@@ -1,5 +1,10 @@
 /**
- * POST /api/health-check, abortable via client disconnect. Ported from server.js.
+ * GET /api/health, plain liveness for the instance pointer (src/instance.ts): no auth, no
+ * app-layer checks, just "is a redesign daemon answering on this port". Used by
+ * findLiveInstance() to validate runtime.json and by the tray/CLI to resolve the live URL.
+ *
+ * POST /api/health-check, abortable via client disconnect, is a DIFFERENT thing (spends quota
+ * pinging AI provider keys). Ported from server.js.
  */
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
@@ -16,6 +21,8 @@ interface CancelledLike {
 }
 
 export function register(app: Hono, _deps: Deps): void {
+  app.get("/api/health", (c) => c.json({ ok: true, service: "redesign", ts: Date.now() }));
+
   app.post("/api/health-check", requireSameOrigin(), async (c) => {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as { models?: unknown };
     const controller = new AbortController();

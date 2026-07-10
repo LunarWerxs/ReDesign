@@ -12,14 +12,27 @@ import { loadModels, loadPrompts, resolveModels } from "../config";
 import { getKeyManager } from "../runner";
 import { healthCheckModel } from "../healthCheck";
 import { startAutoUpdate, setAutoUpdateHooks } from "../auto-update";
+import { findLiveInstance } from "../instance";
 import type { Args } from "./args";
 
-// Where the web server listens (mirrors http/serve.ts: HOST default 127.0.0.1, PORT default 5178;
-// 0.0.0.0 is a bind address, not a connect address, so fall back to loopback for the client).
+// The PREFERRED base (mirrors http/serve.ts: HOST default 127.0.0.1, PORT default 5178; 0.0.0.0
+// is a bind address, not a connect address, so fall back to loopback for the client). This is
+// only a fallback now, the daemon may have hopped to a different port, resolveServerBase() below
+// is what actually finds it.
 function serverBase(): string {
   const host = process.env.HOST && process.env.HOST !== "0.0.0.0" ? process.env.HOST : "127.0.0.1";
   const port = process.env.PORT || 5178;
   return `http://${host}:${port}`;
+}
+
+// Resolve the live daemon's base URL: the instance pointer first (it knows where the daemon
+// ACTUALLY bound, even after a port hop), falling back to probing the preferred port directly
+// (covers REDESIGN_PORT_FIXED=1 and any daemon started before the pointer existed). Mirrors the
+// CLI/tray resolution order documented in the sibling apps (RepoYeti's src/instance.ts).
+async function resolveServerBase(): Promise<string> {
+  const live = await findLiveInstance();
+  if (live) return live.url;
+  return serverBase();
 }
 
 interface ServerSummary {
@@ -29,10 +42,12 @@ interface ServerSummary {
   runs: number;
 }
 
-// Probe a running server via GET /api/bootstrap; returns a small summary or null (not running).
-async function probeServer(): Promise<ServerSummary | null> {
+// Probe a running server (at `base`, or the resolved live URL if omitted) via GET /api/bootstrap;
+// returns a small summary or null (not running).
+async function probeServer(base?: string): Promise<ServerSummary | null> {
   try {
-    const res = await fetch(`${serverBase()}/api/bootstrap`, { signal: AbortSignal.timeout(1500) });
+    const url = base ?? (await resolveServerBase());
+    const res = await fetch(`${url}/api/bootstrap`, { signal: AbortSignal.timeout(1500) });
     if (!res.ok) return null;
     const b = (await res.json()) as Record<string, unknown>;
     const len = (x: unknown): number => (Array.isArray(x) ? x.length : 0);
@@ -141,12 +156,21 @@ export async function healthCheckCmd(args: Args): Promise<void> {
 export async function serveCmd(args: Args): Promise<void> {
   // Boot the web UI + API in-process, the same server as `npm start`, but reachable from the one
   // `redesign` command an agent already knows. --port/--host override (read by http/serve.ts at
-  // load, so set them BEFORE importing it). Refuse a second instance on the same port.
+  // load, so set them BEFORE importing it).
   if (args.port) process.env.PORT = String(args.port);
   if (args.host) process.env.HOST = String(args.host);
-  if (await probeServer()) {
-    console.log(C.yellow(`RēDesign is already running → ${serverBase()}`));
-    return;
+
+  // Single-instance guard: if a RedDesign daemon is already serving (found via the runtime
+  // pointer, or by probing the preferred port directly), don't start a second one, it would
+  // just hop to another port and the CLI/tray would disagree about which instance is "the" one.
+  // REDESIGN_PORT_FIXED=1 and REDESIGN_RELAUNCH=1 (the auto-update successor, which is SUPPOSED
+  // to take over the same port from its predecessor) are exempt from this guard.
+  if (process.env.REDESIGN_PORT_FIXED !== "1" && process.env.REDESIGN_RELAUNCH !== "1") {
+    const live = await findLiveInstance();
+    if (live) {
+      console.log(C.yellow(`RēDesign is already running → ${live.url}`));
+      return;
+    }
   }
   const { startServer, shutdown } = await import("../http/serve");
   await startServer();
@@ -181,28 +205,28 @@ export async function serveCmd(args: Args): Promise<void> {
 }
 
 export async function statusCmd(args: Args): Promise<void> {
-  const info = await probeServer();
+  const base = await resolveServerBase();
+  const info = await probeServer(base);
   if (args.json) {
-    console.log(JSON.stringify({ running: !!info, url: serverBase(), ...(info || {}) }, null, 2));
+    console.log(JSON.stringify({ running: !!info, url: base, ...(info || {}) }, null, 2));
   } else if (info) {
     console.log(
-      `${C.bold("RēDesign")}${C.green(" running")}${C.dim(` → ${serverBase()}`)}` +
+      `${C.bold("RēDesign")}${C.green(" running")}${C.dim(` → ${base}`)}` +
         `\n  ${info.models} models · ${info.prompts} prompts · ${info.inputs} inputs · ${info.runs} recent runs`,
     );
   } else {
-    console.log(
-      `${C.dim(`RēDesign is not running (${serverBase()}). Start it with `)}${C.cyan("redesign serve")}`,
-    );
+    console.log(`${C.dim(`RēDesign is not running (${base}). Start it with `)}${C.cyan("redesign serve")}`);
   }
 }
 
 export async function stopCmd(): Promise<void> {
-  if (!(await probeServer())) {
+  const base = await resolveServerBase();
+  if (!(await probeServer(base))) {
     console.log(C.dim("RēDesign is not running."));
     return;
   }
   try {
-    const res = await fetch(`${serverBase()}/api/shutdown`, { method: "POST" });
+    const res = await fetch(`${base}/api/shutdown`, { method: "POST" });
     console.log(res.ok ? C.green("Stopped RēDesign.") : C.red(`Shutdown refused (${res.status}).`));
   } catch (e) {
     console.log(C.red("Could not reach the server to stop it: ") + (e instanceof Error ? e.message : String(e)));

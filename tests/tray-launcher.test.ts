@@ -79,11 +79,59 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(/bun/i.test(tray) && /index\.ts/i.test(tray)).toBe(true);
     expect(/NotifyIcon/i.test(tray)).toBe(true);
     expect(/System\.Threading\.Mutex/i.test(tray) && /WaitOne\(0/i.test(tray)).toBe(true);
-    expect(/tray icon is not running/i.test(tray) && /Stop the process using port/i.test(tray)).toBe(true);
+    expect(/tray icon is not running/i.test(tray) && /Stop that process/i.test(tray)).toBe(true);
 
     const trayIconIndex = tray.search(/New-Object\s+System\.Windows\.Forms\.NotifyIcon/i);
     const startServerIndex = tray.search(/Start-Server\s+\$root\s+\$port\s+\|\s+Out-Null/i);
     expect(trayIconIndex >= 0 && startServerIndex >= 0 && trayIconIndex < startServerIndex).toBe(true);
+  });
+
+  // Dynamic-port + instance-pointer wiring (matches RepoYeti's tray): the tray must read the
+  // runtime.json pointer the daemon writes and validate it via /api/health before trusting it,
+  // rather than assuming the preferred port is where the daemon actually landed.
+  it("reads the runtime pointer and validates it via /api/health before trusting it", () => {
+    const tray = fs.existsSync(trayPath) ? fs.readFileSync(trayPath, "utf8") : "";
+    expect(/REDESIGN_HOME/.test(tray)).toBe(true);
+    expect(/runtime\.json/i.test(tray)).toBe(true);
+    expect(/function\s+Get-RunningUrl/i.test(tray)).toBe(true);
+    expect(/function\s+Test-ReDesign/i.test(tray)).toBe(true);
+    expect(/\/api\/health/i.test(tray)).toBe(true);
+    expect(/service\s+-eq\s+["']redesign["']/i.test(tray)).toBe(true);
+
+    // Open/menu actions and the initial browser open resolve through $script:url (kept in sync
+    // with Get-RunningUrl / Wait-ForUrl), not a hardcoded preferred-port URL.
+    expect(/Start-Process\s+\$script:url/i.test(tray)).toBe(true);
+    expect(/function\s+Wait-ForUrl/i.test(tray)).toBe(true);
+  });
+
+  // The headless self-test (-SelfTest) mirrors RepoYeti's: bun on PATH, the daemon entry file
+  // exists, and the icon loads into a real NotifyIcon, with no browser/mutex/message-loop work.
+  it("declares a -SelfTest switch, gated before any tray/mutex/daemon work", () => {
+    const tray = fs.existsSync(trayPath) ? fs.readFileSync(trayPath, "utf8") : "";
+    expect(/\[switch\]\$SelfTest/i.test(tray)).toBe(true);
+    expect(/REDESIGN_TRAY_SELFTEST_OK/.test(tray)).toBe(true);
+    expect(/REDESIGN_TRAY_SELFTEST_FAIL/.test(tray)).toBe(true);
+
+    const selfTestIndex = tray.search(/if\s*\(\s*\$SelfTest\s*\)/i);
+    const mutexIndex = tray.search(/New-Object\s+System\.Threading\.Mutex/i);
+    expect(selfTestIndex >= 0 && mutexIndex >= 0 && selfTestIndex < mutexIndex).toBe(true);
+  });
+
+  it("-SelfTest actually runs and reports OK on this machine", () => {
+    let out = "";
+    let failed = false;
+    try {
+      out = cp.execFileSync(
+        "powershell",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", trayPath, "-SelfTest"],
+        { encoding: "utf8" },
+      );
+    } catch (e) {
+      failed = true;
+      out = (e as { stdout?: string })?.stdout || "";
+    }
+    expect(failed).toBe(false);
+    expect(out).toContain("REDESIGN_TRAY_SELFTEST_OK");
   });
 
   it("resolves the .lnk for real and confirms it points at THIS repo", () => {

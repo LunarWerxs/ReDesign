@@ -12,7 +12,7 @@
  *   buildCmd          build step, e.g. ["bun", "run", "--cwd", "web", "build"]
  *
  * runtime-agnostic (Bun + Node): node:child_process spawn runs in both. Part of the
- * shared kit — keep it app-agnostic.
+ * shared kit, keep it app-agnostic.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -220,8 +220,38 @@ export function createUpdater({ appRoot, serviceName, appLabel, updateRepoEnvVar
       APPLY_TIMEOUT_MS,
       output,
     );
-    await runStep(installCmd, BUILD_TIMEOUT_MS, output);
-    await runStep(buildCmd, BUILD_TIMEOUT_MS, output);
+    try {
+      await runStep(installCmd, BUILD_TIMEOUT_MS, output);
+      await runStep(buildCmd, BUILD_TIMEOUT_MS, output);
+    } catch (err) {
+      // Unattended self-update: a failed install/build must never leave the checkout
+      // half-upgraded (new code, stale deps/build). Reset back to the pre-update commit
+      // (safe: the tree was clean and the pull was ff-only), then best-effort reinstall +
+      // rebuild the previous version so the running daemon stays consistent.
+      const resetArgs = ["git", "reset", "--hard", before.currentCommit];
+      const reset = await runCommand(resetArgs, APPLY_TIMEOUT_MS);
+      output.push(commandSummary(resetArgs, reset));
+      let restored = false;
+      if (reset.ok) {
+        restored = true;
+        for (const cmd of [installCmd, buildCmd]) {
+          const r = await runCommand(cmd, BUILD_TIMEOUT_MS);
+          output.push(commandSummary(cmd, r));
+          if (!r.ok) {
+            restored = false;
+            break;
+          }
+        }
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        reset.ok
+          ? restored
+            ? `${msg}; rolled back to the previous version`
+            : `${msg}; code was rolled back, but reinstalling/rebuilding it failed; the previous version may not run until this is fixed`
+          : `${msg}; rollback failed; the checkout may be partially updated`,
+      );
+    }
 
     return {
       ok: true,

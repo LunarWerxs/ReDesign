@@ -1,7 +1,7 @@
 /* =====================================================================
    LunarWerx UI, shared base tokens · shadcn-vue "reka-mira" style
    ---------------------------------------------------------------------
-   Part of the shared kit — keep it app-agnostic.
+   Part of the shared kit, keep it app-agnostic.
    Per-app brand accent (primary/ring) lives in the sibling accent file
    (accent-<app>.css), imported right after this one.
    ===================================================================== */

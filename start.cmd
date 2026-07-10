@@ -33,10 +33,12 @@ if not exist "src\web\dist\index.html" (
 
 echo.
 echo Starting RēDesign...
-echo UI: http://127.0.0.1:%PORT%/
+echo Preferred port: %PORT% ^(hops to a free one if that's busy^)
 echo.
 echo Leave this window open while you use it. Press Ctrl+C here to stop.
 echo.
 
-start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; Start-Process 'http://127.0.0.1:%PORT%/'"
+rem The server may hop past %PORT% if something else holds it, so resolve the URL to open from
+rem the runtime pointer it writes (~/.redesign/runtime.json), falling back to the preferred port.
+start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; $rdHome = if ($env:REDESIGN_HOME) { $env:REDESIGN_HOME } else { Join-Path $env:USERPROFILE '.redesign' }; $f = Join-Path $rdHome 'runtime.json'; $u = $null; if (Test-Path $f) { try { $u = (Get-Content $f -Raw | ConvertFrom-Json).url } catch {} }; if (-not $u) { $u = 'http://localhost:%PORT%' }; Start-Process $u"
 bun run src\index.ts serve

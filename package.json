@@ -40,7 +40,9 @@
     "test": "bun test tests",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "check": "bun run typecheck && bun run lint && bun run check:kit",
+    "check:kit": "node ../lunarwerx-ui/sync.mjs --check --app redesign"
   },
   "dependencies": {
     "@cnct/connect": "^0.3.0",

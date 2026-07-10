@@ -23,12 +23,13 @@ function extractHtml(raw: unknown): ExtractedHtml {
 
   // 2) No full document. Try a fenced code block that contains markup.
   const fenceRe = /```(?:html|HTML)?\s*\n([\s\S]*?)```/g;
-  let m: RegExpExecArray | null;
-  while ((m = fenceRe.exec(text)) !== null) {
+  let m = fenceRe.exec(text);
+  while (m !== null) {
     const inner = m[1] as string;
     const innerDoc = sliceDocument(inner);
     if (innerDoc) return { html: innerDoc, wrapped: false, hadFence: true };
     if (/<body[\s>]|<main[\s>]|<section[\s>]|<div[\s>]/i.test(inner)) return { html: wrap(inner.trim()), wrapped: true, hadFence: true };
+    m = fenceRe.exec(text);
   }
 
   // 3) Bare markup fragment with no <html> -> wrap minimally.
@@ -50,8 +51,11 @@ function sliceDocument(text: string): string | null {
   let out = text.slice(start);
   const closeRe = /<\/html\s*>/gi;
   let last: RegExpExecArray | null = null;
-  let mm: RegExpExecArray | null;
-  while ((mm = closeRe.exec(out)) !== null) last = mm; // take the LAST </html>
+  let mm = closeRe.exec(out);
+  while (mm !== null) {
+    last = mm; // take the LAST </html>
+    mm = closeRe.exec(out);
+  }
   if (last) out = out.slice(0, last.index + last[0].length);
   return out.trim();
 }
