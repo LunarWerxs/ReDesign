@@ -1,0 +1,55 @@
+{
+  "name": "redesign",
+  "version": "1.1.0",
+  "license": "MIT",
+  "private": true,
+  "description": "Run UI/UX screenshots through many AI models and collect reimagined HTML prototypes.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LunarWerxs/ReDesign.git"
+  },
+  "homepage": "https://redes1gn.github.io/",
+  "bugs": {
+    "url": "https://github.com/LunarWerxs/ReDesign/issues"
+  },
+  "type": "module",
+  "bin": {
+    "redesign": "./src/index.ts"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts serve",
+    "serve": "bun run src/index.ts serve",
+    "build": "npm --prefix src/web install && npm --prefix src/web run build",
+    "build:web": "npm --prefix src/web run build",
+    "dist": "bun run scripts/build.ts",
+    "update-pricing": "bun run scripts/update-pricing.ts",
+    "dev:server": "bun run src/index.ts serve",
+    "dev:web": "npm --prefix src/web run dev",
+    "run-job": "bun run src/index.ts run",
+    "inputs": "bun run src/index.ts inputs",
+    "models": "bun run src/index.ts models",
+    "prompts": "bun run src/index.ts prompts",
+    "keys": "bun run src/index.ts keys",
+    "health-check": "bun run src/index.ts health-check",
+    "status": "bun run src/index.ts status",
+    "stop": "bun run src/index.ts stop",
+    "mcp": "bun run src/index.ts mcp",
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format --write ."
+  },
+  "dependencies": {
+    "@cnct/connect": "^0.3.0",
+    "@cnct/locker": "^0.1.1",
+    "hono": "^4.12.28"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.2",
+    "@types/bun": "1.3.14",
+    "typescript": "^6.0.3"
+  }
+}

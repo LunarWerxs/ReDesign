@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  daemon:
+    name: daemon (test + typecheck)
+    # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14" # pin so a Bun upgrade can't silently change the build
+      - uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test tests
+        env:
+          MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
+
+  web:
+    name: web (i18n + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: src/web/package-lock.json
+      - run: npm ci
+      - run: npm run build # vue-tsc type-check + vite bundle (build script itself runs check:i18n first)

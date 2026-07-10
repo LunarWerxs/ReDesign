@@ -1,0 +1,60 @@
+{
+  "_comment": "Default prompt presets. `systemContract` is prepended to EVERY job to force a clean, self-contained HTML output that the iframe viewer can render. Add your own presets here or pass a custom prompt at run time.",
+  "systemContract": "You are a senior product designer and front-end engineer. You will be shown one or more screenshots of an existing UI (when multiple images are given, they are different views/states of the SAME interface, treat them as reference for one product). Your job is to REIMAGINE that interface, not merely transcribe it.\n\nHARD OUTPUT RULES:\n1. Respond with exactly ONE complete, self-contained HTML document and NOTHING else, no commentary, no explanation before or after.\n2. The document MUST start with <!DOCTYPE html> and be fully self-contained: all CSS in a <style> tag and all JS in a <script> tag. No build step.\n3. Do NOT reference local files. External resources are allowed ONLY from these CDNs if needed: fonts.googleapis.com, fonts.gstatic.com, cdn.jsdelivr.net, unpkg.com. Prefer pure CSS.\n4. Use realistic placeholder content that matches the product's domain. Inline SVG for icons. No <img> pointing at the original screenshot.\n5. Make it responsive and visually polished. It should look like a real, shippable screen, not a wireframe.\n6. Put a short HTML comment at the very top, like <!-- REIMAGINE: one-line summary of what you changed and why -->, then the document.",
+  "prompts": [
+    {
+      "id": "faithful-refresh",
+      "label": "Faithful Refresh",
+      "description": "Modernize the visual design while keeping the layout and information architecture recognizable.",
+      "user": "Recreate this screen as a polished, modern version of itself. Keep the same overall layout, structure, and feature set so it is clearly the same product, but elevate typography, spacing, color, depth, and micro-detailing to a 2026 design-system standard. Fix any obvious visual inconsistencies."
+    },
+    {
+      "id": "bold-reimagine",
+      "label": "Bold Reimagine",
+      "description": "Radically rethink the UX, new layout, interaction model, and visual language.",
+      "user": "Boldly reimagine this experience. You may restructure the layout, change the interaction model, and introduce a fresh visual language, as long as it still accomplishes the same user goal better than the original. Surprise me with a genuinely different and superior take. Add tasteful interactivity where it helps."
+    },
+    {
+      "id": "clarity-a11y",
+      "label": "Clarity & Accessibility",
+      "description": "Improve hierarchy, readability, contrast, and accessibility.",
+      "user": "Redesign this screen with a focus on clarity and accessibility: stronger visual hierarchy, generous readable typography, WCAG-AA color contrast, clear focus states, logical tab order, and ARIA where appropriate. Reduce cognitive load while keeping all functionality."
+    },
+    {
+      "id": "conversion",
+      "label": "Conversion-Optimized",
+      "description": "Optimize the screen around its single most important action.",
+      "user": "Identify the primary action a user is here to take, then redesign the screen to drive that action. Improve the funnel: clearer value, stronger primary CTA, less friction, smart defaults, and reassurance. Keep secondary actions available but visually subordinate."
+    },
+    {
+      "id": "minimalist",
+      "label": "Minimalist",
+      "description": "Strip to essentials, calm, focused, lots of breathing room.",
+      "user": "Reimagine this as a minimalist, focused interface. Remove visual noise, collapse or defer anything non-essential, and let whitespace and a restrained palette carry the design. Every element must earn its place. Keep the core task effortless."
+    },
+    {
+      "id": "minimalist-two",
+      "label": "Minimalist Two",
+      "description": "Minimalism with stronger hierarchy and progressive disclosure.",
+      "user": "Reimagine this as a quieter minimalist interface with progressive disclosure and strong visual hierarchy. The default view must be visibly simpler and less busy than the source screenshot. Identify the single primary task, the current state, and only the few details needed immediately; keep those visible, clear, and easy to scan. Everything secondary, advanced, repetitive, or rarely used should be hidden behind one obvious control such as More, Settings, a compact dropdown, an overflow three-dot menu, an accordion, a drawer, or a contextual popover. Do not add new features, marketing copy, onboarding text, explanatory paragraphs, extra cards, decorative badges, duplicated actions, dashboards, or visible controls just to show capability. Use whitespace, muted color, restrained typography, alignment, grouping, and scale to create hierarchy instead of adding more UI. If in doubt, show less by default and make the next layer one intentional click or tap away."
+    },
+    {
+      "id": "material-3",
+      "label": "Material 3",
+      "description": "Rebuild it in Google's Material 3 (Material You) design language.",
+      "user": "Rebuild this screen in Google's Material 3 (Material You) design language. Use an M3 tonal color scheme derived from a single seed color, a primary plus secondary/tertiary accents and neutral surfaces, each with correct on-colors, and convey elevation with surface tints / tonal overlays rather than heavy drop shadows. Apply the M3 shape scale (rounded corners, ~12-28px, pill-shaped buttons) and show visible state layers on interactive elements (hover/focus/pressed). Use the M3 type scale (display / headline / title / body / label) with Roboto or Google Sans from fonts.googleapis.com, and Material Symbols (also from fonts.googleapis.com) or inline SVG for icons. Reach for real M3 components where they fit: filled / filled-tonal / outlined / text buttons, FABs, top app bar, navigation bar or rail, cards, chips, switches, sliders, and dialogs. Keep it accessible and responsive, it should look unmistakably like a polished Material 3 product."
+    },
+    {
+      "id": "approachable",
+      "label": "Approachable",
+      "description": "Keep the important things visible; tuck the rest behind progressive disclosure.",
+      "user": "Reimagine this screen around clarity and progressive disclosure so a first-time, non-technical user finds it effortless. Keep the few genuinely important things always visible, obvious, and large: the primary action, the current state, and the information the user needs at a glance. Take everything secondary, advanced, or only occasionally needed and move it out of the way, behind a 'More' menu, an expandable section, a dropdown, a popover, a settings dialog/modal, or a hover / ▸ disclosure with a help tooltip. Use plain-language labels, generous tap targets, sensible defaults, and gentle guidance (helper text, empty states, confirmations) so the user can't get lost or make a mistake. This is NOT extreme minimalism or hiding everything, nothing essential should be buried, it's an approachable, forgiving, 'anyone can use this' layout where the important stuff is front-and-center and the rest is one obvious click away."
+    },
+    {
+      "id": "playful",
+      "label": "Playful & Branded",
+      "description": "Inject personality, motion, and a memorable brand feel.",
+      "user": "Give this screen a distinctive, memorable personality: a confident brand palette, expressive typography, delightful motion and hover states, and small moments of joy, without sacrificing usability. Make it feel like a product people screenshot and share."
+    }
+  ]
+}

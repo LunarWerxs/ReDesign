@@ -1,0 +1,37 @@
+# Secrets — never commit real keys
+.env
+.env.local
+
+# Runtime state & generated artifacts
+src/keyState.json
+output/
+*.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Ship artifacts (the zips can contain your keys — never commit)
+*.zip
+*.7z
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.saydeploy/
+
+# Tool run output (Architect writes tmp/arkitect/) + local audit profile, not tracked
+tmp/
+.arkitect/
+
+# Editor / local tooling — not needed in a public clone
+.vscode/
+.claude/
+
+# Generated Windows shortcut (machine-specific absolute paths; start.cmd recreates it)
+*.lnk
+
+# Personal sample screenshots — users drop their own here
+/input/*
+!/input/example-dashboard.png

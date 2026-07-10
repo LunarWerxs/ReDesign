@@ -1,0 +1,91 @@
+{
+  "_comment": "Model registry. Each entry maps a friendly id to a provider adapter, the exact API model name, the env var holding its key pool, and provider quirks. Toggle `enabled` or `vision` without touching code. maxTokens is the OUTPUT budget, keep it generous because a full self-contained HTML page plus any model 'thinking' tokens must fit, or the document gets truncated (no closing </html>).",
+  "models": [
+    {
+      "id": "claude-opus-4-8",
+      "label": "Claude Opus 4.8",
+      "provider": "anthropic",
+      "apiModel": "claude-opus-4-8",
+      "keyEnv": "ANTHROPIC_API_KEYS",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "vision": true,
+      "maxTokens": 16000,
+      "temperature": 1,
+      "supportsTemperature": true,
+      "enabled": true,
+      "color": "#a06bff"
+    },
+    {
+      "id": "gpt-5.5",
+      "label": "GPT 5.5",
+      "provider": "openai",
+      "apiModel": "gpt-5.5",
+      "keyEnv": "OPENAI_API_KEYS",
+      "baseUrl": "https://api.openai.com/v1",
+      "vision": true,
+      "maxTokens": 16000,
+      "tokenParam": "max_completion_tokens",
+      "supportsTemperature": false,
+      "enabled": true,
+      "color": "#10a37f"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "label": "Gemini 3.5 Flash",
+      "provider": "gemini",
+      "apiModel": "gemini-3.5-flash",
+      "keyEnv": "GEMINI_FLASH_API_KEYS",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "vision": true,
+      "maxTokens": 24000,
+      "temperature": 1,
+      "supportsTemperature": true,
+      "enabled": true,
+      "color": "#ea4335"
+    },
+    {
+      "id": "gemini-3.1-pro",
+      "label": "Gemini 3.1 Pro",
+      "provider": "gemini",
+      "apiModel": "gemini-3.1-pro-preview",
+      "keyEnv": "GEMINI_PRO_API_KEYS",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "vision": true,
+      "maxTokens": 24000,
+      "temperature": 1,
+      "supportsTemperature": true,
+      "enabled": true,
+      "color": "#4285f4"
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "label": "DeepSeek V4 Pro",
+      "provider": "openai",
+      "apiModel": "deepseek-v4-pro",
+      "keyEnv": "DEEPSEEK_API_KEYS",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "_vision_note": "Confirmed text-only on 2026-06-08: its API rejects image_url content. With vision:false the runner feeds it an auto-generated caption from a vision model so it can still reimagine the real UI.",
+      "vision": false,
+      "maxTokens": 16000,
+      "tokenParam": "max_tokens",
+      "supportsTemperature": true,
+      "enabled": true,
+      "color": "#4d6bfe"
+    },
+    {
+      "id": "qwen-3.5-plus",
+      "label": "Qwen 3.5 Plus",
+      "provider": "openai",
+      "apiModel": "qwen3.5-plus",
+      "keyEnv": "QWEN_API_KEYS",
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "vision": true,
+      "maxTokens": 8000,
+      "tokenParam": "max_tokens",
+      "supportsTemperature": true,
+      "enabled": true,
+      "color": "#615ced"
+    }
+  ],
+  "modelArchive": []
+}

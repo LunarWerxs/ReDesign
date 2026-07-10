@@ -1,0 +1,128 @@
+import { defineStore } from 'pinia';
+import { createControlState } from './control/state';
+import { createAppLifecycleActions } from './control/app-lifecycle';
+import { createSelectionContentActions } from './control/selection-content';
+import { createKeysModelsActions } from './control/keys-models';
+import { createRunsActions } from './control/runs';
+import { createSyncActions } from './control/sync';
+import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
+import { useSelfUpdate } from '@/lib/useSelfUpdate';
+import { api } from '@/lib/api';
+import type { UpdateApplyResult, UpdateStatus } from '@/types';
+
+export const useControlStore = defineStore('control', () => {
+  const state = createControlState();
+  // Shared self-update state machine (check/apply guards), see @/lib/useSelfUpdate.
+  const selfUpdate = useSelfUpdate<UpdateStatus, UpdateApplyResult>(api);
+  const appLifecycleActions = createAppLifecycleActions(state, {
+    checkForUpdate: selfUpdate.checkForUpdate,
+  });
+  const selectionContentActions = createSelectionContentActions(state);
+  const keysModelsActions = createKeysModelsActions(state);
+  const runsActions = createRunsActions(state, {
+    refreshKeys: keysModelsActions.refreshKeys,
+  });
+  // "Sync my settings with Connections" (opt-in cloud sync of theme), see @/stores/control/sync.
+  const syncActions = createSyncActions();
+  // Silent auto-update opt-in, see @/stores/control/auto-update-settings.
+  const autoUpdateSettingsActions = createAutoUpdateSettingsActions();
+
+  return {
+    // data
+    inputs: state.inputs,
+    models: state.models,
+    archivedModels: state.archivedModels,
+    prompts: state.prompts,
+    references: state.references,
+    keys: state.keys,
+    runs: state.runs,
+    deletingRunIds: state.deletingRunIds,
+    sessionInputIds: state.sessionInputIds,
+    spend: state.spend,
+    costEstimate: state.costEstimate,
+    costEstimateLoading: state.costEstimateLoading,
+    providerDefaults: state.providerDefaults,
+    updateStatus: selfUpdate.updateStatus,
+    updateChecking: selfUpdate.updateChecking,
+    updateApplying: selfUpdate.updateApplying,
+    // selection/options
+    selInputs: state.selInputs,
+    selModels: state.selModels,
+    selPrompts: state.selPrompts,
+    selReference: state.selReference,
+    referenceOn: state.referenceOn,
+    mock: state.mock,
+    variants: state.variants,
+    maxImages: state.maxImages,
+    customOn: state.customOn,
+    custom: state.custom,
+    advancedOpen: state.advancedOpen,
+    refNote: state.refNote,
+    // run progress
+    runId: state.runId,
+    runTitle: state.runTitle,
+    runStatus: state.runStatus,
+    queuePosition: state.queuePosition,
+    total: state.total,
+    running: state.running,
+    submitting: state.submitting,
+    jobList: state.jobList,
+    // live check
+    liveCheckArmed: state.liveCheckArmed,
+    liveCheckBusy: state.liveCheckBusy,
+    // settings sync
+    syncStatus: syncActions.syncStatus,
+    syncLoading: syncActions.syncLoading,
+    syncActionBusy: syncActions.syncActionBusy,
+    // auto-update opt-in
+    autoUpdateEnabled: autoUpdateSettingsActions.autoUpdateEnabled,
+    autoUpdateLoading: autoUpdateSettingsActions.autoUpdateLoading,
+    // getters
+    runnableModels: state.runnableModels,
+    runnableModelIds: state.runnableModelIds,
+    envNote: state.envNote,
+    estimate: state.estimate,
+    progress: state.progress,
+    // actions
+    bootstrap: appLifecycleActions.bootstrap,
+    checkForUpdate: selfUpdate.checkForUpdate,
+    applyUpdate: selfUpdate.applyUpdate,
+    recordPulse: appLifecycleActions.recordPulse,
+    toggleInput: selectionContentActions.toggleInput,
+    toggleModel: selectionContentActions.toggleModel,
+    togglePrompt: selectionContentActions.togglePrompt,
+    toggleReference: selectionContentActions.toggleReference,
+    selectAll: selectionContentActions.selectAll,
+    selectNone: selectionContentActions.selectNone,
+    uploadFiles: selectionContentActions.uploadFiles,
+    deleteInput: selectionContentActions.deleteInput,
+    savePrompt: selectionContentActions.savePrompt,
+    deletePrompt: selectionContentActions.deletePrompt,
+    restoreDefaultPrompts: selectionContentActions.restoreDefaultPrompts,
+    shutdownServer: appLifecycleActions.shutdownServer,
+    refreshRuns: runsActions.refreshRuns,
+    deleteRuns: runsActions.deleteRuns,
+    refreshKeys: keysModelsActions.refreshKeys,
+    saveKey: keysModelsActions.saveKey,
+    deleteKey: keysModelsActions.deleteKey,
+    saveModel: keysModelsActions.saveModel,
+    deleteModel: keysModelsActions.deleteModel,
+    restoreModel: keysModelsActions.restoreModel,
+    reorderModels: keysModelsActions.reorderModels,
+    liveCheck: keysModelsActions.liveCheck,
+    cancelLiveCheck: keysModelsActions.cancelLiveCheck,
+    resetLiveCheck: keysModelsActions.resetLiveCheck,
+    startRun: runsActions.startRun,
+    cancelRun: runsActions.cancelRun,
+    refreshCostEstimate: runsActions.refreshCostEstimate,
+    loadSyncStatus: syncActions.loadSyncStatus,
+    enableSync: syncActions.enableSync,
+    disableSync: syncActions.disableSync,
+    pullSync: syncActions.pullSync,
+    pushSync: syncActions.pushSync,
+    pushAppearance: syncActions.pushAppearance,
+    applyAppearance: syncActions.applyAppearance,
+    loadAutoUpdateSetting: autoUpdateSettingsActions.loadAutoUpdateSetting,
+    setAutoUpdate: autoUpdateSettingsActions.setAutoUpdate,
+  };
+});

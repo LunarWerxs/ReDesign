@@ -1,0 +1,48 @@
+{
+  "_comment": "Per-model list pricing used by the Run Cost Meter (costForUsage/runCost in src/runner/cost.ts). USD per million tokens (Mtok), matching each provider's public list price for the apiModel configured in models.json. Entries marked \"estimate\": true are a best guess where the exact current list price wasn't confidently known, replace with the provider's published number when confirmed. The \"source\" field records where a non-estimate price came from: \"litellm\" (BerriAI/litellm's model_prices_and_context_window.json), \"cloudprice\" (cloudprice.net's mirror of the same LiteLLM schema, used when a model is missing usable flat pricing from LiteLLM, direct-provider entries only, never its openrouter/-prefixed entries), \"openrouter\" (openrouter.ai/api/v1/models, used when a model is missing from both LiteLLM and CloudPrice), or \"manual\". Run `bun run update-pricing` (scripts/update-pricing.ts) to refresh from those sources; it also prints a best-effort console warning if models.dev's price for a model differs by more than 10%. Add an entry here whenever a new model id is added to models.json; unknown model ids fall back to a documented default in cost.ts.",
+  "lastUpdated": "2026-07-05",
+  "prices": {
+    "claude-opus-4-8": {
+      "inputPerMtok": 5,
+      "outputPerMtok": 25,
+      "currency": "USD",
+      "estimate": false,
+      "source": "litellm"
+    },
+    "gpt-5.5": {
+      "inputPerMtok": 5,
+      "outputPerMtok": 30,
+      "currency": "USD",
+      "estimate": false,
+      "source": "litellm"
+    },
+    "gemini-3.5-flash": {
+      "inputPerMtok": 1.5,
+      "outputPerMtok": 9,
+      "currency": "USD",
+      "estimate": false,
+      "source": "litellm"
+    },
+    "gemini-3.1-pro": {
+      "inputPerMtok": 2,
+      "outputPerMtok": 12,
+      "currency": "USD",
+      "estimate": false,
+      "source": "litellm"
+    },
+    "deepseek-v4-pro": {
+      "inputPerMtok": 0.435,
+      "outputPerMtok": 0.87,
+      "currency": "USD",
+      "estimate": false,
+      "source": "litellm"
+    },
+    "qwen-3.5-plus": {
+      "inputPerMtok": 0.4,
+      "outputPerMtok": 2.4,
+      "currency": "USD",
+      "estimate": false,
+      "source": "cloudprice"
+    }
+  }
+}

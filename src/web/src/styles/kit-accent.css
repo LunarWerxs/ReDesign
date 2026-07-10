@@ -1,0 +1,18 @@
+/* Reimagine brand accent, violet. Overrides the neutral --primary/--ring from
+   base.css (light + dark). New accent (Reimagine was previously monochrome).
+   Hue ~303 sits clearly apart from DevWebUI's indigo (277). Part of the
+   shared kit; do not edit the in-app copy. */
+:root {
+  --primary: oklch(0.52 0.22 303);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.52 0.22 303);
+  --sidebar-primary: oklch(0.52 0.22 303);
+  --sidebar-ring: oklch(0.52 0.22 303);
+}
+.dark {
+  --primary: oklch(0.62 0.2 303);
+  --primary-foreground: oklch(0.985 0 0);
+  --ring: oklch(0.62 0.2 303);
+  --sidebar-primary: oklch(0.62 0.2 303);
+  --sidebar-ring: oklch(0.62 0.2 303);
+}

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <title>RēDesign</title>
+    <!-- Standalone RēDesign mark, the dark tile on every theme. (The light-background
+         variant was dropped by owner request; it read poorly.) -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <!-- No-flash theme boot: apply the stored theme before first paint. MUST match the
+         shared kit composable (lib/theme.ts), same key `lunarwerx-theme`, same resolve
+         logic, default dark. See kit README "Theme boot snippet". -->
+    <script>
+      (() => {
+        try {
+          const mode = localStorage.getItem('lunarwerx-theme') || 'dark';
+          const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+          const html = document.documentElement;
+          html.classList.toggle('dark', dark);
+          html.dataset.theme = mode;
+          html.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (_) {
+          // localStorage/matchMedia can throw in locked-down contexts (privacy mode,
+          // sandboxed iframe), falling through leaves the CSS default (dark), never a crash.
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
