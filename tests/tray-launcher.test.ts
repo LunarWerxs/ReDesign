@@ -86,6 +86,32 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(trayIconIndex >= 0 && startServerIndex >= 0 && trayIconIndex < startServerIndex).toBe(true);
   });
 
+  // Portable window opt-in (matches RepoYeti's tray): every browser-open call site routes
+  // through Open-AppUi, which honours runtime.json's portableMode by launching a chromeless
+  // Edge/Chrome --app= window instead of a normal tab.
+  it("routes every browser-open through Open-AppUi, which can launch a --app= window", () => {
+    const tray = fs.existsSync(trayPath) ? fs.readFileSync(trayPath, "utf8") : "";
+    expect(/function\s+Open-AppUi/i.test(tray)).toBe(true);
+    expect(/function\s+Resolve-ChromiumBrowser/i.test(tray)).toBe(true);
+    expect(/--app=\$url/i.test(tray)).toBe(true);
+    // No leftover Start-Process call site bypasses Open-AppUi (only its own fallback remains).
+    expect(/Start-Process\s+\$u\b/i.test(tray)).toBe(false);
+    expect(/Start-Process\s+\$script:url/i.test(tray)).toBe(false);
+    const openAppUiCalls = (tray.match(/Open-AppUi\s+\$/gi) || []).length;
+    expect(openAppUiCalls).toBeGreaterThanOrEqual(4);
+  });
+
+  // Dedicated portable-window profile (matches RepoYeti's tray): the --app= window gets its
+  // own Chromium profile, a sibling of runtime.json, so it remembers its own geometry instead
+  // of sharing the default browser profile.
+  it("gives the portable window its own Chromium profile, a sibling of runtime.json", () => {
+    const tray = fs.existsSync(trayPath) ? fs.readFileSync(trayPath, "utf8") : "";
+    expect(/--user-data-dir=/i.test(tray)).toBe(true);
+    expect(/portable-profile/i.test(tray)).toBe(true);
+    expect(/--no-first-run/i.test(tray)).toBe(true);
+    expect(/--no-default-browser-check/i.test(tray)).toBe(true);
+  });
+
   // Dynamic-port + instance-pointer wiring (matches RepoYeti's tray): the tray must read the
   // runtime.json pointer the daemon writes and validate it via /api/health before trusting it,
   // rather than assuming the preferred port is where the daemon actually landed.
@@ -99,8 +125,9 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(/service\s+-eq\s+["']redesign["']/i.test(tray)).toBe(true);
 
     // Open/menu actions and the initial browser open resolve through $script:url (kept in sync
-    // with Get-RunningUrl / Wait-ForUrl), not a hardcoded preferred-port URL.
-    expect(/Start-Process\s+\$script:url/i.test(tray)).toBe(true);
+    // with Get-RunningUrl / Wait-ForUrl), not a hardcoded preferred-port URL. They route through
+    // Open-AppUi (see the portable-window test above) rather than calling Start-Process directly.
+    expect(/Open-AppUi\s+\$script:url/i.test(tray)).toBe(true);
     expect(/function\s+Wait-ForUrl/i.test(tray)).toBe(true);
   });
 

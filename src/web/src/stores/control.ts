@@ -6,6 +6,7 @@ import { createKeysModelsActions } from './control/keys-models';
 import { createRunsActions } from './control/runs';
 import { createSyncActions } from './control/sync';
 import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
+import { createPortableModeSettingsActions } from './control/portable-mode-settings';
 import { useSelfUpdate } from '@/lib/useSelfUpdate';
 import { api } from '@/lib/api';
 import type { UpdateApplyResult, UpdateStatus } from '@/types';
@@ -26,6 +27,8 @@ export const useControlStore = defineStore('control', () => {
   const syncActions = createSyncActions();
   // Silent auto-update opt-in, see @/stores/control/auto-update-settings.
   const autoUpdateSettingsActions = createAutoUpdateSettingsActions();
+  // Portable window opt-in, see @/stores/control/portable-mode-settings.
+  const portableModeSettingsActions = createPortableModeSettingsActions();
 
   return {
     // data
@@ -77,6 +80,9 @@ export const useControlStore = defineStore('control', () => {
     // auto-update opt-in
     autoUpdateEnabled: autoUpdateSettingsActions.autoUpdateEnabled,
     autoUpdateLoading: autoUpdateSettingsActions.autoUpdateLoading,
+    // portable window opt-in
+    portableModeEnabled: portableModeSettingsActions.portableModeEnabled,
+    portableModeLoading: portableModeSettingsActions.portableModeLoading,
     // getters
     runnableModels: state.runnableModels,
     runnableModelIds: state.runnableModelIds,
@@ -124,5 +130,7 @@ export const useControlStore = defineStore('control', () => {
     applyAppearance: syncActions.applyAppearance,
     loadAutoUpdateSetting: autoUpdateSettingsActions.loadAutoUpdateSetting,
     setAutoUpdate: autoUpdateSettingsActions.setAutoUpdate,
+    loadPortableModeSetting: portableModeSettingsActions.loadPortableModeSetting,
+    setPortableMode: portableModeSettingsActions.setPortableMode,
   };
 });

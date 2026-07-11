@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ExternalLinkIcon } from '@lucide/vue';
 import { inputUrl } from '@/lib/api';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { InputItem } from '@/types';
 import { t } from '@/i18n';
 
@@ -16,9 +17,19 @@ const images = () => (props.input.images && props.input.images.length ? props.in
       <span class="text-[13px] font-bold">{{ t('viewer.original') }}</span>
       <span v-if="input.type === 'group'" class="text-xs text-muted-foreground">{{ t('viewer.refsCount', { count: input.imageCount ?? 0 }, input.imageCount ?? 0) }}</span>
       <span class="flex-1" />
-      <a :href="inputUrl(input.preview)" target="_blank" class="text-muted-foreground hover:text-foreground" :title="t('viewer.open')">
-        <ExternalLinkIcon class="size-3.5" />
-      </a>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <a
+            :href="inputUrl(input.preview)"
+            target="_blank"
+            :aria-label="t('viewer.open')"
+            class="text-muted-foreground hover:text-foreground"
+          >
+            <ExternalLinkIcon class="size-3.5" />
+          </a>
+        </TooltipTrigger>
+        <TooltipContent>{{ t('viewer.open') }}</TooltipContent>
+      </Tooltip>
     </div>
     <div class="max-h-[700px] overflow-auto bg-black">
       <img v-for="(rel, i) in images()" :key="i" loading="lazy" :src="inputUrl(rel)" alt="" class="block w-full" />

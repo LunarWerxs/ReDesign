@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
+import { useTooltipConfig } from '@/lib/tooltip-config';
 import { t } from '@/i18n';
 import type { KeyEntry, KeyPool, Model } from '@/types';
 
@@ -39,6 +40,7 @@ const emit = defineEmits<{
 }>();
 
 const store = useControlStore();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // File order is the manual order (drag-reorderable), not alphabetical.
 const activeModels = computed(() => [...store.models]);
@@ -94,9 +96,14 @@ async function restoreModel(model: Model) {
     <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.modelsAndKeys') }}</h3>
     <span class="text-xs text-muted-foreground">{{ activeModels.length }}</span>
     <div class="ml-auto flex items-center gap-1">
-      <Button variant="ghost" size="icon-xs" :title="t('keyModel.refreshApiKeys')" :aria-label="t('keyModel.refreshApiKeys')" @click="store.refreshKeys()">
-        <RefreshCwIcon class="size-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button variant="ghost" size="icon-xs" :aria-label="t('keyModel.refreshApiKeys')" @click="store.refreshKeys()">
+            <RefreshCwIcon class="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ t('keyModel.refreshApiKeys') }}</TooltipContent>
+      </Tooltip>
       <Button
         :variant="store.liveCheckBusy || store.liveCheckArmed ? 'destructive' : 'secondary'"
         size="xs"
@@ -109,9 +116,14 @@ async function restoreModel(model: Model) {
         <ActivityIcon v-else class="size-3" />
         {{ store.liveCheckBusy ? t('keyModel.cancel') : t('keyModel.checkKeys') }}
       </Button>
-      <Button variant="ghost" size="icon-xs" :title="t('keyModel.addModel')" :aria-label="t('keyModel.addModel')" @click="emit('add-model')">
-        <PlusIcon class="size-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button variant="ghost" size="icon-xs" :aria-label="t('keyModel.addModel')" @click="emit('add-model')">
+            <PlusIcon class="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ t('keyModel.addModel') }}</TooltipContent>
+      </Tooltip>
     </div>
   </div>
 
@@ -125,14 +137,18 @@ async function restoreModel(model: Model) {
       class="overflow-hidden rounded-lg border bg-card"
     >
       <div class="flex items-center gap-2 px-3 py-2 text-xs">
-        <button
-          type="button"
-          class="model-drag -ml-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
-          :aria-label="t('keyModel.dragToReorder')"
-          :title="t('keyModel.dragToReorder')"
-        >
-          <GripVerticalIcon class="size-3.5" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="model-drag -ml-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
+              :aria-label="t('keyModel.dragToReorder')"
+            >
+              <GripVerticalIcon class="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyModel.dragToReorder') }}</TooltipContent>
+        </Tooltip>
         <span class="size-2.5 shrink-0 rounded-full" :style="{ background: model.color || '#888' }" />
         <span class="grid min-w-0 flex-1 gap-0.5">
           <span class="truncate text-sm font-semibold">{{ model.label }}</span>
@@ -146,20 +162,24 @@ async function restoreModel(model: Model) {
         >
           {{ model.enabled ? modelKeys(model) : t('keyModel.disabled') }}
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          :title="t('keyModel.editModel')"
-          :aria-label="t('keyModel.editModel')"
-          @click="emit('edit-model', model)"
-        >
-          <PencilIcon class="size-3.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="t('keyModel.editModel')"
+              @click="emit('edit-model', model)"
+            >
+              <PencilIcon class="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyModel.editModel') }}</TooltipContent>
+        </Tooltip>
         <CollapsibleTrigger as-child>
           <button
             type="button"
             class="grid size-6 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            :title="modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')"
+            :title="tooltipsEnabled ? (modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')) : undefined"
             :aria-label="modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')"
           >
             <ChevronDownIcon class="size-4 transition-transform" :class="modelOpen ? 'rotate-180' : ''" />
@@ -182,16 +202,20 @@ async function restoreModel(model: Model) {
               <TooltipContent>{{ b.label }}</TooltipContent>
             </Tooltip>
           </span>
-          <Button
-            class="ml-auto"
-            variant="ghost"
-            size="icon-xs"
-            :title="t('keyModel.addApiKey')"
-            :aria-label="t('keyModel.addApiKey')"
-            @click="emit('add-key', model.keyEnv || '')"
-          >
-            <PlusIcon class="size-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                class="ml-auto"
+                variant="ghost"
+                size="icon-xs"
+                :aria-label="t('keyModel.addApiKey')"
+                @click="emit('add-key', model.keyEnv || '')"
+              >
+                <PlusIcon class="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('keyModel.addApiKey') }}</TooltipContent>
+          </Tooltip>
         </div>
         <div class="px-3 py-1">
           <p v-if="!poolForModel(model)?.entries?.length" class="py-2 text-xs text-muted-foreground">
@@ -202,37 +226,54 @@ async function restoreModel(model: Model) {
             :key="i"
             class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
           >
-            <span
-              class="size-2.5 shrink-0 rounded-full"
-              :class="keyDot[k.status] || 'bg-muted-foreground'"
-              :title="dotLabel[k.status] || k.status"
-            />
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <span
+                  class="size-2.5 shrink-0 rounded-full"
+                  :class="keyDot[k.status] || 'bg-muted-foreground'"
+                />
+              </TooltipTrigger>
+              <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
+            </Tooltip>
             <span class="font-mono">{{ k.mask }}</span>
             <span class="text-muted-foreground" :title="t('keyModel.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
             <!-- i18n-ignore -->
             <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyModel.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
             <span class="flex-1" />
-            <span v-if="k.lastError" class="truncate text-muted-foreground" :title="k.lastError">{{ k.lastError.slice(0, 24) }}</span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :title="t('keyModel.editApiKey')"
-              :aria-label="t('keyModel.editApiKey')"
-              class="opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-              @click="emit('edit-key', model.keyEnv || '', k)"
-            >
-              <PencilIcon class="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :title="t('keyModel.deleteApiKey')"
-              :aria-label="t('keyModel.deleteApiKey')"
-              class="text-destructive opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-              @click="deleteKey(model.keyEnv || '', k)"
-            >
-              <Trash2Icon class="size-3.5" />
-            </Button>
+            <Tooltip v-if="k.lastError">
+              <TooltipTrigger as-child>
+                <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
+              </TooltipTrigger>
+              <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('keyModel.editApiKey')"
+                  class="opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
+                  @click="emit('edit-key', model.keyEnv || '', k)"
+                >
+                  <PencilIcon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('keyModel.editApiKey') }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('keyModel.deleteApiKey')"
+                  class="text-destructive opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
+                  @click="deleteKey(model.keyEnv || '', k)"
+                >
+                  <Trash2Icon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('keyModel.deleteApiKey') }}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </CollapsibleContent>
@@ -259,15 +300,19 @@ async function restoreModel(model: Model) {
           <span class="font-semibold">{{ model.label }}</span>
           <span class="text-muted-foreground"> · {{ providerLabel(model.provider) }}</span>
         </span>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          :title="t('keyModel.restoreModel')"
-          :aria-label="t('keyModel.restoreModel')"
-          @click="restoreModel(model)"
-        >
-          <PlusIcon class="size-3.5" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="t('keyModel.restoreModel')"
+              @click="restoreModel(model)"
+            >
+              <PlusIcon class="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyModel.restoreModel') }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   </div>

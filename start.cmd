@@ -40,5 +40,7 @@ echo.
 
 rem The server may hop past %PORT% if something else holds it, so resolve the URL to open from
 rem the runtime pointer it writes (~/.redesign/runtime.json), falling back to the preferred port.
-start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 2; $rdHome = if ($env:REDESIGN_HOME) { $env:REDESIGN_HOME } else { Join-Path $env:USERPROFILE '.redesign' }; $f = Join-Path $rdHome 'runtime.json'; $u = $null; if (Test-Path $f) { try { $u = (Get-Content $f -Raw | ConvertFrom-Json).url } catch {} }; if (-not $u) { $u = 'http://localhost:%PORT%' }; Start-Process $u"
+rem Factored into misc\Open-Ui.ps1 (rather than an inline one-liner) so it can also honour
+rem portableMode (opens a chromeless Edge/Chrome --app= window instead of a normal tab).
+start "" /b powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "misc\Open-Ui.ps1" -Port %PORT%
 bun run src\index.ts serve

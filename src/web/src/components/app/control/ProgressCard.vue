@@ -5,6 +5,7 @@ import { ImageIcon, SquareIcon } from '@lucide/vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { JobStatus } from '@/types';
@@ -82,21 +83,23 @@ function jobCostLabel(job: { cost?: { totalCost: number } | null }) {
         </template>
       </div>
       <div class="grid max-h-[320px] gap-1.5 overflow-auto">
-        <div
-          v-for="job in store.jobList"
-          :key="job.id"
-          class="grid grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
-          :title="job.status === 'error' && job.error ? job.error : ''"
-        >
-          <span class="size-3 rounded-full" :class="dot(job.status)" />
-          <span class="truncate text-muted-foreground">
-            {{ job.inputId }} · <b class="text-foreground">{{ job.modelId }}</b> · {{ job.promptId
-            }}{{ job.variant > 1 ? ' v' + job.variant : '' }}
-          </span>
-          <span class="tabular-nums text-muted-foreground/70">
-            {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : '' }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : '' }}
-          </span>
-        </div>
+        <Tooltip v-for="job in store.jobList" :key="job.id" :disabled="!(job.status === 'error' && job.error)">
+          <TooltipTrigger as-child>
+            <div
+              class="grid grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+            >
+              <span class="size-3 rounded-full" :class="dot(job.status)" />
+              <span class="truncate text-muted-foreground">
+                {{ job.inputId }} · <b class="text-foreground">{{ job.modelId }}</b> · {{ job.promptId
+                }}{{ job.variant > 1 ? ' v' + job.variant : '' }}
+              </span>
+              <span class="tabular-nums text-muted-foreground/70">
+                {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : '' }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : '' }}
+              </span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent v-if="job.status === 'error' && job.error" class="max-w-xs">{{ job.error }}</TooltipContent>
+        </Tooltip>
       </div>
     </CardContent>
   </Card>

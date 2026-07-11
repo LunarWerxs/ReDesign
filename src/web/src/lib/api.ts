@@ -60,10 +60,17 @@ export const api = {
   authLogout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   checkUpdate: () => request<UpdateStatus>('/api/updates'),
   applyUpdate: () => request<UpdateApplyResult>('/api/updates/apply', { method: 'POST' }),
-  // ── local daemon settings (auto-update opt-in + cadence) ─────────────────────
+  // ── local daemon settings (auto-update opt-in + cadence, portable window opt-in) ─────────────
   getSettings: () => request<AppSettings>('/api/settings'),
   setAutoUpdate: (enabled: boolean) =>
     request<AppSettings>('/api/settings', { ...postJson({ autoUpdate: enabled }), method: 'PUT' }),
+  setPortableMode: (enabled: boolean) =>
+    request<AppSettings>('/api/settings', { ...postJson({ portableMode: enabled }), method: 'PUT' }),
+  openPortableWindow: () =>
+    request<{ ok: true; browser: string } | { ok: false; reason: 'no-browser' | 'spawn-failed' }>(
+      '/api/portable-window',
+      postJson({}),
+    ),
   recordPulse: (event: string, properties?: Record<string, unknown>) =>
     request<{ ok: boolean; enabled: boolean }>('/api/pulse', postJson({ event, properties })),
   uploadInputs: (images: UploadImage[]) =>

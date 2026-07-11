@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { CheckIcon, Trash2Icon } from '@lucide/vue';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { t } from '@/i18n';
 
 withDefaults(
@@ -45,16 +46,19 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
     @click="emit('toggle')"
     @keydown="onKeydown"
   >
-    <button
-      v-if="removable"
-      type="button"
-      :title="t('input.removeThisInput')"
-      :aria-label="t('input.removeThisInput')"
-      class="absolute left-2 top-2 z-10 grid size-6 place-items-center rounded-md border border-white/30 bg-black/55 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100 focus-visible:opacity-100"
-      @click.stop="emit('remove')"
-    >
-      <Trash2Icon class="size-3.5" />
-    </button>
+    <Tooltip v-if="removable">
+      <TooltipTrigger as-child>
+        <button
+          type="button"
+          :aria-label="t('input.removeThisInput')"
+          class="absolute left-2 top-2 z-10 grid size-6 place-items-center rounded-md border border-white/30 bg-black/55 text-white opacity-0 transition-opacity hover:bg-destructive group-hover:opacity-100 focus-visible:opacity-100"
+          @click.stop="emit('remove')"
+        >
+          <Trash2Icon class="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{{ t('input.removeThisInput') }}</TooltipContent>
+    </Tooltip>
     <span
       class="absolute right-2 top-2 z-10 grid size-5 place-items-center rounded-md border transition-colors"
       :class="selected ? 'border-primary bg-primary text-primary-foreground' : 'border-white/40 bg-black/50 text-transparent'"

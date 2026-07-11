@@ -3,6 +3,7 @@ import { ExternalLinkIcon, DownloadIcon, EyeIcon, StarIcon, XIcon } from '@lucid
 import { computed } from 'vue';
 import { outputUrl, outputRawUrl, downloadUrl } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
 import type { ViewerHeight } from '@/stores/viewer';
 import ScaledFrame from './ScaledFrame.vue';
@@ -49,39 +50,57 @@ const sub = () => {
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ sub() }}</span>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          :title="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
-          :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
-          :aria-pressed="starred"
-          @click.stop="$emit('toggle-star')"
-        >
-          <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          :title="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
-          :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
-          :aria-pressed="itemHidden"
-          @click.stop="$emit('toggle-hidden')"
-        >
-          <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
-          <XIcon v-else class="size-3.5 text-muted-foreground" />
-        </Button>
-        <Button as-child variant="ghost" size="icon-xs" :title="t('viewer.openOutput')" :aria-label="t('viewer.openOutput')">
-          <a :href="outputUrl(job.file || '')" target="_blank" rel="noreferrer">
-            <ExternalLinkIcon class="size-3.5" />
-          </a>
-        </Button>
-        <Button as-child variant="ghost" size="icon-xs" :title="t('viewer.downloadOutput')" :aria-label="t('viewer.downloadOutput')">
-          <a :href="downloadUrl(job.file || '')">
-            <DownloadIcon class="size-3.5" />
-          </a>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
+              :aria-pressed="starred"
+              @click.stop="$emit('toggle-star')"
+            >
+              <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ starred ? t('viewer.unstarItem') : t('viewer.starItem') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
+              :aria-pressed="itemHidden"
+              @click.stop="$emit('toggle-hidden')"
+            >
+              <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
+              <XIcon v-else class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.openOutput')">
+              <a :href="outputUrl(job.file || '')" target="_blank" rel="noreferrer">
+                <ExternalLinkIcon class="size-3.5" />
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.openOutput') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.downloadOutput')">
+              <a :href="downloadUrl(job.file || '')">
+                <DownloadIcon class="size-3.5" />
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.downloadOutput') }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
     <ScaledFrame :raw-url="rawUrl" :rw="rw" :ar="ar" :height="height" :scale="scale" />

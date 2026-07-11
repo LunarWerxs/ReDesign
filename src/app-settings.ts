@@ -21,6 +21,12 @@ export interface AppSettings {
   autoUpdate?: boolean;
   /** Auto-update check cadence in seconds. Clamped to [900, 604800]; absent = 21600 (6 h). */
   autoUpdateIntervalSecs?: number;
+  /**
+   * Open the app UI in a chromeless Chromium app window (msedge/chrome --app=URL) instead of a
+   * normal browser tab, both from the in-app toggle and from the tray/start.cmd launcher (see
+   * src/portable-window.mjs, POST /api/portable-window). Absent/false = OFF (a normal tab).
+   */
+  portableMode?: boolean;
 }
 
 let cached: AppSettings | null = null;

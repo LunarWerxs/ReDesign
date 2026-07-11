@@ -5,12 +5,17 @@
  * than a bare import. Run: `npm run check:i18n` (also gates `npm run build`).
  *
  * Fails (exit 1) on:
- *   1. MISSING KEY, a t()/$t('x') reference in source with no entry in en.ts.
+ *   1. MISSING KEY, a t()/$t('x') reference (or `errKey: 'x'`, see below) in source
+ *                        with no entry in en.ts.
  *   2. HARDCODED, user-facing prose in a template (text node or placeholder/
  *                        title/aria-label/alt attribute) or a toast() literal not run
  *                        through t(). Put `<!-- i18n-ignore -->` immediately before a
  *                        node to exempt it (and its subtree).
  * Warns (does not fail) on UNUSED keys present in en.ts but never referenced.
+ *
+ * Key references also count `errKey: 'x.y'` object-literal properties, the one
+ * sanctioned indirection: lib/asyncAction.ts's withToast() takes `errKey` and calls
+ * t(opts.errKey) internally, so a plain t()-call scan would misreport those as unused.
  *
  * Templates are parsed with @vue/compiler-sfc (real AST), so the hardcoded-string
  * scan is accurate. Kit-synced dirs (components/ui, shell) are exempt library code.
@@ -35,7 +40,9 @@ const PROSE_ATTRS = new Set(["placeholder", "title", "aria-label", "alt", "aria-
 // Elements whose text content is never UI prose.
 const SKIP_TEXT_TAGS = new Set(["code", "pre", "style", "script"]);
 // Literal text allowed to stay hardcoded (brand / symbols / technical, non-translatable).
-const TEXT_ALLOWLIST = new Set(["RēDesign", "·", ", ", "/", "×", "AI", "↑", "↓"]);
+// "v" covers the job-variant tag (e.g. "v2"), a technical suffix rather than prose —
+// matches OutputCard.vue's own `v${variant}`, which isn't run through t() either.
+const TEXT_ALLOWLIST = new Set(["RēDesign", "·", ", ", "/", "×", "AI", "↑", "↓", "v"]);
 
 const errors = [];
 const warnings = [];
@@ -80,11 +87,18 @@ const sourceFiles = walkDir(SRC);
 // ── 1. collect t()/$t() key references (negative lookbehind avoids `.at(`, `format(`) ──
 const referenced = new Set();
 const KEY_RE = /(?<![\w$])\$?t\(\s*(['"`])([\w.]+)\1/g;
+// `errKey: 'x.y'` object-literal properties are the one sanctioned indirection: passed
+// through to lib/asyncAction.ts's withToast(), which calls t(opts.errKey) internally.
+const ERR_KEY_RE = /\berrKey:\s*(['"`])([\w.]+)\1/g;
 for (const file of sourceFiles) {
   const src = readFileSync(file, "utf8");
   for (const m of src.matchAll(KEY_RE)) {
     referenced.add(m[2]);
     if (!enKeys.has(m[2])) errors.push(`MISSING KEY   ${rel(file)} → t('${m[2]}') has no entry in en.ts`);
+  }
+  for (const m of src.matchAll(ERR_KEY_RE)) {
+    referenced.add(m[2]);
+    if (!enKeys.has(m[2])) errors.push(`MISSING KEY   ${rel(file)} → errKey: '${m[2]}' has no entry in en.ts`);
   }
 }
 

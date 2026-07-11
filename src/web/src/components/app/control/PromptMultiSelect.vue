@@ -33,6 +33,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Prompt } from '@/types';
@@ -151,19 +152,28 @@ function useCustom() {
       <div class="flex items-center gap-2 px-1 pb-2">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('promptSelect.prompts') }}</strong>
         <div class="relative ml-auto flex gap-1.5">
-          <Button variant="ghost" size="icon-xs" :title="t('promptSelect.addPrompt')" :aria-label="t('promptSelect.addPrompt')" @click="openAdd">
-            <PlusIcon class="size-3.5" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button variant="ghost" size="icon-xs" :aria-label="t('promptSelect.addPrompt')" @click="openAdd">
+                <PlusIcon class="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('promptSelect.addPrompt') }}</TooltipContent>
+          </Tooltip>
           <div ref="actionsMenuRef" class="relative">
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :title="t('promptSelect.promptActions')"
-              :aria-label="t('promptSelect.promptActions')"
-              @click="actionsOpen = !actionsOpen"
-            >
-              <MoreHorizontalIcon class="size-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('promptSelect.promptActions')"
+                  @click="actionsOpen = !actionsOpen"
+                >
+                  <MoreHorizontalIcon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('promptSelect.promptActions') }}</TooltipContent>
+            </Tooltip>
             <div
               v-if="actionsOpen"
               class="cn-menu-translucent absolute right-0 top-full z-50 mt-1 grid w-44 gap-1 rounded-md bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10"
@@ -200,26 +210,34 @@ function useCustom() {
               <span class="font-semibold">{{ p.label }}</span>
               <span v-if="p.description" class="text-xs text-muted-foreground"> · {{ p.description }}</span>
             </span>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :title="t('promptSelect.editPrompt')"
-              :aria-label="t('promptSelect.editPrompt')"
-              class="opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
-              @click.stop="openEdit(p)"
-            >
-              <PencilIcon class="size-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :title="t('promptSelect.deletePrompt')"
-              :aria-label="t('promptSelect.deletePrompt')"
-              class="text-destructive opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
-              @click.stop="deletePrompt(p)"
-            >
-              <Trash2Icon class="size-3.5" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('promptSelect.editPrompt')"
+                  class="opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
+                  @click.stop="openEdit(p)"
+                >
+                  <PencilIcon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('promptSelect.editPrompt') }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('promptSelect.deletePrompt')"
+                  class="text-destructive opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
+                  @click.stop="deletePrompt(p)"
+                >
+                  <Trash2Icon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('promptSelect.deletePrompt') }}</TooltipContent>
+            </Tooltip>
           </div>
       </div>
     </PopoverContent>

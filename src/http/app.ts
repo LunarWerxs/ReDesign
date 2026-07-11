@@ -26,6 +26,7 @@ import * as connections from "./routes/connections";
 import * as costs from "./routes/costs";
 import * as settingsRoute from "./routes/settings";
 import { loadAppSettings } from "../app-settings";
+import { writeShutdownRequest } from "../instance";
 import { setAutoUpdateEnabled, setAutoUpdateIntervalSecs, AUTO_UPDATE_INTERVAL_DEFAULT_S } from "../auto-update";
 
 interface StatusError extends Error {
@@ -71,6 +72,11 @@ export function createApp(hooks: AppHooks = {}): Hono {
   // server.js: respond first, then close the listener on a short unref'd timer so the response
   // has a chance to flush before the process exits.
   app.post("/api/shutdown", requireSameOrigin(), (c) => {
+    // The tray stops the daemon by port (Stop-Server) and never calls this route, so any request
+    // that reaches here is a user "Shut Down" from the web UI (or `redesign stop`) — a request to
+    // terminate the WHOLE app, tray included. Drop a sentinel the tray host polls so it disposes its
+    // notification-area icon and exits too; harmless when no tray is running (cleared on next boot).
+    writeShutdownRequest();
     setTimeout(() => deps.requestShutdown?.(), 50).unref?.();
     return c.json({ ok: true });
   });

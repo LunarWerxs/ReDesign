@@ -2,6 +2,7 @@
 import { EyeIcon, StarIcon, XIcon } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
 import type { ViewerHeight } from '@/stores/viewer';
 import { t } from '@/i18n';
@@ -40,29 +41,37 @@ const frameAspect = computed(() =>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ promptLabel }}</span>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          :title="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
-          :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
-          :aria-pressed="starred"
-          @click.stop="$emit('toggle-star')"
-        >
-          <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          :title="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
-          :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
-          :aria-pressed="itemHidden"
-          @click.stop="$emit('toggle-hidden')"
-        >
-          <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
-          <XIcon v-else class="size-3.5 text-muted-foreground" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
+              :aria-pressed="starred"
+              @click.stop="$emit('toggle-star')"
+            >
+              <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ starred ? t('viewer.unstarItem') : t('viewer.starItem') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
+              :aria-pressed="itemHidden"
+              @click.stop="$emit('toggle-hidden')"
+            >
+              <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
+              <XIcon v-else class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
     <div

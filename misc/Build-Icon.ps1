@@ -2,9 +2,15 @@
 # Windows system tray and Explorer render it crisply. A 256-only .ico shows up blank
 # or mushy in the tray, that is the classic "tray icon is broken". Small frames are
 # 32bpp DIBs (GDI+ rejects PNG-encoded small frames); the 256 jumbo is PNG-compressed.
-# Re-run this whenever the artwork changes.
+#
+# Source art is misc\Reimagine-icon.png (a committed 1024x1024 render of the brand icon) so
+# this needs NO SVG renderer at runtime. To change the logo: re-render the PNG from the web
+# favicon, then re-run this script, e.g.
+#     magick -background none src\web\public\icon.svg -resize 1024x1024 misc\Reimagine-icon.png
+# The brand vector lives in misc\brand\icon-dark.svg. After regenerating, re-run
+# Create-Shortcut.ps1 (Windows caches icons; refreshing the shortcut picks up the new one).
 param(
-  [string]$Source = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Definition) "Reimagine.ico"),
+  [string]$Source = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Definition) "Reimagine-icon.png"),
   [string]$Out    = (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Definition) "Reimagine.ico")
 )
 $ErrorActionPreference = "Stop"

@@ -77,11 +77,78 @@ $env:PORT = "$Port"   # RēDesign's loadEnv won't override an already-set var
 # Runtime pointer the daemon writes (honours REDESIGN_HOME, like the daemon does).
 $rdHome = if ($env:REDESIGN_HOME) { $env:REDESIGN_HOME } else { Join-Path $env:USERPROFILE ".redesign" }
 $infoFile = Join-Path $rdHome "runtime.json"
+# Where the daemon self-logs (see src/log-file.ts) — surfaced in the crash balloons so the
+# user knows where to look when the watchdog reports a restart.
+$logPath = Join-Path $rdHome "logs\daemon.log"
+# "Full shutdown" sentinel the daemon drops when a user picks Shut Down in the web UI (or runs
+# `redesign stop`): a request to terminate the WHOLE app, this tray included. The watch timer below
+# polls for it and runs Quit; without it the auto-restart watchdog would just resurrect the daemon
+# the user asked to stop. Clear any stale one now so a leftover from a hard-killed previous run
+# can't make us quit the instant we launch.
+$script:shutdownRequestFile = Join-Path $rdHome "shutdown.request"
+Remove-Item $script:shutdownRequestFile -Force -ErrorAction SilentlyContinue
 # Current live URL, refreshed whenever we (re)start the daemon, so the tray menu always
 # opens wherever the daemon actually is now. Starts as the preferred-port guess.
 $script:url = "http://127.0.0.1:$port"
 $script:trayMutex = $null
 $script:ownsTrayMutex = $false
+
+# First installed Chromium-family browser that understands --app= (msedge preferred, then
+# Chrome), or $null if none is present. Mirrors src/portable-window.mjs's Windows candidate
+# list so the tray's cold-start behavior (before the daemon is up) matches the daemon's own.
+function Resolve-ChromiumBrowser {
+  $candidates = @()
+  if (${env:ProgramFiles(x86)}) {
+    $candidates += Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"
+  }
+  if ($env:ProgramFiles) {
+    $candidates += Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe"
+  }
+  if ($env:ProgramFiles) {
+    $candidates += Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"
+  }
+  if (${env:ProgramFiles(x86)}) {
+    $candidates += Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += Join-Path $env:LOCALAPPDATA "Google\Chrome\Application\chrome.exe"
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+# Open the app UI at $url, honouring portableMode: re-reads runtime.json FRESH on every call
+# (so a setting flipped after this tray started is picked up on the next open) and, when
+# portableMode is truthy AND a Chromium browser is found, launches it as a chromeless
+# --app= window instead of a normal tab.
+function Open-AppUi([string]$url) {
+  $portable = $false
+  try {
+    if (Test-Path $infoFile) {
+      $info = Get-Content $infoFile -Raw | ConvertFrom-Json
+      if ($info.portableMode) { $portable = $true }
+    }
+  } catch {}
+  if ($portable) {
+    $browser = Resolve-ChromiumBrowser
+    if ($browser) {
+      # Dedicated Chromium profile (sibling of runtime.json) so the app window remembers its
+      # own size/position across launches instead of sharing/fighting over the default profile.
+      # Same convention the daemon's POST /api/portable-window uses, so both open paths agree.
+      $profileDir = Join-Path (Split-Path -Parent $infoFile) "portable-profile"
+      $profileArgs = @()
+      try {
+        if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Force -Path $profileDir | Out-Null }
+        $profileArgs = @("--user-data-dir=`"$profileDir`"", "--no-first-run", "--no-default-browser-check")
+      } catch {}
+      Start-Process $browser -ArgumentList ($profileArgs + @("--app=$url"))
+      return
+    }
+  }
+  Start-Process $url
+}
 
 function Release-TrayMutex {
   if ($script:ownsTrayMutex -and $script:trayMutex) {
@@ -231,7 +298,7 @@ try {
 if (-not $script:ownsTrayMutex) {
   $u = Get-RunningUrl $infoFile $port
   if ($u) {
-    Start-Process $u
+    Open-AppUi $u
   } else {
     [System.Windows.Forms.MessageBox]::Show("RēDesign is already starting in the tray. Wait a moment, then open it from the tray icon.", "RēDesign") | Out-Null
   }
@@ -372,6 +439,23 @@ $script:jobKind = ''
 # Shared with the worker runspace (same process heap): the worker records the PIDs it
 # spawns so Quit can reap them, and Quit sets `cancel` to stop the worker early.
 $script:shared = [hashtable]::Synchronized(@{ buildPid = 0; serverPid = 0; cancel = $false })
+# --- Auto-restart watchdog state --------------------------------------------------
+# Nothing else brings the daemon back if it dies on its own (an uncaught throw, or the
+# process just vanishing). This host is the natural supervisor: a timer probes /api/health
+# and relaunches a daemon that died on its own. Guards keep it from fighting deliberate stops:
+#   · $intentionalStop — set during Quit so we never resurrect a daemon the user is closing.
+#   · $script:busy      — a Rebuild/Restart worker owns the daemon; the watchdog stands down.
+#   · reviveGraceUntil  — after firing a relaunch, wait for it to bind before trying again
+#                         (a fresh daemon takes a few seconds), so we don't spawn a pile-up.
+#   · crash-loop guard  — >= MAX restarts within WINDOW seconds ⇒ pause auto-restart and tell
+#                         the user (a persistently-broken build must not spin forever; mirrors
+#                         RepoYeti's tray watchdog).
+$script:intentionalStop = $false
+$script:autoRestartPaused = $false
+$script:reviveGraceUntil = [DateTime]::MinValue
+$script:restartTimes = New-Object System.Collections.Generic.List[DateTime]
+$CrashLoopMax = 4       # restarts…
+$CrashLoopWindowSec = 120  # …within this many seconds ⇒ pause
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $openItem = New-Object System.Windows.Forms.ToolStripMenuItem("Open RēDesign")
@@ -400,7 +484,7 @@ $pollTimer.Add_Tick({
     $tray.ShowBalloonTip(3500, "RēDesign", "Build failed. See misc\Reimagine-Rebuild.log.", [System.Windows.Forms.ToolTipIcon]::Error)
   } elseif ($out -and $out.Ready) {
     if ($out.Url) { $script:url = $out.Url }
-    if ($script:jobKind -eq 'rebuild') { Start-Process $script:url }
+    if ($script:jobKind -eq 'rebuild') { Open-AppUi $script:url }
   } else {
     $tray.ShowBalloonTip(3500, "RēDesign", "Restarted, but RēDesign isn't answering yet.", [System.Windows.Forms.ToolTipIcon]::Warning)
   }
@@ -414,6 +498,10 @@ function Start-Job-Async([bool]$doRebuild) {
   if ($script:busy) { return }
   $script:busy = $true
   $script:jobKind = if ($doRebuild) { 'rebuild' } else { 'restart' }
+  # An explicit Restart/Rebuild is the user re-arming things: clear any crash-loop pause and
+  # the restart history so the watchdog resumes cleanly once the worker hands the daemon back.
+  $script:autoRestartPaused = $false
+  $script:restartTimes.Clear()
   $rebuildItem.Enabled = $false
   $restartItem.Enabled = $false
 
@@ -443,10 +531,14 @@ function Start-Job-Async([bool]$doRebuild) {
   }
 }
 
-$openItem.Add_Click({ Start-Process $script:url })
+$openItem.Add_Click({ Open-AppUi $script:url })
 $rebuildItem.Add_Click({ Start-Job-Async $true })
 $restartItem.Add_Click({ Start-Job-Async $false })
 $quitItem.Add_Click({
+  # Tell the watchdog we're closing on purpose BEFORE we kill the daemon, so it doesn't
+  # relaunch what we're about to stop.
+  $script:intentionalStop = $true
+  if ($healthTimer) { $healthTimer.Stop() }
   $script:shared.cancel = $true
   $pollTimer.Stop()
   # If a job is in flight, reap what the worker spawned (build + a server that may not
@@ -471,7 +563,61 @@ $menu.Items.Add($restartItem) | Out-Null
 $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $menu.Items.Add($quitItem) | Out-Null
 $tray.ContextMenuStrip = $menu
-$tray.Add_MouseDoubleClick({ Start-Process $script:url })
+$tray.Add_MouseDoubleClick({ Open-AppUi $script:url })
+
+# --- Auto-restart watchdog --------------------------------------------------------
+# Ticks on the UI thread; each tick is cheap (one /api/health probe) and NEVER blocks —
+# a relaunch is fire-and-forget (Start-Server returns as soon as it spawns), and recovery
+# is observed on a later tick, so the tray stays responsive even while the daemon reboots.
+$healthTimer = New-Object System.Windows.Forms.Timer
+$healthTimer.Interval = 5000
+$healthTimer.Add_Tick({
+  # Deliberate close, or a Rebuild/Restart worker owns the daemon → stand down.
+  if ($script:intentionalStop -or $script:busy) { return }
+
+  $u = Get-RunningUrl $infoFile $port
+  if ($u) { $script:url = $u; return }         # healthy (track where it actually bound)
+
+  # Down. Wait out the grace window after a relaunch so a still-booting daemon isn't
+  # double-spawned, and honour a crash-loop pause.
+  if ((Get-Date) -lt $script:reviveGraceUntil) { return }
+  if ($script:autoRestartPaused) { return }
+
+  # Crash-loop guard: prune attempts outside the window, then bail if we've hit the cap.
+  $cutoff = (Get-Date).AddSeconds(-$CrashLoopWindowSec)
+  for ($i = $script:restartTimes.Count - 1; $i -ge 0; $i--) {
+    if ($script:restartTimes[$i] -lt $cutoff) { $script:restartTimes.RemoveAt($i) }
+  }
+  if ($script:restartTimes.Count -ge $CrashLoopMax) {
+    $script:autoRestartPaused = $true
+    $tray.ShowBalloonTip(6000, "RēDesign", "RēDesign keeps crashing - auto-restart paused. See $logPath, then use Restart to try again.", [System.Windows.Forms.ToolTipIcon]::Error)
+    return
+  }
+
+  # Relaunch (same path the tray uses everywhere else — cmd->bun so taskkill /T can reap it).
+  $script:restartTimes.Add((Get-Date))
+  $script:reviveGraceUntil = (Get-Date).AddSeconds(20)
+  Start-Server $root $port | Out-Null
+  $tray.ShowBalloonTip(4000, "RēDesign", "RēDesign stopped unexpectedly - restarting. Log: $logPath", [System.Windows.Forms.ToolTipIcon]::Warning)
+})
+$healthTimer.Start()
+
+# Watch for a "Shut Down" from the web UI (or `redesign stop`): the daemon drops the
+# shutdown.request sentinel and we tear the WHOLE app down — otherwise the daemon exits but this
+# tray (and its notification-area icon) lingers, and the watchdog above would even try to relaunch
+# it. Reuses the Quit menu item's teardown (which sets $intentionalStop so the watchdog stands
+# down). $intentionalStop also means a Quit already in progress is left alone.
+$watchTimer = New-Object System.Windows.Forms.Timer
+$watchTimer.Interval = 500
+$watchTimer.Add_Tick({
+  if ($script:intentionalStop) { return }
+  if (Test-Path $script:shutdownRequestFile) {
+    $watchTimer.Stop()
+    Remove-Item $script:shutdownRequestFile -Force -ErrorAction SilentlyContinue
+    $quitItem.PerformClick()
+  }
+})
+$watchTimer.Start()
 
 $tray.ShowBalloonTip(2500, "RēDesign", "Running in the tray - right-click for options.", [System.Windows.Forms.ToolTipIcon]::Info)
 # Wait for the freshly-spawned server to bind before opening the browser, so the first paint
@@ -480,7 +626,7 @@ $tray.ShowBalloonTip(2500, "RēDesign", "Running in the tray - right-click for o
 # a genuinely-stuck start still opens the tab (surfacing the browser's own error) rather than hanging.
 $readyUrl = Wait-ForUrl $infoFile $port 15
 if ($readyUrl) { $script:url = $readyUrl }
-Start-Process $script:url
+Open-AppUi $script:url
 
 # Run the WinForms message loop (keeps the tray alive until Quit).
 try {

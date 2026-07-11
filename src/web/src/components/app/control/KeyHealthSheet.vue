@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useControlStore } from '@/stores/control';
 import { useTheme, type ThemeMode } from '@/lib/theme';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { t } from '@/i18n';
 import ViewSettings from './ViewSettings.vue';
 import ModelList from './key-health-sheet/ModelList.vue';
@@ -27,8 +28,11 @@ import OrphanKeyPools from './key-health-sheet/OrphanKeyPools.vue';
 import ModelKeyDialogs from './key-health-sheet/ModelKeyDialogs.vue';
 import CloudSyncSection from './CloudSyncSection.vue';
 import AutoUpdateSection from './AutoUpdateSection.vue';
+import PortableModeSection from './PortableModeSection.vue';
+import TooltipPreferenceSection from './TooltipPreferenceSection.vue';
 import AppActionsBar from '@/components/app/AppActionsBar.vue';
 import SettingsGroup from '@/shell/SettingsGroup.vue';
+import SettingsTabs from '@/shell/SettingsTabs.vue';
 import { useRoute } from 'vue-router';
 import type { KeyEntry, KeyPool, Model, ModelSaveRequest, ProviderDefault } from '@/types';
 
@@ -105,8 +109,24 @@ const route = useRoute();
 const isViewer = computed(() => route.name === 'Viewer');
 const isDesktop = useMediaQuery('(min-width: 768px)');
 const side = ref<'right' | 'bottom'>(isDesktop.value ? 'right' : 'bottom');
+
+// The sheet groups its sections under three tabs; the first is the sheet's real job
+// (models and keys on the dashboard, view options on the viewer) and opens selected.
+// Panes stay mounted behind v-show (SettingsTabs rule) so store-driven sections keep
+// their live state across tab switches.
+type TabId = 'main' | 'prefs' | 'app';
+const tab = ref<TabId>('main');
+const tabs = computed<{ id: TabId; label: string }[]>(() => [
+  { id: 'main', label: isViewer.value ? t('keyHealth.tabView') : t('keyHealth.tabModels') },
+  { id: 'prefs', label: t('keyHealth.tabPreferences') },
+  { id: 'app', label: t('keyHealth.tabApp') },
+]);
+
 watch(open, (o) => {
-  if (o) side.value = isDesktop.value ? 'right' : 'bottom';
+  if (o) {
+    side.value = isDesktop.value ? 'right' : 'bottom';
+    tab.value = 'main'; // every open lands back on the sheet's main tab
+  }
 });
 const keyDialogOpen = ref(false);
 const keySaving = ref(false);
@@ -366,18 +386,26 @@ async function confirmDeleteKey() {
   >
     <template #header>
       <span class="text-sm font-semibold text-foreground">{{ t('keyHealth.settings') }}</span>
-      <Button
-        class="ml-auto"
-        variant="ghost"
-        size="icon-sm"
-        :title="t('keyHealth.themeToggle', { theme: themeLabel })"
-        :aria-label="t('keyHealth.themeToggle', { theme: themeLabel })"
-        @click="cycleTheme"
-      >
-        <component :is="themeIcon" class="size-4" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            class="ml-auto"
+            variant="ghost"
+            size="icon-sm"
+            :aria-label="t('keyHealth.themeToggle', { theme: themeLabel })"
+            @click="cycleTheme"
+          >
+            <component :is="themeIcon" class="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ t('keyHealth.themeToggle', { theme: themeLabel }) }}</TooltipContent>
+      </Tooltip>
     </template>
 
+        <SettingsTabs v-model="tab" :tabs="tabs" class="mb-5" />
+
+        <!-- Main: view options (viewer) or models + keys (dashboard) ─────────── -->
+        <div v-show="tab === 'main'">
         <SettingsGroup v-if="isViewer" :label="t('keyHealth.view')" class="mb-5">
           <ViewSettings />
         </SettingsGroup>
@@ -417,7 +445,21 @@ async function confirmDeleteKey() {
             {{ pricingLastUpdatedLabel }}
           </p>
         </section>
+        </div>
 
+        <!-- Preferences: per-machine UI behavior ──────────────────────────────── -->
+        <div v-show="tab === 'prefs'">
+        <div class="mb-5">
+          <TooltipPreferenceSection />
+        </div>
+
+        <div class="mb-5">
+          <PortableModeSection />
+        </div>
+        </div>
+
+        <!-- App: cloud sync, updates, server actions ──────────────────────────── -->
+        <div v-show="tab === 'app'">
         <div class="mb-5">
           <CloudSyncSection />
         </div>
@@ -437,6 +479,7 @@ async function confirmDeleteKey() {
             @close="open = false"
           />
         </SettingsGroup>
+        </div>
   </Sidebar>
 
   <ModelKeyDialogs

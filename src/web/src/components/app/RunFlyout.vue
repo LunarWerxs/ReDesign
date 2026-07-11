@@ -18,6 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -216,16 +217,19 @@ watch(
                 {{ t('runFlyout.delete') }}
               </Button>
             </template>
-            <Button
-              v-else
-              variant="ghost"
-              size="icon-xs"
-              :title="t('runFlyout.selectRunsToDelete')"
-              :aria-label="t('runFlyout.selectRunsToDelete')"
-              @click="beginEdit"
-            >
-              <PencilIcon class="size-3.5" />
-            </Button>
+            <Tooltip v-else>
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  :aria-label="t('runFlyout.selectRunsToDelete')"
+                  @click="beginEdit"
+                >
+                  <PencilIcon class="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('runFlyout.selectRunsToDelete') }}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 

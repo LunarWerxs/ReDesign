@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
+import { useTooltipConfig } from '@/lib/tooltip-config';
 import { t } from '@/i18n';
 import type { KeyEntry, KeyPool } from '@/types';
 
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 }>();
 
 const store = useControlStore();
+const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // Pools not claimed by any active model still need somewhere to live.
 const orphanPools = computed(() => {
@@ -68,21 +70,24 @@ function poolName(p: KeyPool) {
             <span class="ml-auto text-xs text-muted-foreground" :title="t('keyHealth.totalKeysInPool')">{{ pool.total }}</span>
           </button>
         </CollapsibleTrigger>
-        <Button
-          v-if="poolOpen"
-          variant="ghost"
-          size="icon-xs"
-          :title="t('keyHealth.addApiKey')"
-          :aria-label="t('keyHealth.addApiKey')"
-          @click="emit('add-key', pool.pool)"
-        >
-          <PlusIcon class="size-3.5" />
-        </Button>
+        <Tooltip v-if="poolOpen">
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="t('keyHealth.addApiKey')"
+              @click="emit('add-key', pool.pool)"
+            >
+              <PlusIcon class="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyHealth.addApiKey') }}</TooltipContent>
+        </Tooltip>
         <CollapsibleTrigger as-child>
           <button
             type="button"
             class="grid size-6 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            :title="t('keyHealth.toggleKeys')"
+            :title="tooltipsEnabled ? t('keyHealth.toggleKeys') : undefined"
             :aria-label="t('keyHealth.toggleKeys')"
           >
             <ChevronDownIcon class="size-4 transition-transform" :class="poolOpen ? 'rotate-180' : ''" />
@@ -95,37 +100,54 @@ function poolName(p: KeyPool) {
           :key="i"
           class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
         >
-          <span
-            class="size-2.5 shrink-0 rounded-full"
-            :class="keyDot[k.status] || 'bg-muted-foreground'"
-            :title="dotLabel[k.status] || k.status"
-          />
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span
+                class="size-2.5 shrink-0 rounded-full"
+                :class="keyDot[k.status] || 'bg-muted-foreground'"
+              />
+            </TooltipTrigger>
+            <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
+          </Tooltip>
           <span class="font-mono">{{ k.mask }}</span>
           <span class="text-muted-foreground" :title="t('keyHealth.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
           <!-- i18n-ignore -->
           <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyHealth.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
           <span class="flex-1" />
-          <span v-if="k.lastError" class="truncate text-muted-foreground" :title="k.lastError">{{ k.lastError.slice(0, 24) }}</span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            :title="t('keyHealth.editApiKey')"
-            :aria-label="t('keyHealth.editApiKey')"
-            class="opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-            @click="emit('edit-key', pool.pool, k)"
-          >
-            <PencilIcon class="size-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            :title="t('keyHealth.deleteApiKey')"
-            :aria-label="t('keyHealth.deleteApiKey')"
-            class="text-destructive opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-            @click="deleteKey(pool.pool, k)"
-          >
-            <Trash2Icon class="size-3.5" />
-          </Button>
+          <Tooltip v-if="k.lastError">
+            <TooltipTrigger as-child>
+              <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
+            </TooltipTrigger>
+            <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                :aria-label="t('keyHealth.editApiKey')"
+                class="opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
+                @click="emit('edit-key', pool.pool, k)"
+              >
+                <PencilIcon class="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('keyHealth.editApiKey') }}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                :aria-label="t('keyHealth.deleteApiKey')"
+                class="text-destructive opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
+                @click="deleteKey(pool.pool, k)"
+              >
+                <Trash2Icon class="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('keyHealth.deleteApiKey') }}</TooltipContent>
+          </Tooltip>
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -10,9 +10,6 @@
  * this file incrementally.
  */
 export default {
-  app: {
-    name: 'RēDesign',
-  },
   common: {
     cancel: 'Cancel',
   },
@@ -352,6 +349,10 @@ export default {
   keyHealth: {
     settings: 'Settings',
     settingsDescription: 'Appearance, viewer, models & keys, and server actions',
+    tabModels: 'Models & keys',
+    tabView: 'View',
+    tabPreferences: 'Preferences',
+    tabApp: 'App',
     themeLight: 'Light',
     themeDark: 'Dark',
     themeSystem: 'System',
@@ -460,5 +461,17 @@ export default {
     enableLabel: 'Silently update & restart',
     hint: 'Checks for updates on a schedule and applies them automatically, only when the working tree is clean. Restarts the server to load the new code.',
     toggleFailed: 'Could not update auto-update setting',
+  },
+  portableMode: {
+    label: 'Portable window',
+    hint: 'Opens the app in its own window (no tabs or address bar) instead of a browser tab. The desktop launcher/tray follows this setting too.',
+    toggleFailed: 'Could not update portable window setting',
+    opened: 'Opened in portable window - you can close this tab',
+    noBrowser: 'No Edge or Chrome found for a portable window',
+    openFailed: 'Could not open a portable window',
+  },
+  tooltipPreference: {
+    label: 'Show tooltips',
+    hint: 'Toggle hover tooltips across the app. Off hides descriptive hover text everywhere except the small info icons in Settings.',
   },
 } as const;

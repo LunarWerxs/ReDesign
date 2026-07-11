@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterView, useRoute } from 'vue-router';
 import { Toaster } from '@/components/ui/sonner';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppTopbar from '@/components/app/AppTopbar.vue';
 import StatusPill from '@/components/app/StatusPill.vue';
 import { Settings as SettingsIcon } from '@lucide/vue';
@@ -23,10 +23,13 @@ const route = useRoute();
 const controlStore = useControlStore();
 const viewerStore = useViewerStore();
 const settingsOpen = ref(false);
-// The Settings sidebar pushes the page content.
-const { containerStyle } = usePushPanel(settingsOpen);
-
 const isViewerRoute = computed(() => route.name === 'Viewer');
+// The Settings sidebar pushes the page content. The shell is centered at
+// --container-max (AppContainer/AppTopbar) EXCEPT on the Viewer route, whose
+// OutputGrid body is full-bleed, so shellMaxWidth is disabled there.
+const { containerStyle } = usePushPanel(settingsOpen, {
+  shellMaxWidth: () => (isViewerRoute.value ? null : 800),
+});
 const viewerTo = computed(() => {
   const id = viewerStore.runId || controlStore.runId || controlStore.runs[0]?.runId || viewerStore.runs[0]?.runId;
   return id ? { path: '/viewer', query: { run: id } } : { path: '/viewer' };
@@ -80,9 +83,14 @@ onMounted(async () => {
         </template>
 
         <template #actions>
-          <Button variant="ghost" size="icon" :aria-label="t('shell.settings')" :title="t('shell.settings')" @click="openSettings">
-            <SettingsIcon class="size-4" />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button variant="ghost" size="icon" :aria-label="t('shell.settings')" @click="openSettings">
+                <SettingsIcon class="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('shell.settings') }}</TooltipContent>
+          </Tooltip>
         </template>
       </AppTopbar>
 

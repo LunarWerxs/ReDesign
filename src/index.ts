@@ -12,6 +12,16 @@
  */
 import { C } from "./util";
 import { main } from "./cli/main";
+import { initFileLogging } from "./log-file";
+
+// Persist console output to <CONFIG_DIR>/logs/daemon.log BEFORE anything else runs, so if the
+// daemon dies (the tray runs it with a hidden console, so stdout/stderr would otherwise be lost)
+// there's a record of what happened. Best-effort; never throws. NB: ReDesign has no
+// uncaughtException/unhandledRejection handlers (unlike RepoYeti's src/index.ts) — that's out of
+// scope here, so an uncaught throw still crashes node's default way, but now at least whatever
+// was logged via console.* up to that point survives on disk for the tray's health watchdog to
+// point at.
+initFileLogging();
 
 main(process.argv.slice(2))
   .then(() => {

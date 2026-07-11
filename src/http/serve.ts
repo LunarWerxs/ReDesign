@@ -32,7 +32,8 @@ import { WEB_ROOT } from "./web";
 import * as connections from "../connections";
 import { stopAutoUpdate } from "../auto-update";
 import { findFreePort } from "../find-free-port.mjs";
-import { writeInstanceInfo, clearInstanceInfo } from "../instance";
+import { writeInstanceInfo, clearInstanceInfo, clearShutdownRequest } from "../instance";
+import { loadAppSettings } from "../app-settings";
 
 const PORT = Number.parseInt(process.env.PORT || "", 10) || 5178;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -118,7 +119,13 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
     boundPort = port;
   }
 
-  writeInstanceInfo(boundPort);
+  // extra: publish portableMode so the tray/start.cmd launcher knows, on a cold start (before it
+  // can ask the daemon anything), whether to open an app window instead of a normal tab.
+  writeInstanceInfo(boundPort, { portableMode: loadAppSettings().portableMode === true });
+  // Clear any stale "full shutdown" sentinel from a previous (possibly hard-killed) run so a
+  // leftover can't make a freshly-launched tray quit the instant it starts; only a genuine
+  // in-session UI shutdown (POST /api/shutdown) writes a fresh one. See src/instance.ts.
+  clearShutdownRequest();
   process.on("exit", cleanupInstance);
 
   const settled = store.settleStaleRuns({ staleAfterMs: 0, reason: ORPHANED_RUN_MESSAGE }).settled;
