@@ -42,10 +42,6 @@ function onPreviewOpenChange(open: boolean) {
       <CardTitle class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('input.inputsTitle') }}
       </CardTitle>
-      <div class="ml-auto flex gap-2">
-        <Button variant="ghost" size="sm" @click="store.selectAll('inputs')">{{ t('input.all') }}</Button>
-        <Button variant="ghost" size="sm" @click="store.selectNone('inputs')">{{ t('input.none') }}</Button>
-      </div>
     </CardHeader>
     <CardContent>
       <InputDropzone />
@@ -71,9 +67,15 @@ function onPreviewOpenChange(open: boolean) {
       </div>
 
       <div v-if="previousInputs.length" class="mt-4 grid gap-2.5">
-        <div class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {{ t('input.previousSessions') }}
-          <span class="ml-1 font-normal text-muted-foreground/70">{{ previousInputs.length }}</span>
+        <div class="flex items-center gap-2.5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {{ t('input.previousSessions') }}
+            <span class="ml-1 font-normal text-muted-foreground/70">{{ previousInputs.length }}</span>
+          </div>
+          <div class="ml-auto flex gap-2">
+            <Button variant="ghost" size="sm" @click="store.selectAll('inputs')">{{ t('input.all') }}</Button>
+            <Button variant="ghost" size="sm" @click="store.selectNone('inputs')">{{ t('input.none') }}</Button>
+          </div>
         </div>
         <div
           class="grid gap-2"

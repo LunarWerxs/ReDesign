@@ -326,6 +326,7 @@ export interface AppSettings {
   autoUpdate: boolean;
   autoUpdateIntervalSecs: number;
   portableMode: boolean;
+  hideTrayIcon: boolean;
 }
 
 // Server-Sent Events emitted by GET /api/runs/:id/events.

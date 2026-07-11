@@ -66,6 +66,8 @@ export const api = {
     request<AppSettings>('/api/settings', { ...postJson({ autoUpdate: enabled }), method: 'PUT' }),
   setPortableMode: (enabled: boolean) =>
     request<AppSettings>('/api/settings', { ...postJson({ portableMode: enabled }), method: 'PUT' }),
+  setHideTrayIcon: (enabled: boolean) =>
+    request<AppSettings>('/api/settings', { ...postJson({ hideTrayIcon: enabled }), method: 'PUT' }),
   openPortableWindow: () =>
     request<{ ok: true; browser: string } | { ok: false; reason: 'no-browser' | 'spawn-failed' }>(
       '/api/portable-window',

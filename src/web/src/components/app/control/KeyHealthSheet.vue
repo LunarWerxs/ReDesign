@@ -29,6 +29,7 @@ import ModelKeyDialogs from './key-health-sheet/ModelKeyDialogs.vue';
 import CloudSyncSection from './CloudSyncSection.vue';
 import AutoUpdateSection from './AutoUpdateSection.vue';
 import PortableModeSection from './PortableModeSection.vue';
+import HideTrayIconSection from './HideTrayIconSection.vue';
 import TooltipPreferenceSection from './TooltipPreferenceSection.vue';
 import AppActionsBar from '@/components/app/AppActionsBar.vue';
 import SettingsGroup from '@/shell/SettingsGroup.vue';
@@ -455,6 +456,10 @@ async function confirmDeleteKey() {
 
         <div class="mb-5">
           <PortableModeSection />
+        </div>
+
+        <div class="mb-5">
+          <HideTrayIconSection />
         </div>
         </div>
 

@@ -7,6 +7,7 @@ import { createRunsActions } from './control/runs';
 import { createSyncActions } from './control/sync';
 import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
 import { createPortableModeSettingsActions } from './control/portable-mode-settings';
+import { createHideTraySettingsActions } from './control/hide-tray-settings';
 import { useSelfUpdate } from '@/lib/useSelfUpdate';
 import { api } from '@/lib/api';
 import type { UpdateApplyResult, UpdateStatus } from '@/types';
@@ -29,6 +30,8 @@ export const useControlStore = defineStore('control', () => {
   const autoUpdateSettingsActions = createAutoUpdateSettingsActions();
   // Portable window opt-in, see @/stores/control/portable-mode-settings.
   const portableModeSettingsActions = createPortableModeSettingsActions();
+  // Hide-tray-icon opt-in, see @/stores/control/hide-tray-settings.
+  const hideTraySettingsActions = createHideTraySettingsActions();
 
   return {
     // data
@@ -83,6 +86,9 @@ export const useControlStore = defineStore('control', () => {
     // portable window opt-in
     portableModeEnabled: portableModeSettingsActions.portableModeEnabled,
     portableModeLoading: portableModeSettingsActions.portableModeLoading,
+    // hide tray icon opt-in
+    hideTrayIconEnabled: hideTraySettingsActions.hideTrayIconEnabled,
+    hideTrayIconLoading: hideTraySettingsActions.hideTrayIconLoading,
     // getters
     runnableModels: state.runnableModels,
     runnableModelIds: state.runnableModelIds,
@@ -132,5 +138,7 @@ export const useControlStore = defineStore('control', () => {
     setAutoUpdate: autoUpdateSettingsActions.setAutoUpdate,
     loadPortableModeSetting: portableModeSettingsActions.loadPortableModeSetting,
     setPortableMode: portableModeSettingsActions.setPortableMode,
+    loadHideTrayIconSetting: hideTraySettingsActions.loadHideTrayIconSetting,
+    setHideTrayIcon: hideTraySettingsActions.setHideTrayIcon,
   };
 });

@@ -10,9 +10,11 @@
  * unref'd/cleared, so the event loop drains and the process exits cleanly on its own. (Ported
  * verbatim from the old src/cli.js's own comment/guard.)
  */
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { C } from "./util";
 import { main } from "./cli/main";
-import { initFileLogging } from "./log-file";
+import { initFileLogging } from "./log-file.mjs";
 
 // Persist console output to <CONFIG_DIR>/logs/daemon.log BEFORE anything else runs, so if the
 // daemon dies (the tray runs it with a hidden console, so stdout/stderr would otherwise be lost)
@@ -20,8 +22,10 @@ import { initFileLogging } from "./log-file";
 // uncaughtException/unhandledRejection handlers (unlike RepoYeti's src/index.ts) — that's out of
 // scope here, so an uncaught throw still crashes node's default way, but now at least whatever
 // was logged via console.* up to that point survives on disk for the tray's health watchdog to
-// point at.
-initFileLogging();
+// point at. log-file.mjs is the shared LunarWerx server-lib (synced from the kit); the config
+// dir is resolved inline here (REDESIGN_HOME override else ~/.redesign — mirrors src/instance.ts's
+// CONFIG_DIR) so logging depends only on node builtins and runs before the config chain.
+initFileLogging(process.env.REDESIGN_HOME?.trim() || join(homedir(), ".redesign"));
 
 main(process.argv.slice(2))
   .then(() => {

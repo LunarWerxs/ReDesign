@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ImageIcon, LayoutDashboardIcon } from '@lucide/vue';
-import { RouterLink, type RouteLocationRaw } from 'vue-router';
+import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router';
 import { t } from '@/i18n';
 
 const props = withDefaults(
@@ -22,9 +23,35 @@ const props = withDefaults(
 );
 
 const navItemClass =
-  'inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
-const activeNavClass = 'bg-background text-foreground shadow-xs';
+  'relative z-10 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
+const activeNavClass = 'text-foreground';
 const inactiveNavClass = 'text-muted-foreground hover:bg-background/70 hover:text-foreground';
+
+// Sliding active-segment indicator, same visual language as the kit's SettingsTabs:
+// an absolutely positioned div measured against the active link's offsetLeft/offsetWidth
+// so the Dashboard <-> Viewer switch animates instead of jump-cutting the background.
+const route = useRoute();
+const dashboardLinkEl = ref<HTMLElement | null>(null);
+const viewerLinkEl = ref<HTMLElement | null>(null);
+const indicatorStyle = ref<{ transform: string; width: string }>({ transform: 'translateX(0px)', width: '0px' });
+const indicatorReady = ref(false);
+
+function measure() {
+  const active = route.path === '/viewer' ? viewerLinkEl.value : dashboardLinkEl.value;
+  if (!active) return;
+  indicatorStyle.value = { transform: `translateX(${active.offsetLeft}px)`, width: `${active.offsetWidth}px` };
+  indicatorReady.value = true;
+}
+
+watch(() => route.path, () => void nextTick(measure), { immediate: true });
+
+onMounted(() => {
+  void nextTick(measure);
+  window.addEventListener('resize', measure);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', measure);
+});
 </script>
 
 <template>
@@ -52,9 +79,16 @@ const inactiveNavClass = 'text-muted-foreground hover:bg-background/70 hover:tex
           <span><!-- i18n-ignore -->R<span class="text-primary"><!-- i18n-ignore -->ē</span><!-- i18n-ignore -->Design</span>
         </RouterLink>
 
-        <nav class="flex shrink-0 items-center rounded-lg border bg-muted/40 p-0.5" :aria-label="t('topbar.workspace')">
+        <nav class="relative flex shrink-0 items-center rounded-lg border bg-muted/40 p-0.5" :aria-label="t('topbar.workspace')">
+          <div
+            v-if="indicatorReady"
+            class="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-background shadow-xs transition-[transform,width] duration-200 ease-out"
+            :style="indicatorStyle"
+            aria-hidden="true"
+          />
           <RouterLink v-slot="{ href, navigate, isActive }" to="/" custom>
             <a
+              ref="dashboardLinkEl"
               :href="href"
               :class="[navItemClass, isActive ? activeNavClass : inactiveNavClass]"
               :aria-label="t('topbar.dashboard')"
@@ -67,6 +101,7 @@ const inactiveNavClass = 'text-muted-foreground hover:bg-background/70 hover:tex
           </RouterLink>
           <RouterLink v-slot="{ href, navigate, isActive }" :to="props.viewerTo" custom>
             <a
+              ref="viewerLinkEl"
               :href="href"
               :class="[navItemClass, isActive ? activeNavClass : inactiveNavClass]"
               :aria-label="t('topbar.viewer')"

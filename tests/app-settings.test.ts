@@ -27,3 +27,14 @@ test("portableMode persists through save + reload (default off)", () => {
   const onDisk = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
   expect(onDisk.portableMode).toBe(true);
 });
+
+test("hideTrayIcon persists through save + reload (default off)", () => {
+  const settings = loadAppSettings();
+  expect(settings.hideTrayIcon).not.toBe(true);
+
+  settings.hideTrayIcon = true;
+  saveAppSettings(settings);
+
+  const onDisk = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+  expect(onDisk.hideTrayIcon).toBe(true);
+});

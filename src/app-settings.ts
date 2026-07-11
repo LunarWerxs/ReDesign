@@ -27,6 +27,13 @@ export interface AppSettings {
    * src/portable-window.mjs, POST /api/portable-window). Absent/false = OFF (a normal tab).
    */
   portableMode?: boolean;
+  /**
+   * Hide the tray notification-area icon (see misc/ReDesign-Tray.ps1). The NotifyIcon object is
+   * always created (Quit/menu/watchdog hang off it); only its .Visible is gated. Absent/false =
+   * OFF (icon shown). The daemon keeps running either way; re-enable here or relaunch the
+   * shortcut to get the UI back.
+   */
+  hideTrayIcon?: boolean;
 }
 
 let cached: AppSettings | null = null;

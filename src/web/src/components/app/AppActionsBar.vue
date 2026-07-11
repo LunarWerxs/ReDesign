@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import {
-  DownloadCloudIcon,
   HistoryIcon,
   KeyRoundIcon,
-  Loader2Icon,
   MonitorIcon,
   MoonIcon,
   PowerIcon,
@@ -26,7 +24,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useControlStore } from '@/stores/control';
 import { useTheme, type ThemeMode } from '@/lib/theme';
-import { toast } from 'vue-sonner';
 import { t } from '@/i18n';
 
 // Refresh and API keys need parent context (route-specific refresh; the key
@@ -64,14 +61,6 @@ const nextThemeLabel = computed(() => {
   const next = themeOrder[(themeOrder.indexOf(mode.value) + 1) % themeOrder.length];
   return labelForMode(next ?? 'system');
 });
-const updateTooltipTitle = computed(() => t('actions.checkUpdates'));
-const updateTooltipDescription = computed(() => {
-  if (controlStore.updateApplying) return t('actions.updateTooltipApplying');
-  if (controlStore.updateChecking) return t('actions.updateTooltipChecking');
-  if (controlStore.updateStatus?.updateAvailable) return t('actions.updateTooltipAvailable');
-  return t('actions.updateTooltipIdle');
-});
-
 function cycleTheme() {
   const next = themeOrder[(themeOrder.indexOf(mode.value) + 1) % themeOrder.length];
   if (next) setTheme(next);
@@ -87,33 +76,6 @@ function onKeys() {
 function onRecentRuns() {
   emit('close');
   emit('recent-runs');
-}
-async function onUpdate() {
-  if (controlStore.updateChecking || controlStore.updateApplying) return;
-  try {
-    let status = controlStore.updateStatus;
-    if (!status) status = await controlStore.checkForUpdate();
-    if (!status?.ok) {
-      toast.warning(t('actions.updateCheckFailed'), { description: status?.reason || undefined });
-      return;
-    }
-    if (!status?.updateAvailable) {
-      toast(t('actions.updateNone'));
-      return;
-    }
-    if (!status.canApply) {
-      toast.warning(t('actions.updateBlocked'), { description: status.reason || undefined });
-      return;
-    }
-    const result = await controlStore.applyUpdate();
-    toast.success(t('actions.updateApplied'), {
-      description: result.restartRequired ? t('actions.updateRestart') : undefined,
-    });
-  } catch (e) {
-    toast.error(t('actions.updateFailed'), { description: e instanceof Error ? e.message : undefined });
-  } finally {
-    emit('close');
-  }
 }
 function onCancel() {
   controlStore.cancelRun();
@@ -159,21 +121,6 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
     <button v-if="!props.hideKeys" type="button" :class="menuItemClass" :aria-label="t('actions.apiKeys')" @click="onKeys">
       <KeyRoundIcon :class="menuIconClass" />
       <span class="min-w-0 truncate">{{ t('actions.apiKeys') }}</span>
-    </button>
-
-    <button
-      type="button"
-      :class="menuItemClass"
-      :aria-label="updateTooltipTitle"
-      :disabled="controlStore.updateChecking || controlStore.updateApplying"
-      @click="onUpdate"
-    >
-      <Loader2Icon
-        v-if="controlStore.updateChecking || controlStore.updateApplying"
-        :class="[menuIconClass, 'animate-spin']"
-      />
-      <DownloadCloudIcon v-else :class="menuIconClass" />
-      <span class="min-w-0 truncate">{{ updateTooltipTitle }}</span>
     </button>
 
     <button v-if="!props.hideTheme" type="button" :class="menuItemClass" :aria-label="t('actions.theme', { mode: themeLabel })" @click="cycleTheme">
@@ -226,24 +173,6 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
       <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.apiKeys') }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.apiKeysDescription') }}</span>
-      </TooltipContent>
-    </Tooltip>
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          :aria-label="updateTooltipTitle"
-          :disabled="controlStore.updateChecking || controlStore.updateApplying"
-          @click="onUpdate"
-        >
-          <Loader2Icon v-if="controlStore.updateChecking || controlStore.updateApplying" class="size-4 animate-spin" />
-          <DownloadCloudIcon v-else class="size-4" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[230px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ updateTooltipTitle }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ updateTooltipDescription }}</span>
       </TooltipContent>
     </Tooltip>
     <Tooltip>

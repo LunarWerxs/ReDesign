@@ -119,9 +119,13 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
     boundPort = port;
   }
 
-  // extra: publish portableMode so the tray/start.cmd launcher knows, on a cold start (before it
-  // can ask the daemon anything), whether to open an app window instead of a normal tab.
-  writeInstanceInfo(boundPort, { portableMode: loadAppSettings().portableMode === true });
+  // extra: publish portableMode + hideTrayIcon so the tray/start.cmd launcher knows, on a cold
+  // start (before it can ask the daemon anything), whether to open an app window instead of a
+  // normal tab, and whether to keep the notification-area icon hidden.
+  writeInstanceInfo(boundPort, {
+    portableMode: loadAppSettings().portableMode === true,
+    hideTrayIcon: loadAppSettings().hideTrayIcon === true,
+  });
   // Clear any stale "full shutdown" sentinel from a previous (possibly hard-killed) run so a
   // leftover can't make a freshly-launched tray quit the instant it starts; only a genuine
   // in-session UI shutdown (POST /api/shutdown) writes a fresh one. See src/instance.ts.

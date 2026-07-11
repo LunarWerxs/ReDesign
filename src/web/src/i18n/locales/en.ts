@@ -42,11 +42,11 @@ export default {
     shutdownConfirmBody: 'The server will stop and this page will lose its connection.',
     shutdownConfirm: 'Shutdown',
     // Self-update, key names shared with RepoYeti / DevWebUI's actions.* catalog
-    checkUpdates: 'Check for updates',
+    checkUpdates: 'Updates',
     updateTooltipApplying: 'Installing the latest RēDesign update.',
     updateTooltipChecking: 'Looking for a newer local build.',
     updateTooltipAvailable: 'Download and apply the available local update.',
-    updateTooltipIdle: 'Check whether a newer RēDesign build is ready.',
+    updateTooltipIdle: 'Check for updates now, or turn on auto-update below to install new builds automatically.',
     updateCheckFailed: 'Could not check for updates',
     updateNone: 'RēDesign is up to date',
     updateBlocked: 'Update cannot be applied yet',
@@ -457,9 +457,9 @@ export default {
     pushFailed: 'Sync push failed',
   },
   autoUpdate: {
-    label: 'Auto-update',
+    label: 'Updates',
     enableLabel: 'Silently update & restart',
-    hint: 'Checks for updates on a schedule and applies them automatically, only when the working tree is clean. Restarts the server to load the new code.',
+    hint: 'Check for a newer local build on demand, or let RēDesign check on a schedule and apply updates automatically (only when the working tree is clean). Applying restarts the server to load the new code.',
     toggleFailed: 'Could not update auto-update setting',
   },
   portableMode: {
@@ -469,6 +469,11 @@ export default {
     opened: 'Opened in portable window - you can close this tab',
     noBrowser: 'No Edge or Chrome found for a portable window',
     openFailed: 'Could not open a portable window',
+  },
+  hideTrayIcon: {
+    label: 'Hide tray icon',
+    hint: 'Hides the notification-area icon. The app keeps running in the background - launching the shortcut again reopens the UI, and you can re-enable the icon right here in Settings.',
+    toggleFailed: 'Could not update hide tray icon setting',
   },
   tooltipPreference: {
     label: 'Show tooltips',

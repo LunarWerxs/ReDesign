@@ -28,6 +28,7 @@ function snapshot() {
     autoUpdate: autoUpdateEnabled(),
     autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
     portableMode: loadAppSettings().portableMode === true,
+    hideTrayIcon: loadAppSettings().hideTrayIcon === true,
   };
 }
 
@@ -55,6 +56,13 @@ export function register(app: Hono, _deps: Deps): void {
       // Keep runtime.json current so the tray/start.cmd launcher picks up the change on its
       // next open, without waiting for a daemon restart (see src/instance.ts / instance-pointer.mjs).
       updateInstanceInfo({ portableMode: b.portableMode });
+    }
+    if (typeof b.hideTrayIcon === "boolean") {
+      settings.hideTrayIcon = b.hideTrayIcon;
+      saveAppSettings(settings);
+      // Keep runtime.json current so the tray host's live-sync timer (misc/ReDesign-Tray.ps1)
+      // picks up the change within a few seconds, without restarting anything.
+      updateInstanceInfo({ hideTrayIcon: b.hideTrayIcon });
     }
 
     return c.json({ ok: true, ...snapshot() });
