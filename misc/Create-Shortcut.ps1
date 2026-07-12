@@ -1,7 +1,4 @@
-# Creates / refreshes the "RēDesign" shortcut in the project root. THIN ADAPTER over the
-# shared LunarWerx shortcut engine (misc/New-TrayShortcut.ps1, kit-synced from
-# lunarwerx-ui/src/tray-host/New-TrayShortcut.ps1 - DO NOT EDIT THAT FILE HERE; edit the kit
-# copy and run `node sync.mjs`). This file owns only what's genuinely ReDesign-specific: the
+# Creates / refreshes the "RēDesign" shortcut in the project root. Thin adapter over the shared shortcut engine (misc/New-TrayShortcut.ps1). This file owns only what's genuinely ReDesign-specific: the
 # display name, icon, description, and the legacy-.lnk cleanup list. Re-run this if you move
 # or rename the folder.
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition   # ...\misc

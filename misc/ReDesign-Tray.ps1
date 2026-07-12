@@ -1,6 +1,4 @@
-﻿# RēDesign system-tray host (Windows). THIN ADAPTER over the shared LunarWerx tray-host
-# engine (misc/Tray-Host.ps1, kit-synced from lunarwerx-ui/src/tray-host/Tray-Host.ps1 —
-# DO NOT EDIT THAT FILE HERE; edit the kit copy and run `node sync.mjs`). This file owns
+﻿# RēDesign system-tray host (Windows). Thin adapter over the shared Tray-Host engine (misc/Tray-Host.ps1). This file owns
 # only what's genuinely ReDesign-specific: it builds a $TrayConfig hashtable (see the
 # engine's header comment for the full per-key contract), dot-sources the engine, then
 # hands off to Invoke-TrayHostSelfTest / Start-TrayHost. Launch it via Reimagine.vbs
@@ -8,7 +6,7 @@
 # is one level up.
 #
 # ReDesign's divergences from the shared engine defaults (see the engine header for the
-# full documented list across all four apps):
+# full documented list):
 #   - ServiceName 'redesign': health check requires body.ok AND body.service=='redesign'.
 #   - Shutdown: force-kill only (no HTTP token) — ShutdownTokenEnvVar/ShutdownHeaderPrefix
 #     are left unset, so the engine takes the port-sweep branch.
