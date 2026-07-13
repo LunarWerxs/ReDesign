@@ -162,7 +162,12 @@ function redactSecrets(str?: string | null): string | null | undefined {
     .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, "sk-ant-...REDACTED")
     .replace(/sk-proj-[A-Za-z0-9_-]{8,}/g, "sk-proj-...REDACTED")
     .replace(/AIza[A-Za-z0-9_-]{20,}/g, "AIza...REDACTED")
-    .replace(/sk-[A-Za-z0-9]{20,}/g, "sk-...REDACTED");
+    .replace(/xai-[A-Za-z0-9_-]{16,}/g, "xai-...REDACTED")
+    .replace(/gsk_[A-Za-z0-9]{20,}/g, "gsk_...REDACTED")
+    // Generic sk- catch-all (OpenAI legacy, DeepSeek, Qwen, OpenRouter sk-or-v1-),
+    // last so the more specific prefixes above win. Includes -/_ so hyphenated
+    // keys like sk-or-v1-... are fully masked.
+    .replace(/sk-[A-Za-z0-9_-]{16,}/g, "sk-...REDACTED");
 }
 
 function ensureDir(dir: string): string {

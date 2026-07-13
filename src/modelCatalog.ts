@@ -21,6 +21,9 @@ interface CatalogModel {
   id: string;
   label: string;
   source: "provider" | "catalog";
+  // Whether the model accepts image input, when known (from models.dev metadata).
+  // Undefined when we can't tell; callers should fall back to a sensible default.
+  vision?: boolean;
 }
 
 const CACHE_TTL_MS = 60 * 60 * 1000; // ~1 hour
@@ -143,6 +146,34 @@ async function listLiveForProvider(provider: string, baseUrl: string, apiKey: st
   return listOpenAICompatible(baseUrl, apiKey);
 }
 
+/**
+ * Does `apiKey` authenticate against this provider/baseUrl? Reuses the provider's
+ * free list-models GET (same call getAvailableModels uses): a resolved response
+ * means the key was accepted, a throw (401/403/network) means it was not. Used by
+ * keyDetect.ts to disambiguate a pasted key whose prefix is shared across services
+ * (a bare `sk-` could be OpenAI, DeepSeek, Qwen or Moonshot). Read-only, never a
+ * generation call. NOTE: only sound for services whose list-models endpoint
+ * REQUIRES auth; callers must not probe endpoints that return a public catalog
+ * without a key (e.g. OpenRouter), or every key would false-positive.
+ */
+async function probeKey(provider: string, baseUrl: string, apiKey: string, timeoutMs = 8000): Promise<boolean> {
+  if (!apiKey || !baseUrl) return false;
+  try {
+    if (provider === "anthropic") {
+      await fetchJSON(`${baseUrl.replace(/\/$/, "")}/models?limit=1`, {
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      }, timeoutMs);
+    } else if (provider === "gemini" || provider === "google") {
+      await fetchJSON(`${baseUrl.replace(/\/$/, "")}/models?key=${encodeURIComponent(apiKey)}&pageSize=1`, undefined, timeoutMs);
+    } else {
+      await fetchJSON(`${baseUrl.replace(/\/$/, "")}/models`, { headers: { authorization: `Bearer ${apiKey}` } }, timeoutMs);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // models.dev fallback catalog (no key needed)
 // ---------------------------------------------------------------------------
@@ -151,6 +182,13 @@ const MODELS_DEV_URL = "https://models.dev/api.json";
 interface ModelsDevModel {
   id?: string;
   name?: string;
+  modalities?: { input?: string[]; output?: string[] };
+}
+
+// True if models.dev reports image among a model's accepted input modalities.
+function modelsDevVision(info: ModelsDevModel): boolean | undefined {
+  const input = info.modalities?.input;
+  return Array.isArray(input) ? input.includes("image") : undefined;
 }
 interface ModelsDevProvider {
   models?: Record<string, ModelsDevModel>;
@@ -188,10 +226,31 @@ async function listFromModelsDev(provider: string): Promise<CatalogModel[]> {
       const id = info.id || modelId;
       if (!id || seen.has(id) || isExcluded(id)) continue;
       seen.add(id);
-      out.push({ id, label: info.name || id, source: "catalog" });
+      out.push({ id, label: info.name || id, source: "catalog", vision: modelsDevVision(info) });
     }
   }
   return out;
+}
+
+// Enrich a live provider listing with vision info from the models.dev catalog
+// (the live list-models endpoints don't report modality). Opportunistic and
+// non-fetching: it only uses an already-cached models.dev blob so it never adds
+// a network round-trip to a browse. Matches by exact id; leaves vision undefined
+// when models.dev isn't cached yet or has no entry for the id.
+function enrichVision(provider: string, models: CatalogModel[]): void {
+  const data = modelsDevCache && Date.now() - modelsDevCache.at <= CACHE_TTL_MS ? modelsDevCache.data : null;
+  if (!data) return;
+  const providerKeys = MODELS_DEV_PROVIDER_KEYS[provider] || [provider];
+  const vision = new Map<string, boolean>();
+  for (const key of providerKeys) {
+    const md = data[key]?.models;
+    if (!md) continue;
+    for (const [modelId, info] of Object.entries(md)) {
+      const v = modelsDevVision(info);
+      if (v !== undefined) vision.set(info.id || modelId, v);
+    }
+  }
+  for (const m of models) if (m.vision === undefined && vision.has(m.id)) m.vision = vision.get(m.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +284,7 @@ export async function getAvailableModels(opts: {
     try {
       const models = await listLiveForProvider(provider, baseUrl, apiKey);
       if (models.length) {
+        enrichVision(provider, models);
         setCached(key, models);
         return { models, source: "provider" };
       }
@@ -245,6 +305,8 @@ export async function getAvailableModels(opts: {
     return { models: [], source: "catalog" };
   }
 }
+
+export { probeKey };
 
 /** Test-only: clear both the per-(provider,baseUrl,key) cache and the shared
  * models.dev blob cache so each test starts from a clean slate. Not used by

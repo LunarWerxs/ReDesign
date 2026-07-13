@@ -1,44 +1,69 @@
 <script setup lang="ts">
-import { ChevronDownIcon } from '@lucide/vue';
-import { toast } from 'vue-sonner';
+import { computed, ref } from 'vue';
+import { ChevronDownIcon, PlusIcon, SearchIcon, StarIcon } from '@lucide/vue';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Input } from '@/components/ui/input';
+import ModelRow from './ModelRow.vue';
 import { useControlStore } from '@/stores/control';
+import { providerLabel } from '@/lib/providers';
 import { t } from '@/i18n';
 import type { Model } from '@/types';
 
 const store = useControlStore();
+const emit = defineEmits<{ browse: [] }>();
 
-function isRunnable(m: Model) {
-  return m.enabled && Number(m.keys) > 0;
+const pickerOpen = ref(false);
+const search = ref('');
+const showAll = ref(false);
+
+function openBrowse() {
+  // Hand off to the browse dialog (mounted by the parent); close this popover first.
+  pickerOpen.value = false;
+  emit('browse');
 }
 
-function onPick(m: Model) {
-  if (!isRunnable(m)) {
-    toast(
-      !m.enabled
-        ? t('modelSelect.disabledToast', { label: m.label })
-        : t('modelSelect.missingKeysToast', { label: m.label }),
-    );
-    return;
+const q = computed(() => search.value.trim().toLowerCase());
+
+function matches(m: Model) {
+  if (!q.value) return true;
+  return (
+    m.label.toLowerCase().includes(q.value) ||
+    (m.apiModel || '').toLowerCase().includes(q.value) ||
+    (m.provider || '').toLowerCase().includes(q.value) ||
+    providerLabel(m.provider).toLowerCase().includes(q.value)
+  );
+}
+
+const filtered = computed(() => store.models.filter(matches));
+const starred = computed(() => filtered.value.filter((m) => m.starred));
+const rest = computed(() => filtered.value.filter((m) => !m.starred));
+
+// Group the non-starred models by provider (VS Code Copilot-style sections).
+const restGroups = computed(() => {
+  const groups = new Map<string, Model[]>();
+  for (const m of rest.value) {
+    const key = m.provider || 'other';
+    const arr = groups.get(key);
+    if (arr) arr.push(m);
+    else groups.set(key, [m]);
   }
-  store.toggleModel(m.id);
-}
+  return [...groups.entries()].map(([provider, models]) => ({
+    provider,
+    label: providerLabel(provider) || t('modelSelect.allModels'),
+    models,
+  }));
+});
 
-function onRowKeydown(e: KeyboardEvent, m: Model) {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  e.preventDefault();
-  onPick(m);
-}
+// A search forces the "All models" drawer open so matches aren't hidden behind it.
+const restOpen = computed(() => showAll.value || !!q.value);
+const anyStarredConfigured = computed(() => store.models.some((m) => m.starred));
 </script>
 
 <template>
-  <Popover>
+  <Popover v-model:open="pickerOpen">
     <PopoverTrigger as-child>
       <Button variant="outline" class="min-w-[150px] justify-between" :title="t('modelSelect.chooseModelsTitle')">
-
         <span>{{ t('modelSelect.models') }}</span>
         <span class="ml-auto text-muted-foreground"
           >{{ store.selModels.length }}/{{ store.runnableModelIds.length }}</span
@@ -47,39 +72,61 @@ function onRowKeydown(e: KeyboardEvent, m: Model) {
       </Button>
     </PopoverTrigger>
     <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))] p-2">
-      <div class="flex items-center gap-2 px-1 pb-2">
+      <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('modelSelect.models') }}</strong>
         <div class="ml-auto flex gap-1.5">
           <Button variant="ghost" size="xs" @click="store.selectAll('models')">{{ t('modelSelect.all') }}</Button>
           <Button variant="ghost" size="xs" @click="store.selectNone('models')">{{ t('modelSelect.none') }}</Button>
         </div>
       </div>
-      <div class="grid max-h-[min(50vh,360px)] gap-1.5 overflow-y-auto pr-1">
-          <Tooltip v-for="m in store.models" :key="m.id" :disabled="isRunnable(m)">
-            <TooltipTrigger as-child>
-              <div
-                role="button"
-                tabindex="0"
-                class="flex items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors outline-none"
-                :class="[
-                  store.selModels.includes(m.id) ? 'border-primary bg-accent' : 'hover:border-muted-foreground/40',
-                  !isRunnable(m) ? 'cursor-not-allowed opacity-55' : '',
-                ]"
-                @click="onPick(m)"
-                @keydown="onRowKeydown($event, m)"
-              >
-                <Checkbox class="pointer-events-none" :model-value="store.selModels.includes(m.id)" tabindex="-1" />
-                <span class="size-2.5 shrink-0 rounded-full" :style="{ background: m.color || '#888' }" />
-                <span class="flex-1">
-                  <span class="font-semibold">{{ m.label }}</span>
-                  <span class="text-xs text-muted-foreground">
-                    · {{ m.vision ? '' : `${t('modelSelect.textOnly')} · ` }}{{ t('modelSelect.keysCount', { count: m.keys }, m.keys) }}{{ m.keys ? '' : ' ⚠' }}{{ m.enabled ? '' : ` · ${t('modelSelect.disabled')}` }}
-                  </span>
-                </span>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>{{ !m.enabled ? t('modelSelect.disabledInConfig') : t('modelSelect.noKeysAvailable') }}</TooltipContent>
-          </Tooltip>
+
+      <div class="px-1 pb-1.5">
+        <div class="relative">
+          <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="search" :placeholder="t('modelSelect.searchPlaceholder')" class="h-8 pl-8" />
+        </div>
+      </div>
+
+      <div class="grid max-h-[min(50vh,380px)] gap-0.5 overflow-y-auto pr-1">
+        <p v-if="!filtered.length" class="px-1 py-3 text-center text-xs text-muted-foreground">
+          {{ t('modelSelect.noMatches') }}
+        </p>
+
+        <!-- Starred tier -->
+        <template v-if="starred.length || (anyStarredConfigured && !q)">
+          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <StarIcon class="size-3 fill-current text-amber-400" />
+            {{ t('modelSelect.starred') }}
+          </div>
+          <ModelRow v-for="m in starred" :key="m.id" :model="m" />
+          <p v-if="!starred.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('modelSelect.starredEmpty') }}</p>
+        </template>
+
+        <!-- All models drawer (grouped by provider) -->
+        <template v-if="rest.length">
+          <button
+            type="button"
+            class="mt-0.5 flex items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
+            @click="showAll = !showAll"
+          >
+            <ChevronDownIcon class="size-3.5 transition-transform" :class="restOpen ? 'rotate-0' : '-rotate-90'" />
+            {{ t('modelSelect.allModels') }}
+            <span class="text-muted-foreground/70">({{ rest.length }})</span>
+          </button>
+          <div v-show="restOpen" class="grid gap-0.5">
+            <template v-for="g in restGroups" :key="g.provider">
+              <div class="px-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{{ g.label }}</div>
+              <ModelRow v-for="m in g.models" :key="m.id" :model="m" />
+            </template>
+          </div>
+        </template>
+      </div>
+
+      <div class="mt-1 border-t pt-1">
+        <Button variant="ghost" size="sm" class="w-full justify-start text-muted-foreground" @click="openBrowse">
+          <PlusIcon class="size-3.5" />
+          {{ t('browseModels.trigger') }}
+        </Button>
       </div>
     </PopoverContent>
   </Popover>

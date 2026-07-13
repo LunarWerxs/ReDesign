@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { ref, useTemplateRef } from 'vue';
+import { computed, ref, useTemplateRef } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import {
   ChevronDownIcon,
   Loader2Icon,
   MoreHorizontalIcon,
-  PencilIcon,
   PlusIcon,
   RotateCcwIcon,
+  SearchIcon,
+  StarIcon,
   Trash2Icon,
   WandIcon,
 } from '@lucide/vue';
@@ -27,13 +28,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import PromptRow from './PromptRow.vue';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Prompt } from '@/types';
@@ -45,9 +46,33 @@ const actionsOpen = ref(false);
 const actionsMenuRef = useTemplateRef<HTMLElement>('actionsMenuRef');
 const saving = ref(false);
 
+const search = ref('');
+// Prompts are few and ungrouped, so the "All prompts" drawer starts open (unlike
+// the models picker, where the many-provider list collapses under the starred tier).
+const showAll = ref(true);
+
+const q = computed(() => search.value.trim().toLowerCase());
+
+function matches(p: Prompt) {
+  if (!q.value) return true;
+  return (
+    p.label.toLowerCase().includes(q.value) ||
+    (p.description || '').toLowerCase().includes(q.value) ||
+    (p.user || '').toLowerCase().includes(q.value)
+  );
+}
+
+const filtered = computed(() => store.prompts.filter(matches));
+const starred = computed(() => filtered.value.filter((p) => p.starred));
+const rest = computed(() => filtered.value.filter((p) => !p.starred));
+const anyStarredConfigured = computed(() => store.prompts.some((p) => p.starred));
+// A search forces the drawer open so matches aren't hidden behind it.
+const restOpen = computed(() => showAll.value || !!q.value);
+
 onClickOutside(actionsMenuRef, () => {
   actionsOpen.value = false;
 });
+
 const form = ref({
   id: '',
   label: '',
@@ -69,12 +94,6 @@ function openEdit(prompt: Prompt) {
     user: prompt.user || '',
   };
   dialogOpen.value = true;
-}
-
-function onRowKeydown(e: KeyboardEvent, id: string) {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  e.preventDefault();
-  store.togglePrompt(id);
 }
 
 async function save() {
@@ -100,6 +119,20 @@ function deletePrompt(prompt: Prompt) {
   deletePromptConfirmOpen.value = true;
 }
 
+// Delete now lives inside the edit dialog (one fewer icon per row). Close the
+// editor, then hand off to the same confirm flow the row trash used to trigger.
+function deleteFromDialog() {
+  if (!form.value.id) return;
+  const prompt: Prompt = {
+    id: form.value.id,
+    label: form.value.label,
+    description: form.value.description,
+    user: form.value.user,
+  };
+  dialogOpen.value = false;
+  deletePrompt(prompt);
+}
+
 async function confirmDeletePrompt() {
   const prompt = pendingDeletePrompt.value;
   if (!prompt) return;
@@ -118,16 +151,6 @@ async function confirmRestoreDefaults() {
   await store.restoreDefaultPrompts();
 }
 
-function selectAll() {
-  actionsOpen.value = false;
-  store.selectAll('prompts');
-}
-
-function selectNone() {
-  actionsOpen.value = false;
-  store.selectNone('prompts');
-}
-
 function useCustom() {
   actionsOpen.value = false;
   popoverOpen.value = false;
@@ -140,7 +163,6 @@ function useCustom() {
   <Popover v-model:open="popoverOpen">
     <PopoverTrigger as-child>
       <Button variant="outline" class="min-w-[150px] justify-between" :title="t('promptSelect.choosePromptsTitle')">
-
         <span>{{ t('promptSelect.prompts') }}</span>
         <span class="ml-auto text-muted-foreground"
           >{{ store.selPrompts.length }}/{{ store.prompts.length }}</span
@@ -148,10 +170,12 @@ function useCustom() {
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent align="start" :collision-padding="12" class="w-[min(680px,calc(100vw-2rem))] p-2">
-      <div class="flex items-center gap-2 px-1 pb-2">
+    <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))] p-2">
+      <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('promptSelect.prompts') }}</strong>
-        <div class="relative ml-auto flex gap-1.5">
+        <div class="ml-auto flex items-center gap-1.5">
+          <Button variant="ghost" size="xs" @click="store.selectAll('prompts')">{{ t('promptSelect.all') }}</Button>
+          <Button variant="ghost" size="xs" @click="store.selectNone('prompts')">{{ t('promptSelect.none') }}</Button>
           <Tooltip>
             <TooltipTrigger as-child>
               <Button variant="ghost" size="icon-xs" :aria-label="t('promptSelect.addPrompt')" @click="openAdd">
@@ -178,9 +202,6 @@ function useCustom() {
               v-if="actionsOpen"
               class="cn-menu-translucent absolute right-0 top-full z-50 mt-1 grid w-44 gap-1 rounded-md bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10"
             >
-              <button type="button" class="cursor-pointer select-none rounded-sm px-2 py-1.5 text-left hover:bg-accent" @click="selectAll">{{ t('promptSelect.all') }}</button>
-              <button type="button" class="cursor-pointer select-none rounded-sm px-2 py-1.5 text-left hover:bg-accent" @click="selectNone">{{ t('promptSelect.none') }}</button>
-              <div class="-mx-1 my-1 h-px bg-border" />
               <button type="button" class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-accent" @click="restoreDefaults">
                 <RotateCcwIcon class="size-4" />
                 {{ t('promptSelect.restoreDefaults') }}
@@ -194,51 +215,44 @@ function useCustom() {
           </div>
         </div>
       </div>
-      <div class="grid max-h-[min(50vh,360px)] gap-1.5 overflow-y-auto pr-1">
-          <div
-            v-for="p in store.prompts"
-            :key="p.id"
-            role="button"
-            tabindex="0"
-            class="group/prompt flex cursor-pointer select-none items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors outline-none focus-visible:border-primary"
-            :class="store.selPrompts.includes(p.id) ? 'border-primary bg-accent' : 'hover:border-muted-foreground/40'"
-            @click="store.togglePrompt(p.id)"
-            @keydown="onRowKeydown($event, p.id)"
-          >
-            <Checkbox class="pointer-events-none" :model-value="store.selPrompts.includes(p.id)" tabindex="-1" />
-            <span class="flex-1">
-              <span class="font-semibold">{{ p.label }}</span>
-              <span v-if="p.description" class="text-xs text-muted-foreground"> · {{ p.description }}</span>
-            </span>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  :aria-label="t('promptSelect.editPrompt')"
-                  class="opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
-                  @click.stop="openEdit(p)"
-                >
-                  <PencilIcon class="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ t('promptSelect.editPrompt') }}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  :aria-label="t('promptSelect.deletePrompt')"
-                  class="text-destructive opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
-                  @click.stop="deletePrompt(p)"
-                >
-                  <Trash2Icon class="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ t('promptSelect.deletePrompt') }}</TooltipContent>
-            </Tooltip>
+
+      <div class="px-1 pb-1.5">
+        <div class="relative">
+          <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="search" :placeholder="t('promptSelect.searchPlaceholder')" class="h-8 pl-8" />
+        </div>
+      </div>
+
+      <div class="grid max-h-[min(50vh,380px)] grid-cols-1 gap-0.5 overflow-y-auto overflow-x-hidden pr-1">
+        <p v-if="!filtered.length" class="px-1 py-3 text-center text-xs text-muted-foreground">
+          {{ t('promptSelect.noMatches') }}
+        </p>
+
+        <!-- Starred tier -->
+        <template v-if="starred.length || (anyStarredConfigured && !q)">
+          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <StarIcon class="size-3 fill-current text-amber-400" />
+            {{ t('promptSelect.starred') }}
           </div>
+          <PromptRow v-for="p in starred" :key="p.id" :prompt="p" @edit="openEdit" />
+          <p v-if="!starred.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('promptSelect.starredEmpty') }}</p>
+        </template>
+
+        <!-- All prompts drawer -->
+        <template v-if="rest.length">
+          <button
+            type="button"
+            class="mt-0.5 flex items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
+            @click="showAll = !showAll"
+          >
+            <ChevronDownIcon class="size-3.5 transition-transform" :class="restOpen ? 'rotate-0' : '-rotate-90'" />
+            {{ t('promptSelect.allPrompts') }}
+            <span class="text-muted-foreground/70">({{ rest.length }})</span>
+          </button>
+          <div v-show="restOpen" class="grid grid-cols-1 gap-0.5">
+            <PromptRow v-for="p in rest" :key="p.id" :prompt="p" @edit="openEdit" />
+          </div>
+        </template>
       </div>
     </PopoverContent>
   </Popover>
@@ -276,7 +290,17 @@ function useCustom() {
             required
           />
         </div>
-        <div class="flex justify-end gap-2">
+        <div class="flex items-center justify-end gap-2">
+          <Button
+            v-if="form.id"
+            type="button"
+            variant="destructive"
+            class="mr-auto"
+            @click="deleteFromDialog"
+          >
+            <Trash2Icon class="size-4" />
+            {{ t('promptSelect.deletePrompt') }}
+          </Button>
           <Button type="button" variant="ghost" @click="dialogOpen = false">{{ t('promptSelect.cancel') }}</Button>
           <Button type="submit" :disabled="saving">
             <Loader2Icon v-if="saving" class="size-4 animate-spin" />

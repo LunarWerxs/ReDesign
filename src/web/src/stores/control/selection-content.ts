@@ -2,17 +2,44 @@ import { toast } from 'vue-sonner';
 import { api } from '@/lib/api';
 import { t } from '@/i18n';
 import { filesToUploadImages, uploadableImageFiles } from '@/composables/useImageUpload';
+import { readTextAttachment, textAttachableFiles } from '@/composables/useTextAttachments';
 import { toggleIn } from '@/lib/array';
-import type { Prompt } from '@/types';
+import type { BrandAttachment, Prompt } from '@/types';
 import { errMessage } from './state';
 import type { ControlState } from './state';
+
+let brandAttachmentSeq = 0;
+function nextBrandAttachmentId(): string {
+  brandAttachmentSeq += 1;
+  return `brand-attachment-${Date.now()}-${brandAttachmentSeq}`;
+}
 
 export function createSelectionContentActions(state: ControlState) {
   function toggleInput(id: string) {
     state.selInputs.value = toggleIn(state.selInputs.value, id);
   }
   function toggleModel(id: string) {
-    state.selModels.value = toggleIn(state.selModels.value, id);
+    const next = toggleIn(state.selModels.value, id);
+    state.selModels.value = next;
+    // Drop a deselected model's quantity so it can't linger in the payload/estimate.
+    if (!next.includes(id) && state.modelQty.value[id] != null) {
+      const { [id]: _dropped, ...rest } = state.modelQty.value;
+      state.modelQty.value = rest;
+    }
+  }
+
+  // Per-model copy count (1..10). Store only values > 1; a quantity of 1 is the
+  // default and is represented by the model's absence from the map.
+  function setModelQty(id: string, value: unknown) {
+    const q = Math.max(1, Math.min(10, Math.round(Number(value) || 1)));
+    if (q <= 1) {
+      if (state.modelQty.value[id] != null) {
+        const { [id]: _dropped, ...rest } = state.modelQty.value;
+        state.modelQty.value = rest;
+      }
+      return;
+    }
+    state.modelQty.value = { ...state.modelQty.value, [id]: q };
   }
   function togglePrompt(id: string) {
     state.selPrompts.value = toggleIn(state.selPrompts.value, id);
@@ -28,8 +55,10 @@ export function createSelectionContentActions(state: ControlState) {
   }
   function selectNone(kind: 'inputs' | 'models' | 'prompts') {
     if (kind === 'inputs') state.selInputs.value = [];
-    else if (kind === 'models') state.selModels.value = [];
-    else state.selPrompts.value = [];
+    else if (kind === 'models') {
+      state.selModels.value = [];
+      state.modelQty.value = {};
+    } else state.selPrompts.value = [];
   }
 
   function reconcilePromptSelection(nextPrompts: Prompt[]) {
@@ -60,6 +89,59 @@ export function createSelectionContentActions(state: ControlState) {
     } catch (e) {
       toast.error(t('content.uploadFailed'), { description: errMessage(e) });
     }
+  }
+
+  async function uploadReferences(files: FileList | File[] | null, source = 'reference') {
+    const accepted = uploadableImageFiles(files);
+    if (!accepted.length) {
+      toast(t('content.dropHint'));
+      return;
+    }
+    try {
+      const images = await filesToUploadImages(accepted, source);
+      const r = await api.uploadReferences(images);
+      state.references.value = r.references || [];
+      const ids = new Set(state.references.value.map((it) => it.id));
+      const addedIds = (r.addedIds || []).filter((id) => ids.has(id));
+      if (addedIds.length) {
+        state.selReference.value = Array.from(new Set([...state.selReference.value, ...addedIds]));
+      }
+      const n = (r.saved || []).length || accepted.length;
+      toast.success(t('content.added', { count: n }, n));
+    } catch (e) {
+      toast.error(t('content.uploadFailed'), { description: errMessage(e) });
+    }
+  }
+
+  async function addBrandAttachments(files: FileList | File[] | null) {
+    const accepted = textAttachableFiles(files);
+    if (!accepted.length) {
+      toast(t('options.brandAttachmentsDropHint'));
+      return;
+    }
+    try {
+      const read = await Promise.all(accepted.map((file) => readTextAttachment(file)));
+      const added: BrandAttachment[] = read.map((r) => ({ id: nextBrandAttachmentId(), ...r }));
+      state.brandAttachments.value = [...state.brandAttachments.value, ...added];
+      if (added.some((a) => a.truncated)) toast(t('options.brandAttachmentTruncated'));
+      toast.success(t('options.brandAttachmentsAdded', { count: added.length }, added.length));
+    } catch (e) {
+      toast.error(t('content.uploadFailed'), { description: errMessage(e) });
+    }
+  }
+
+  function removeBrandAttachment(id: string) {
+    state.brandAttachments.value = state.brandAttachments.value.filter((a) => a.id !== id);
+  }
+
+  function saveBrandStyleGuideDefault() {
+    state.brandStyleGuideDefault.value = state.brandStyleGuide.value;
+    toast.success(t('options.brandStyleGuideDefaultSaved'));
+  }
+
+  function clearBrandStyleGuideDefault() {
+    state.brandStyleGuideDefault.value = '';
+    toast.success(t('options.brandStyleGuideDefaultCleared'));
   }
 
   async function deleteInput(id: string) {
@@ -119,17 +201,38 @@ export function createSelectionContentActions(state: ControlState) {
     }
   }
 
+  // Toggle a prompt's picker "starred" flag. Silent on success (like models) so
+  // rapid star/unstar doesn't spam toasts; the returned snapshot refreshes state.
+  async function togglePromptStarred(id: string) {
+    const current = state.prompts.value.find((p) => p.id === id);
+    const nextStarred = !current?.starred;
+    try {
+      const r = await api.starPrompt(id, nextStarred);
+      state.prompts.value = r.prompts || [];
+      reconcilePromptSelection(state.prompts.value);
+    } catch (e) {
+      toast.error(t('prompts.starFailed'), { description: errMessage(e) });
+    }
+  }
+
   return {
     toggleInput,
     toggleModel,
+    setModelQty,
     togglePrompt,
     toggleReference,
     selectAll,
     selectNone,
     uploadFiles,
+    uploadReferences,
+    addBrandAttachments,
+    removeBrandAttachment,
+    saveBrandStyleGuideDefault,
+    clearBrandStyleGuideDefault,
     deleteInput,
     savePrompt,
     deletePrompt,
     restoreDefaultPrompts,
+    togglePromptStarred,
   };
 }

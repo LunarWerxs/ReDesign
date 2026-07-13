@@ -28,6 +28,7 @@ tmp/
 # Editor / local tooling — not needed in a public clone
 .vscode/
 .claude/
+.agents/
 
 # Generated Windows shortcut (machine-specific absolute paths; start.cmd recreates it)
 *.lnk

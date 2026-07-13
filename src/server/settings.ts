@@ -4,9 +4,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, getKeyPool, keyId } from "../util";
+import { ROOT, getKeyPool, keyId, maskKey, mapLimit } from "../util";
 import { loadModels, loadArchivedModels, loadPrompts } from "../config";
 import { getKeyManager } from "../runner";
+import { brandLabel, parseKeyBlob, poolsForBrand, resolveKeyBrand, servicesFromModels } from "../keyDetect";
 import type { Model } from "../config/models";
 import type { KeyManager, Snapshot } from "../keyManager";
 
@@ -17,6 +18,7 @@ interface PublicPrompt {
   label: string;
   description?: string;
   user: string;
+  starred: boolean;
 }
 
 function publicPrompts(): PublicPrompt[] {
@@ -25,6 +27,7 @@ function publicPrompts(): PublicPrompt[] {
     label: p2.label,
     description: p2.description,
     user: p2.user,
+    starred: p2.starred === true,
   }));
 }
 
@@ -37,6 +40,7 @@ interface PublicModel {
   baseUrl: string;
   vision: boolean;
   enabled: boolean;
+  starred: boolean;
   color: string | undefined;
   keys: number;
   maxTokens: number;
@@ -55,6 +59,7 @@ function publicModel(m: Model, km: KeyManager | null): PublicModel {
     baseUrl: m.baseUrl,
     vision: m.vision !== false,
     enabled: m.enabled !== false,
+    starred: m.starred === true,
     color: m.color,
     keys: m.keyEnv ? (km ? km.poolSize(m.keyEnv) : getKeyPool(m.keyEnv).length) : 0,
     maxTokens: m.maxTokens,
@@ -223,6 +228,86 @@ function deleteApiKey({ pool, id }: DeleteApiKeyInput): Snapshot {
   return reloadKeyPool(poolName, [deleteId]);
 }
 
+// ---------------------------------------------------------------------------
+// Paste-and-autodetect key import
+// ---------------------------------------------------------------------------
+interface ImportKeysInput {
+  text: string;
+}
+
+interface ImportKeyResult {
+  mask: string;
+  brand: string | null;
+  label: string;
+  pools: string[];
+  status: "added" | "duplicate" | "unknown" | "no_service";
+  probed: boolean;
+}
+
+interface ImportKeysResult {
+  results: ImportKeyResult[];
+  added: number;
+  keys: Snapshot;
+}
+
+/**
+ * Parse a pasted blob of keys, auto-detect the service each belongs to (by prefix,
+ * falling back to a live probe for ambiguous `sk-` keys), and add each to the
+ * right pool(s), deduping against what is already stored. Writes each touched .env
+ * pool once, then reloads the KeyManager. Returns a per-key result so the UI can
+ * show what happened.
+ */
+async function importKeys({ text }: ImportKeysInput): Promise<ImportKeysResult> {
+  const candidates = parseKeyBlob(String(text || ""));
+  const services = servicesFromModels(loadModels());
+
+  // Resolve every candidate's brand first (the probe is read-only, so this is
+  // safe to parallelize); apply the writes afterward, serialized per pool.
+  const resolved = await mapLimit(candidates, 4, (key) => resolveKeyBrand(key, services));
+
+  const staged = new Map<string, string[]>(); // pool -> keys to ensure present
+  const pending = candidates.map((key, i) => {
+    const r = resolved[i];
+    const res = r?.ok ? r.value : { brand: null, probed: false };
+    const pools = res.brand ? poolsForBrand(res.brand, services) : [];
+    for (const pool of pools) {
+      const list = staged.get(pool) || [];
+      list.push(key);
+      staged.set(pool, list);
+    }
+    return { key, brand: res.brand, probed: res.probed, pools };
+  });
+
+  const addedKeys = new Set<string>(); // `${pool}::${keyId}` newly written
+  for (const [pool, keys] of staged) {
+    const existing = getKeyPool(pool);
+    const ids = new Set(existing.map((k) => keyId(k)));
+    const next = [...existing];
+    for (const key of keys) {
+      const kid = keyId(key);
+      if (ids.has(kid)) continue;
+      ids.add(kid);
+      next.push(key);
+      addedKeys.add(`${pool}::${kid}`);
+    }
+    if (next.length !== existing.length) setEnvKeyPool(pool, next);
+  }
+
+  const km = getKeyManager();
+  for (const pool of staged.keys()) km.reloadPool(pool);
+  registerActiveKeyPools(km);
+
+  const results: ImportKeyResult[] = pending.map((p) => {
+    let status: ImportKeyResult["status"];
+    if (!p.brand) status = "unknown";
+    else if (!p.pools.length) status = "no_service";
+    else status = p.pools.some((pool) => addedKeys.has(`${pool}::${keyId(p.key)}`)) ? "added" : "duplicate";
+    return { mask: maskKey(p.key), brand: p.brand, label: p.brand ? brandLabel(p.brand) : "", pools: p.pools, status, probed: p.probed };
+  });
+
+  return { results, added: results.filter((r) => r.status === "added").length, keys: filteredKeySnapshot(km) };
+}
+
 export {
   publicPrompts,
   publicModel,
@@ -232,5 +317,6 @@ export {
   filteredKeySnapshot,
   saveApiKey,
   deleteApiKey,
+  importKeys,
 };
-export type { PublicPrompt, PublicModel, ModelSettings, SaveApiKeyInput, DeleteApiKeyInput };
+export type { PublicPrompt, PublicModel, ModelSettings, SaveApiKeyInput, DeleteApiKeyInput, ImportKeysInput, ImportKeyResult, ImportKeysResult };

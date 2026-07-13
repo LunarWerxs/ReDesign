@@ -78,6 +78,19 @@ function textReferenceBlock(refCaption: unknown, note?: string | null): string {
   );
 }
 
+// Brand style guide: a user-authored brand brief (colors, typography, voice, spacing
+// rules...) appended to EVERY job's prompt. Unlike the reference blocks it needs no image
+// and applies identically to vision and text-only models.
+function brandStyleGuideBlock(guide: string): string {
+  return (
+    "\n\n--- BRAND STYLE GUIDE ---\n" +
+    "The user's brand style guide follows. Your reimagining MUST conform to it (colors, " +
+    "typography, tone of copy, spacing, and component styling) wherever it speaks; where it " +
+    "is silent, use your own judgment:\n" +
+    guide
+  );
+}
+
 export {
   getKeyManager,
   cfgInt,
@@ -88,4 +101,5 @@ export {
   codename,
   visionReferenceBlock,
   textReferenceBlock,
+  brandStyleGuideBlock,
 };

@@ -38,16 +38,20 @@ interface BuildJobsOptions {
   inputItems: InputItem[];
   models: Model[];
   prompts: ResolvedPrompt[];
-  variants: number;
+  variants: number; // default copies-per-model when a model has no explicit quantity (CLI/MCP)
+  variantsByModel?: Record<string, number>; // per-model quantity override (web "quantity" control)
 }
 
-// Build the flat job list = inputs × models × prompts × variants.
-function buildJobs({ inputItems, models, prompts, variants }: BuildJobsOptions): Job[] {
+// Build the flat job list = inputs × models × prompts × (per-model quantity).
+// A model's copy count is its entry in variantsByModel, falling back to the flat
+// `variants` default; clamped 1..10 defensively (reimagine.ts already clamps).
+function buildJobs({ inputItems, models, prompts, variants, variantsByModel }: BuildJobsOptions): Job[] {
   const jobs: Job[] = [];
   for (const input of inputItems) {
     for (const model of models) {
+      const copies = Math.max(1, Math.min(10, variantsByModel?.[model.id] ?? variants));
       for (const prompt of prompts) {
-        for (let v = 1; v <= variants; v++) {
+        for (let v = 1; v <= copies; v++) {
           jobs.push({
             id: `${input.id}__${model.id}__${prompt.id}__v${v}`,
             inputId: input.id,

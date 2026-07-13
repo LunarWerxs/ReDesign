@@ -278,6 +278,7 @@ watch(
 
           <span class="flex-1" />
 
+          <Badge v-if="run.mock" variant="secondary" :title="t('runFlyout.mockBadgeTitle')">{{ t('runFlyout.mockBadge') }}</Badge>
           <Badge v-if="run.status && run.status !== 'done'" variant="secondary">{{ run.status }}</Badge>
           <span
             v-if="runCostLabel(run)"

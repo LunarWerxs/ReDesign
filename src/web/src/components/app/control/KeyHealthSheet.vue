@@ -22,10 +22,11 @@ import { useControlStore } from '@/stores/control';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { t } from '@/i18n';
-import ViewSettings from './ViewSettings.vue';
 import ModelList from './key-health-sheet/ModelList.vue';
 import OrphanKeyPools from './key-health-sheet/OrphanKeyPools.vue';
 import ModelKeyDialogs from './key-health-sheet/ModelKeyDialogs.vue';
+import ImportKeysDialog from './key-health-sheet/ImportKeysDialog.vue';
+import { providerOptions, providerLabel as providerLabelFor, OPENAI_FAMILY } from '@/lib/providers';
 import CloudSyncSection from './CloudSyncSection.vue';
 import AutoUpdateSection from './AutoUpdateSection.vue';
 import PortableModeSection from './PortableModeSection.vue';
@@ -53,13 +54,8 @@ interface ModelForm {
   color: string;
 }
 
-const providerOptions = [
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'openai-compatible', label: 'OpenAI-compatible' },
-  { value: 'gemini', label: 'Gemini' },
-  { value: 'google', label: 'Google' },
-];
+// providerOptions + providerLabel now live in @/lib/providers (shared with the
+// model picker) so the settings sheet and picker never drift.
 // Sourced from the backend's src/config/shared.ts PROVIDER_DEFAULTS via GET /api/bootstrap
 // (store.providerDefaults), the single source of truth, so the two never drift apart.
 const openAiDefaults: ProviderDefault = { baseUrl: '', keyEnv: '', color: '' };
@@ -111,26 +107,31 @@ const isViewer = computed(() => route.name === 'Viewer');
 const isDesktop = useMediaQuery('(min-width: 768px)');
 const side = ref<'right' | 'bottom'>(isDesktop.value ? 'right' : 'bottom');
 
-// The sheet groups its sections under three tabs; the first is the sheet's real job
-// (models and keys on the dashboard, view options on the viewer) and opens selected.
+// The sheet groups its sections under tabs. On the dashboard the first ("main") tab is
+// models and keys; on the viewer, view options now live in a header flyout (see App.vue),
+// so the sheet drops "main" entirely and opens straight to Preferences.
 // Panes stay mounted behind v-show (SettingsTabs rule) so store-driven sections keep
 // their live state across tab switches.
 type TabId = 'main' | 'prefs' | 'app';
 const tab = ref<TabId>('main');
-const tabs = computed<{ id: TabId; label: string }[]>(() => [
-  { id: 'main', label: isViewer.value ? t('keyHealth.tabView') : t('keyHealth.tabModels') },
-  { id: 'prefs', label: t('keyHealth.tabPreferences') },
-  { id: 'app', label: t('keyHealth.tabApp') },
-]);
+const tabs = computed<{ id: TabId; label: string }[]>(() => {
+  const rest: { id: TabId; label: string }[] = [
+    { id: 'prefs', label: t('keyHealth.tabPreferences') },
+    { id: 'app', label: t('keyHealth.tabApp') },
+  ];
+  return isViewer.value ? rest : [{ id: 'main', label: t('keyHealth.tabModels') }, ...rest];
+});
 
 watch(open, (o) => {
   if (o) {
     side.value = isDesktop.value ? 'right' : 'bottom';
-    tab.value = 'main'; // every open lands back on the sheet's main tab
+    // Every open lands on the first tab: "main" on the dashboard, "prefs" on the viewer.
+    tab.value = isViewer.value ? 'prefs' : 'main';
   }
 });
 const keyDialogOpen = ref(false);
 const keySaving = ref(false);
+const importOpen = ref(false);
 const modelDialogOpen = ref(false);
 const modelSaving = ref(false);
 const keyForm = ref({
@@ -141,9 +142,7 @@ const keyForm = ref({
 });
 const modelForm = ref(defaultModelForm());
 
-const supportsTokenParam = computed(() =>
-  modelForm.value.provider === 'openai' || modelForm.value.provider === 'openai-compatible',
-);
+const supportsTokenParam = computed(() => OPENAI_FAMILY.has(modelForm.value.provider));
 
 function defaultModelForm(): ModelForm {
   const defaults = defaultsForProvider('openai');
@@ -169,7 +168,7 @@ function defaultsForProvider(provider?: string): ProviderDefault {
 }
 
 function providerLabel(provider?: string) {
-  return providerOptions.find((p) => p.value === provider)?.label || provider || t('keyHealth.provider');
+  return providerLabelFor(provider) || t('keyHealth.provider');
 }
 
 function onOpenChange(value: boolean) {
@@ -405,12 +404,8 @@ async function confirmDeleteKey() {
 
         <SettingsTabs v-model="tab" :tabs="tabs" class="mb-5" />
 
-        <!-- Main: view options (viewer) or models + keys (dashboard) ─────────── -->
+        <!-- Main: models + keys (dashboard only; the viewer has no main tab) ───── -->
         <div v-show="tab === 'main'">
-        <SettingsGroup v-if="isViewer" :label="t('keyHealth.view')" class="mb-5">
-          <ViewSettings />
-        </SettingsGroup>
-
         <section v-if="!isViewer" class="mb-5">
           <ModelList
             :provider-label="providerLabel"
@@ -425,6 +420,7 @@ async function confirmDeleteKey() {
             @edit-model="openEditModel"
             @add-key="openAddKey"
             @edit-key="openEditKey"
+            @import-keys="importOpen = true"
           />
 
           <OrphanKeyPools
@@ -486,6 +482,8 @@ async function confirmDeleteKey() {
         </SettingsGroup>
         </div>
   </Sidebar>
+
+  <ImportKeysDialog v-model:open="importOpen" />
 
   <ModelKeyDialogs
     v-model:model-dialog-open="modelDialogOpen"

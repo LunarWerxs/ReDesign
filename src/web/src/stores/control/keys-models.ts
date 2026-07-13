@@ -2,7 +2,7 @@ import { toast } from 'vue-sonner';
 import { api } from '@/lib/api';
 import { t } from '@/i18n';
 import { withToast } from '@/lib/asyncAction';
-import type { KeySnapshot, Model, ModelSaveRequest, ModelSettingsResponse } from '@/types';
+import type { ImportKeysResponse, KeySnapshot, Model, ModelSaveRequest, ModelSettingsResponse } from '@/types';
 import { errMessage, isRunnable } from './state';
 import type { ControlState } from './state';
 
@@ -33,6 +33,11 @@ export function createKeysModelsActions(state: ControlState) {
   function reconcileModelSelection(nextModels: Model[]) {
     const runnableIds = new Set(nextModels.filter(isRunnable).map((m) => m.id));
     state.selModels.value = state.selModels.value.filter((id) => runnableIds.has(id));
+    // Prune per-model quantities for models that are no longer selectable.
+    const kept = new Set(state.selModels.value);
+    const nextQty: Record<string, number> = {};
+    for (const [id, q] of Object.entries(state.modelQty.value)) if (kept.has(id)) nextQty[id] = q;
+    state.modelQty.value = nextQty;
   }
 
   async function refreshKeys() {
@@ -71,6 +76,25 @@ export function createKeysModelsActions(state: ControlState) {
       successMsg: body.id ? t('models.updated') : t('models.added'),
       errKey: 'models.saveFailed',
     });
+  }
+
+  // Toggle a model's picker "starred" flag. Silent (no success toast) so rapid
+  // star/unstar from the picker doesn't spam.
+  function toggleModelStarred(id: string) {
+    const current = state.models.value.find((m) => m.id === id);
+    const nextStarred = !current?.starred;
+    return withToast(() => api.starModel(id, nextStarred), {
+      onSuccess: applyModelSettings,
+      errKey: 'models.starFailed',
+    });
+  }
+
+  // Paste-and-autodetect: send a blob of keys, apply the returned key snapshot,
+  // and hand the per-key results back to the caller so it can show what happened.
+  async function importKeys(text: string): Promise<ImportKeysResponse> {
+    const r = await api.importKeys(text);
+    applyKeys({ keys: r.keys });
+    return r;
   }
 
   function deleteModel(id: string) {
@@ -146,7 +170,9 @@ export function createKeysModelsActions(state: ControlState) {
     refreshKeys,
     saveKey,
     deleteKey,
+    importKeys,
     saveModel,
+    toggleModelStarred,
     deleteModel,
     reorderModels,
     restoreModel,

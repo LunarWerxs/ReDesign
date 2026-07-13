@@ -21,9 +21,10 @@ import {
   codename,
   visionReferenceBlock,
   textReferenceBlock,
+  brandStyleGuideBlock,
 } from "./helpers";
 import { buildJobs, buildPoolLimits, runJobsByPool, type Job } from "./scheduling";
-import { costForUsage, type RunCostResult } from "./cost";
+import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
 import type { Model } from "../config/models";
 
 interface ReferenceOptions {
@@ -38,6 +39,7 @@ interface RunReimagineOptions {
   keyManager?: KeyManager;
   mock?: boolean;
   variants?: number | string;
+  modelQuantities?: Record<string, number | string>; // per-model copy count (overrides `variants` for that model)
   maxImagesPerInput?: number | string;
   concurrency?: number | string;
   poolConcurrency?: number | string;
@@ -48,6 +50,7 @@ interface RunReimagineOptions {
   models?: SelectionInput;
   prompts?: { presets?: unknown; custom?: string };
   reference?: ReferenceOptions | null;
+  brandStyleGuide?: string | null;
   runId?: string;
   label?: string;
 }
@@ -67,6 +70,14 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
   const km = opts.keyManager || getKeyManager();
   const mock = !!opts.mock;
   const variants = Math.max(1, Math.min(parseInt(String(opts.variants), 10) || 1, 10));
+  // Per-model copy count (the web's per-model "quantity" control). Each entry
+  // overrides the flat `variants` default for that one model; clamped 1..10.
+  const variantsByModel: Record<string, number> = {};
+  if (opts.modelQuantities && typeof opts.modelQuantities === "object") {
+    for (const [id, q] of Object.entries(opts.modelQuantities)) {
+      variantsByModel[id] = Math.max(1, Math.min(parseInt(String(q), 10) || 1, 10));
+    }
+  }
   const reqImages = parseInt(String(opts.maxImagesPerInput), 10);
   const maxImagesPerInput = Number.isFinite(reqImages) && reqImages > 0 ? Math.min(reqImages, 16) : 8;
   const concurrency = Math.max(1, parseInt(String(opts.concurrency), 10) || cfgInt("MAX_CONCURRENCY", 12));
@@ -92,6 +103,9 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     referenceNote = String(ref?.note || "").trim();
   }
   const referenceImages: LoadedImage[] = referenceRels.length ? loadReferenceImages(referenceRels, { maxImages: maxImagesPerInput }) : [];
+
+  // Optional brand style guide: appended to every job's prompt (vision and text-only alike).
+  const brandStyleGuide = String(opts.brandStyleGuide || "").trim();
 
   if (!inputItems.length) throw new Error("No inputs matched the selection (input/ folder empty?).");
   if (!models.length) throw new Error("No models matched the selection.");
@@ -162,7 +176,7 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
   const describer = anyTextOnly ? visionHelper : null;
 
   const runId = opts.runId || store.newRunId(opts.label);
-  const jobs = buildJobs({ inputItems, models, prompts, variants });
+  const jobs = buildJobs({ inputItems, models, prompts, variants, variantsByModel });
   const summary = fallbackRunSummary();
   const poolLimits = buildPoolLimits(models, km, poolConcurrency);
 
@@ -178,6 +192,7 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       modelIds: models.map((m) => m.id),
       promptIds: prompts.map((p) => p.id),
       variants,
+      ...(Object.keys(variantsByModel).length ? { variantsByModel } : {}),
       concurrency,
       poolConcurrency,
       poolLimits: Object.fromEntries(poolLimits),
@@ -345,6 +360,7 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
             if (refCaption) effectivePrompt += textReferenceBlock(refCaption, referenceNote);
           }
         }
+        if (brandStyleGuide) effectivePrompt += brandStyleGuideBlock(brandStyleGuide);
         job.status = "running";
         job.startedAt = new Date().toISOString();
         onProgress({ type: "job", runId, job });
@@ -415,7 +431,9 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
             job.status = "ok";
             job.file = path.join(runId, rel).split(path.sep).join("/");
             job.usage = result.usage || null;
-            job.cost = job.usage ? costForUsage(model.id, job.usage) : null;
+            // Mock-mode jobs spend no real quota, so they never carry a cost (keeps the
+            // run's cost meter and spend-to-date honest, see cost.ts isMockUsage).
+            job.cost = job.usage && !isMockUsage(job.usage) ? costForUsage(model.id, job.usage) : null;
             if (job.cost) {
               const rc = manifest.cost as RunCostResult;
               rc.totalCost += job.cost.totalCost;

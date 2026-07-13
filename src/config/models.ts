@@ -5,6 +5,7 @@ import {
   jsonCache,
   MODEL_ARCHIVE_KEY,
   MODEL_PROVIDERS,
+  OPENAI_FAMILY,
   readConfig,
   providerDefault,
 } from "./shared";
@@ -30,6 +31,9 @@ interface Model {
   maxTokens: number;
   supportsTemperature?: boolean;
   enabled?: boolean;
+  // Surfaced at the top of the model picker (vs. tucked into "All models").
+  // Purely a UI hint; the run path never reads it.
+  starred?: boolean;
   color?: string;
   tokenParam?: "max_tokens" | "max_completion_tokens";
   temperature?: number;
@@ -92,6 +96,7 @@ interface ModelInput {
   vision?: boolean;
   supportsTemperature?: boolean;
   enabled?: boolean;
+  starred?: boolean;
   color?: string;
   tokenParam?: string;
   temperature?: string | number;
@@ -139,6 +144,7 @@ function normalizeModelInput(input: ModelInput = {}, existing: Model | null = nu
     maxTokens,
     supportsTemperature: input.supportsTemperature == null ? base.supportsTemperature !== false : !!input.supportsTemperature,
     enabled: input.enabled == null ? base.enabled !== false : !!input.enabled,
+    starred: input.starred == null ? base.starred === true : !!input.starred,
   };
 
   const color = String(input.color || base.color || providerDefault(provider, "color") || "").trim();
@@ -150,7 +156,7 @@ function normalizeModelInput(input: ModelInput = {}, existing: Model | null = nu
   }
 
   const tokenParam = String(input.tokenParam || base.tokenParam || "").trim();
-  if (provider === "openai" || provider === "openai-compatible") {
+  if (OPENAI_FAMILY.has(provider)) {
     next.tokenParam = tokenParam === "max_completion_tokens" ? "max_completion_tokens" : "max_tokens";
   } else {
     next.tokenParam = undefined;
@@ -230,6 +236,22 @@ function restoreModel(id: string): Model {
   return restored;
 }
 
+// Toggle the picker "starred" hint on an active model. Kept separate from
+// saveModel() so the client can star/unstar without re-validating the whole
+// model form (base url, tokens, etc.).
+function setModelStarred(id: string, starred: boolean): Model {
+  const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
+  const modelId = String(id || "").trim();
+  if (!modelId) throw statusError("id is required", 400);
+  const models = Array.isArray(data.models) ? [...data.models] : [];
+  const idx = models.findIndex((m) => m.id === modelId);
+  if (idx === -1) throw statusError("model not found", 404);
+  const next: Model = { ...(models[idx] as Model), starred: !!starred };
+  models[idx] = next;
+  writeModelsData({ ...data, models });
+  return next;
+}
+
 function reorderModels(orderedIds: unknown): Model[] {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const models = Array.isArray(data.models) ? data.models : [];
@@ -251,6 +273,7 @@ export {
   getModel,
   resolveModels,
   saveModel,
+  setModelStarred,
   reorderModels,
   deleteModel,
   restoreModel,

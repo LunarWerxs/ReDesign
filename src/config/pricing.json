@@ -16,6 +16,27 @@
       "estimate": false,
       "source": "litellm"
     },
+    "gpt-5.6": {
+      "inputPerMtok": 5,
+      "outputPerMtok": 30,
+      "currency": "USD",
+      "estimate": false,
+      "source": "manual"
+    },
+    "gpt-5.6-terra": {
+      "inputPerMtok": 2.5,
+      "outputPerMtok": 15,
+      "currency": "USD",
+      "estimate": false,
+      "source": "manual"
+    },
+    "gpt-5.6-luna": {
+      "inputPerMtok": 1,
+      "outputPerMtok": 6,
+      "currency": "USD",
+      "estimate": false,
+      "source": "manual"
+    },
     "gemini-3.5-flash": {
       "inputPerMtok": 1.5,
       "outputPerMtok": 9,
@@ -43,6 +64,13 @@
       "currency": "USD",
       "estimate": false,
       "source": "cloudprice"
+    },
+    "muse-spark-1.1": {
+      "inputPerMtok": 1,
+      "outputPerMtok": 5,
+      "currency": "USD",
+      "estimate": true,
+      "source": "manual"
     }
   }
 }

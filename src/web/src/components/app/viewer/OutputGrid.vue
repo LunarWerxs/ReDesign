@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { Badge } from '@/components/ui/badge';
 import { useViewerStore } from '@/stores/viewer';
 import type { Model, Prompt } from '@/types';
 import ReferenceCard from './ReferenceCard.vue';
@@ -34,6 +35,10 @@ const emptyMsg = computed(() => {
 </script>
 
 <template>
+  <div v-if="store.manifest?.mock" class="mx-[18px] mt-[18px] flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+    <Badge variant="secondary">{{ t('runFlyout.mockBadge') }}</Badge>
+    {{ t('viewer.mockRunNotice') }}
+  </div>
   <div
     v-if="store.grouped.length"
     class="grid gap-[18px] p-[18px]"

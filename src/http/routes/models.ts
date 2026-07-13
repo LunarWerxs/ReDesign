@@ -5,7 +5,7 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
-import { saveModel, deleteModel, restoreModel, reorderModels, type ModelInput } from "../../config";
+import { saveModel, setModelStarred, deleteModel, restoreModel, reorderModels, type ModelInput } from "../../config";
 import { modelSettingsResponse } from "../../server/settings";
 import { getAvailableModels } from "../../modelCatalog";
 import { providerDefault } from "../../config/shared";
@@ -28,6 +28,17 @@ export function register(app: Hono, _deps: Deps): void {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as ModelInput;
     const model = saveModel(body);
     return c.json(modelSettingsResponse({ model }));
+  });
+
+  app.post("/api/models/star", requireSameOrigin(), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { id?: string; starred?: boolean };
+    try {
+      const model = setModelStarred(body.id as string, body.starred !== false);
+      return c.json(modelSettingsResponse({ model }));
+    } catch (e) {
+      const status = (e as { status?: number }).status || 400;
+      return c.json({ error: e instanceof Error ? e.message : "star failed" }, status as 400);
+    }
   });
 
   app.post("/api/models/delete", requireSameOrigin(), async (c) => {

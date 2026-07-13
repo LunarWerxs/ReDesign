@@ -5,11 +5,13 @@ import type {
   BootstrapResponse,
   EstimateRunCost,
   HealthCheckResponse,
+  ImportKeysResponse,
   KeySnapshot,
   Manifest,
   ModelSaveRequest,
   ModelSettingsResponse,
   Prompt,
+  ReferenceUploadResponse,
   RunDeleteResponse,
   RunRequest,
   RunSummary,
@@ -46,6 +48,7 @@ export const outputUrl = (rel: string) => `/output/${encPath(rel)}`;
 export const outputRawUrl = (rel: string, opts?: { measure?: boolean }) =>
   `/output-raw/${encPath(rel)}${opts?.measure ? '?measure=1' : ''}`;
 export const downloadUrl = (rel: string) => `/output/${encPath(rel)}?download=1`;
+export const screenshotUrl = (rel: string) => `/api/output/screenshot?file=${encodeURIComponent(rel)}`;
 export const eventsUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`;
 
 export const api = {
@@ -77,6 +80,8 @@ export const api = {
     request<{ ok: boolean; enabled: boolean }>('/api/pulse', postJson({ event, properties })),
   uploadInputs: (images: UploadImage[]) =>
     request<UploadResponse>('/api/inputs/upload', postJson({ images })),
+  uploadReferences: (images: UploadImage[]) =>
+    request<ReferenceUploadResponse>('/api/reference/upload', postJson({ images })),
   deleteInput: (id: string) =>
     request<{ inputs: import('@/types').InputItem[] }>('/api/inputs/delete', postJson({ id })),
   keys: () => request<KeySnapshot>('/api/keys'),
@@ -84,6 +89,8 @@ export const api = {
     request<{ keys: KeySnapshot }>('/api/keys/save', postJson(body)),
   deleteKey: (body: { pool: string; id: string }) =>
     request<{ keys: KeySnapshot }>('/api/keys/delete', postJson(body)),
+  importKeys: (text: string) =>
+    request<ImportKeysResponse>('/api/keys/import', postJson({ text })),
   availableModels: (params: { provider: string; baseUrl?: string; keyEnv?: string }) => {
     const qs = new URLSearchParams({ provider: params.provider });
     if (params.baseUrl) qs.set('baseUrl', params.baseUrl);
@@ -92,6 +99,8 @@ export const api = {
   },
   saveModel: (body: ModelSaveRequest) =>
     request<ModelSettingsResponse>('/api/models/save', postJson(body)),
+  starModel: (id: string, starred: boolean) =>
+    request<ModelSettingsResponse>('/api/models/star', postJson({ id, starred })),
   deleteModel: (id: string) =>
     request<ModelSettingsResponse>('/api/models/delete', postJson({ id })),
   restoreModel: (id: string) =>
@@ -111,12 +120,14 @@ export const api = {
     request<{ ok: boolean }>('/api/output/open', postJson({ file, target })),
   savePrompt: (prompt: { id?: string; label: string; description?: string; user: string }) =>
     request<{ prompt: Prompt; prompts: Prompt[] }>('/api/prompts/save', postJson(prompt)),
+  starPrompt: (id: string, starred: boolean) =>
+    request<{ prompt: Prompt; prompts: Prompt[] }>('/api/prompts/star', postJson({ id, starred })),
   deletePrompt: (id: string) =>
     request<{ id: string; prompts: Prompt[] }>('/api/prompts/delete', postJson({ id })),
   restoreDefaultPrompts: () =>
     request<{ prompts: Prompt[] }>('/api/prompts/restore-defaults', postJson({})),
   shutdownServer: () => request<{ ok: boolean }>('/api/shutdown', postJson({})),
   costs: () => request<SpendToDate>('/api/costs'),
-  estimateRunCost: (body: { modelIds: string[]; jobCount: number }) =>
+  estimateRunCost: (body: { modelIds: string[]; jobCount: number; jobCountByModel?: Record<string, number> }) =>
     request<EstimateRunCost>('/api/costs/estimate', postJson(body)),
 };

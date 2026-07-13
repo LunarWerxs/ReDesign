@@ -18,6 +18,7 @@
  */
 import { recordPulse } from "./http/routes/bootstrap";
 import { checkForUpdate, applyUpdate } from "./updater";
+import { hasActiveRun } from "./http/runQueue";
 
 /** Check cadence bounds (seconds): 15 min floor, 7 day ceiling, default 6 h. */
 export const AUTO_UPDATE_INTERVAL_MIN_S = 900;
@@ -57,6 +58,10 @@ let started = false; // true only after the daemon finishes booting (startAutoUp
 let timer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
 let applying = false; // an apply is in flight, never overlap checks/applies
+// An update was applied on disk but its relaunch was deferred because a run was active
+// at the time. Never restart out from under a running job; the next tick (or an explicit
+// nudge from runQueue once a run finishes) retries the relaunch once idle.
+let restartPending = false;
 
 export function autoUpdateEnabled(): boolean {
   return enabled;
@@ -73,14 +78,41 @@ export interface AutoUpdateRunResult {
   reason?: string;
 }
 
+/** True if an update was applied on disk but its restart is waiting for the app to go idle. */
+export function isRestartPending(): boolean {
+  return restartPending;
+}
+
+/** Fire the deferred relaunch now, if one is pending and no run is active. Safe to call
+ *  speculatively (e.g. from runQueue.ts right after a run finishes); no-ops otherwise. */
+export function maybeApplyDeferredRestart(): boolean {
+  if (!restartPending || hasActiveRun()) return false;
+  restartPending = false;
+  void recordPulse("auto_update_restarting", { message: "deferred restart, no run active" });
+  hooks.relaunch();
+  return true;
+}
+
 /**
  * One check → maybe apply → maybe relaunch. Applies ONLY when the engine reports an update is
  * available AND applicable (`canApply`: clean tree, on a branch with an update remote), so a dirty
  * working tree is never touched. On a successful apply that needs a restart, it fires the injected
- * relaunch. Exported + returns a result so the timer AND the test can drive it identically.
+ * relaunch UNLESS a run is actively queued/running, in which case the restart is deferred until the
+ * app goes idle (see `maybeApplyDeferredRestart`/`restartPending`); a run in progress is never
+ * interrupted by a self-relaunch. Exported + returns a result so the timer AND the test can drive it
+ * identically.
  */
 export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   if (applying) return { checked: false, applied: false, relaunched: false, reason: "busy" };
+
+  // A previous pass already applied an update but deferred the restart, retry the relaunch now
+  // instead of re-checking/re-applying (nothing new to fetch; we're just waiting to go idle).
+  if (restartPending) {
+    if (hasActiveRun()) return { checked: false, applied: false, relaunched: false, reason: "deferred-active-run" };
+    maybeApplyDeferredRestart();
+    return { checked: false, applied: true, relaunched: true };
+  }
+
   let status: Awaited<ReturnType<typeof checkForUpdate>>;
   try {
     status = await hooks.check();
@@ -98,6 +130,11 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
     const res = await hooks.apply();
     if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
     if (res.restartRequired) {
+      // Never restart out from under an active run; defer and retry once idle.
+      if (hasActiveRun()) {
+        restartPending = true;
+        return { checked: true, applied: true, relaunched: false, reason: "deferred-active-run" };
+      }
       void recordPulse("auto_update_restarting", { message: res.message });
       hooks.relaunch();
       return { checked: true, applied: true, relaunched: true };

@@ -212,6 +212,12 @@ async function deleteRuns(ids: string[]): Promise<RunDeleteResponse | null> {
 const rowTriggerClass =
   'w-full h-auto data-[size=default]:h-auto justify-between gap-3 rounded-none border-0 bg-transparent dark:bg-transparent px-3.5 py-[7px] text-[13px] font-normal text-popover-foreground shadow-none ring-0 outline-none transition-colors hover:bg-accent dark:hover:bg-accent focus-visible:bg-accent focus-visible:ring-0 [&>svg]:hidden';
 
+// The row triggers are full-width (they span the flyout), so the popper would inherit
+// that width via --reka-select-trigger-width and balloon to the full flyout width. Break
+// that coupling for these menus: size the option list to its own content instead.
+const selectContentClass =
+  '[&_[data-position=popper]]:w-auto! [&_[data-position=popper]]:min-w-0!';
+
 function choiceValue(row: ChoiceRow) {
   const value = row.get();
   const match = row.options.find((o) => o.v === value);
@@ -283,7 +289,7 @@ function selectCustomInput(event: FocusEvent) {
             <ChevronDownIcon class="size-3 text-muted-foreground/60" />
           </span>
         </SelectTrigger>
-        <SelectContent position="popper" align="end" :side-offset="4">
+        <SelectContent position="popper" align="end" :side-offset="4" :class="selectContentClass">
           <SelectItem v-for="o in row.options" :key="o.v" :value="o.v">{{ o.label }}</SelectItem>
           <div v-if="row.custom" class="mt-1 border-t px-2 py-2" @click.stop @pointerdown.stop>
             <form class="flex items-center gap-1.5" @submit.prevent="applyCustomChoice(row)">
@@ -330,7 +336,7 @@ function selectCustomInput(event: FocusEvent) {
             <ChevronDownIcon class="size-3 text-muted-foreground/60" />
           </span>
         </SelectTrigger>
-        <SelectContent position="popper" align="end" :side-offset="4">
+        <SelectContent position="popper" align="end" :side-offset="4" :class="selectContentClass">
           <SelectItem v-for="o in row.options" :key="o.v" :value="o.v">{{ o.label }}</SelectItem>
         </SelectContent>
       </Select>

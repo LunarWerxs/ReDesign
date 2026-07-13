@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import RunControls from './RunControls.vue';
 import {
   Dialog,
   DialogContent,
@@ -100,9 +99,6 @@ function onPreviewOpenChange(open: boolean) {
 
       <p v-if="!store.inputs.length" class="text-xs text-muted-foreground">{{ t('input.noImagesFound') }}</p>
     </CardContent>
-    <CardFooter>
-      <RunControls />
-    </CardFooter>
   </Card>
 
   <Dialog :open="!!previewInput" @update:open="onPreviewOpenChange">

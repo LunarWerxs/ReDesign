@@ -17,6 +17,7 @@ interface PromptPreset {
   label: string;
   description?: string;
   user: string;
+  starred?: boolean;
   source?: "preset" | "custom";
 }
 
@@ -49,6 +50,7 @@ interface PromptInput {
   label?: string;
   user?: string;
   description?: string;
+  starred?: boolean;
 }
 
 function savePromptPreset(input: PromptInput = {}): PromptPreset {
@@ -64,11 +66,14 @@ function savePromptPreset(input: PromptInput = {}): PromptPreset {
   if (!user) throw statusError("prompt text is required", 400);
 
   const id = existingIndex >= 0 ? existingId : uniqueSlugId(prompts, label, existingId, "prompt");
+  // Preserve an existing prompt's star on edit; honor an explicit `starred` when sent.
+  const prevStarred = existingIndex >= 0 ? prompts[existingIndex]?.starred === true : false;
   const nextPrompt: PromptPreset = {
     id,
     label,
     description,
     user,
+    starred: input.starred == null ? prevStarred : !!input.starred,
   };
   if (existingIndex >= 0) prompts[existingIndex] = nextPrompt;
   else prompts.push(nextPrompt);
@@ -76,6 +81,22 @@ function savePromptPreset(input: PromptInput = {}): PromptPreset {
   const nextData = { ...data, prompts };
   writePromptsData(nextData);
   return nextPrompt;
+}
+
+// Toggle the picker "starred" hint on a prompt preset. Kept separate from
+// savePromptPreset so a star toggle needn't re-send the whole prompt (and can't
+// trip its label/text validation). Mirrors setModelStarred in config/models.ts.
+function setPromptStarred(id: string, starred: boolean): PromptPreset {
+  const data = readConfig<PromptsFileData>(PROMPTS_FILE, { systemContract: "", prompts: [] });
+  const prompts = Array.isArray(data.prompts) ? [...data.prompts] : [];
+  const promptId = String(id || "").trim();
+  if (!promptId) throw statusError("id is required", 400);
+  const idx = prompts.findIndex((p) => p.id === promptId);
+  if (idx < 0) throw statusError("prompt not found", 404);
+  const next: PromptPreset = { ...(prompts[idx] as PromptPreset), starred: !!starred };
+  prompts[idx] = next;
+  writePromptsData({ ...data, prompts });
+  return next;
 }
 
 function deletePromptPreset(id: string): string {
@@ -142,6 +163,7 @@ export {
   loadPrompts,
   resolvePrompts,
   savePromptPreset,
+  setPromptStarred,
   deletePromptPreset,
   restoreDefaultPrompts,
 };

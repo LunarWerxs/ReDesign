@@ -13,6 +13,7 @@ import { runStoreOptions } from "../runQueue";
 interface EstimateBody {
   modelIds?: unknown;
   jobCount?: unknown;
+  jobCountByModel?: unknown;
 }
 
 export function register(app: Hono, _deps: Deps): void {
@@ -22,6 +23,16 @@ export function register(app: Hono, _deps: Deps): void {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as EstimateBody;
     const modelIds = Array.isArray(body.modelIds) ? body.modelIds.map(String).filter(Boolean) : [];
     const jobCount = Math.max(0, parseInt(String(body.jobCount), 10) || 0);
-    return c.json(estimateRunCost({ modelIds, jobCount }, runStoreOptions()));
+    // Optional per-model job counts (per-model quantity feature): keeps the estimate
+    // accurate when different models run a different number of copies. Missing/omitted
+    // falls back to estimateRunCost's even split across modelIds.
+    let jobCountByModel: Record<string, number> | undefined;
+    if (body.jobCountByModel && typeof body.jobCountByModel === "object") {
+      jobCountByModel = {};
+      for (const [id, v] of Object.entries(body.jobCountByModel as Record<string, unknown>)) {
+        jobCountByModel[id] = Math.max(0, parseInt(String(v), 10) || 0);
+      }
+    }
+    return c.json(estimateRunCost({ modelIds, jobCount, jobCountByModel }, runStoreOptions()));
   });
 }

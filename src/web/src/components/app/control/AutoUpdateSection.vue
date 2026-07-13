@@ -73,7 +73,7 @@ onMounted(() => {
         >
           <Loader2Icon v-if="store.updateChecking || store.updateApplying" class="size-3.5 animate-spin" />
           <DownloadCloudIcon v-else class="size-3.5" />
-          {{ checkLabel }}
+          {{ t('actions.checkUpdatesShort') }}
         </Button>
       </template>
     </SettingsRow>

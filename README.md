@@ -10,7 +10,7 @@
 
 Feed it a screenshot of any screen. It fires that screenshot at a bunch of AI models at once and hands back a grid of real, self-contained HTML redesigns, each one sitting next to the original so you can actually judge it. No more pasting the same image into ten chat tabs and eyeballing the results one at a time.
 
-It runs on your own machine and talks only to the model APIs you hand it keys for. There are two opt-in exceptions, both off by default: a "Sync with Connections" toggle that signs you into LunarWerx's Connections account (`accounts.connections.icu`) to carry your theme across devices, and a product-usage pulse that stays dormant unless you set `REDESIGN_PULSE_URL` (or `CONNECTIONS_PULSE_URL`) and then reports only anonymous usage events under a random install id. Your API keys and other settings never leave your machine either way.
+It runs on your own machine and talks only to the model APIs you hand it keys for. There is one opt-in exception, off by default: a "Sync with Connections" toggle that signs you into LunarWerx's Connections account (`accounts.connections.icu`) to carry your theme across devices. Your API keys and other settings never leave your machine either way.
 
 ## What it looks like
 
@@ -37,10 +37,11 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 
 ## Why it is nice
 
-- **Every model at once.** Claude, GPT, Gemini, DeepSeek, and Qwen out of the box, plus anything you add yourself. They all run in parallel, not one after another.
-- **Eight prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
+- **Every model at once.** Claude, GPT, Gemini, DeepSeek, and Qwen out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
+- **Many takes per model, one run.** Ask a single model for three variants and another for one, all in the same fan-out. A bake-off is more useful when you can see a model's range, not just one roll of the dice.
+- **A stack of prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
 - **A viewer worth using.** Filter by model or preset, set the column count, preview at phone through desktop widths. The original always sits first so you have something to compare against.
-- **Keys that fix themselves.** Give each provider a stack of API keys. It cycles through them and quietly benches the ones that start failing, then brings them back later.
+- **Paste your keys, skip the setup.** Drop in one key or a whole pile at once. It works out which service each belongs to, checking live when a key could belong to more than one, and files them in the right pool. Give each provider a stack of keys and it cycles through them, quietly benching the ones that start failing, then bringing them back later.
 - **Safe by design.** The HTML each model writes runs in a locked-down iframe. You can click around in it, but it cannot touch your data.
 - **It knows what it costs.** A per-run cost meter, plus an estimate before you hit Run, so a big fan-out never surprises you.
 - **Scriptable.** Everything in the UI has a command-line twin, and there is an MCP server so an AI agent can drive it too.

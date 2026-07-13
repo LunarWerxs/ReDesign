@@ -5,6 +5,7 @@
 import { CLASS, type ErrorClass } from "./keyManager";
 import { redactSecrets, sleep, type ImagePayload } from "./util";
 import type { Model } from "./config/models";
+import { OPENAI_FAMILY } from "./config/shared";
 
 // ---------------------------------------------------------------------------
 // Errors + HTTP
@@ -310,13 +311,16 @@ interface Adapter {
   call: (req: ProviderRequest) => Promise<ProviderResult>;
 }
 
+const openaiAdapter: Adapter = { call: openaiCall };
 const ADAPTERS: Record<string, Adapter> = {
   anthropic: { call: anthropicCall },
-  openai: { call: openaiCall }, // OpenAI / DeepSeek / Qwen share the chat-completions shape
-  "openai-compatible": { call: openaiCall },
   gemini: { call: geminiCall },
   google: { call: geminiCall },
 };
+// OpenAI, DeepSeek, Qwen, xAI, OpenRouter, Groq, Mistral, Moonshot and Meta AI
+// (Muse Spark) all speak the same chat-completions shape, so they share one
+// adapter (see OPENAI_FAMILY).
+for (const provider of OPENAI_FAMILY) ADAPTERS[provider] = openaiAdapter;
 const MOCK: Adapter = { call: mockCall };
 
 function getAdapter(model: Model, { mock = false }: { mock?: boolean } = {}): Adapter {

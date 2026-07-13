@@ -9,6 +9,14 @@
 import * as store from "../store";
 import { runReimagine } from "../runner";
 import { normalizeSelectionIds, type SelectionInput } from "../util";
+// Lazy (dynamic) import, not a static one: auto-update.ts itself imports hasActiveRun from
+// this module, so a static import here would create a module-init circular dependency.
+// Deferring the require to call time (inside pumpRunQueue(), well after both modules have
+// finished loading) avoids the cycle entirely while keeping the exact same behavior.
+async function maybeApplyDeferredRestart(): Promise<boolean> {
+  const { maybeApplyDeferredRestart: impl } = await import("../auto-update");
+  return impl();
+}
 
 /** A subscriber that can receive raw SSE payload strings (`"data: ...\n\n"` etc). */
 interface SseClient {
@@ -22,10 +30,12 @@ interface RunBody {
   models?: SelectionInput;
   prompts?: { presets?: unknown; custom?: string };
   variants?: number | string;
+  modelQuantities?: Record<string, number | string>;
   maxImages?: number | string;
   concurrency?: number | string;
   poolConcurrency?: number | string;
   reference?: unknown;
+  brandStyleGuide?: string | null;
   [key: string]: unknown;
 }
 
@@ -158,6 +168,9 @@ function pumpRunQueue(): void {
     runQueuedEntry(runId, entry);
     return;
   }
+  // Queue fully drained (nothing running, nothing waiting), a deferred auto-update restart
+  // (see src/auto-update.ts) can now fire safely without interrupting an in-flight run.
+  void maybeApplyDeferredRestart();
 }
 
 function runQueuedEntry(runId: string, entry: RunEntry): void {
@@ -168,7 +181,9 @@ function runQueuedEntry(runId: string, entry: RunEntry): void {
     models: body.models || "all",
     prompts: body.prompts || {},
     reference: (body.reference as any) || null,
+    brandStyleGuide: typeof body.brandStyleGuide === "string" ? body.brandStyleGuide : null,
     variants: body.variants || 1,
+    modelQuantities: body.modelQuantities || undefined,
     mock: !!body.mock,
     concurrency: body.concurrency,
     poolConcurrency: body.poolConcurrency,
@@ -279,6 +294,16 @@ function deleteRuns(ids: string[]): DeleteRunsResult {
   return { deleted, skipped, runs: store.listRuns(runStoreOptions()) };
 }
 
+/** True while any run is queued or actively generating (excludes entries lingering
+ *  in "finished" status during their 2s close-out window). Used to gate anything
+ *  that must never interrupt an in-flight run, e.g. auto-update's self-relaunch. */
+function hasActiveRun(): boolean {
+  for (const entry of activeRuns.values()) {
+    if (entry.status === "queued" || entry.status === "running") return true;
+  }
+  return false;
+}
+
 export {
   activeRuns,
   runStoreOptions,
@@ -287,5 +312,6 @@ export {
   cancelRun,
   normalizeRunDeleteIds,
   deleteRuns,
+  hasActiveRun,
 };
 export type { SseClient, RunBody, RunEntry, DeleteRunsResult };

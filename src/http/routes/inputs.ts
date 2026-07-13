@@ -8,7 +8,7 @@ import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import { jsonBodyLimit } from "../body-limit";
 import { serveFile } from "../fileServing";
-import { listInputs, saveUploadedImages, deleteInput, INPUT_DIR, REFERENCE_DIR, type UploadInput } from "../../inputResolver";
+import { listInputs, listReferences, saveUploadedImages, deleteInput, INPUT_DIR, REFERENCE_DIR, type UploadInput } from "../../inputResolver";
 
 const UPLOAD_BODY_LIMIT_BYTES = Math.max(1, Number.parseInt(process.env.UPLOAD_LIMIT_MB || "", 10) || 40) * 1024 * 1024;
 const UPLOAD_IMAGE_LIMIT_BYTES = Math.max(1, Number.parseInt(process.env.UPLOAD_IMAGE_LIMIT_MB || "", 10) || 20) * 1024 * 1024;
@@ -23,6 +23,19 @@ export function register(app: Hono, _deps: Deps): void {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as { images?: UploadInput[]; image?: UploadInput };
     const images = Array.isArray(body.images) ? body.images : body.image ? [body.image] : [];
     return c.json(saveUploadedImages(images, { maxBytes: UPLOAD_IMAGE_LIMIT_BYTES }));
+  });
+
+  app.post("/api/reference/upload", requireSameOrigin(), jsonBodyLimit(UPLOAD_BODY_LIMIT_BYTES), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { images?: UploadInput[]; image?: UploadInput };
+    const images = Array.isArray(body.images) ? body.images : body.image ? [body.image] : [];
+    // reference/ is a flat pool of style images (no "group" folder concept, unlike
+    // input/), so re-list via listReferences() rather than returning saveUploadedImages'
+    // own InputItem-shaped `inputs`, which would misreport subfolders as groups.
+    const { saved } = saveUploadedImages(images, { inputDir: REFERENCE_DIR, maxBytes: UPLOAD_IMAGE_LIMIT_BYTES });
+    const references = listReferences();
+    const savedRels = new Set(saved.map((s) => s.rel));
+    const addedIds = references.filter((r) => savedRels.has(r.rel)).map((r) => r.id);
+    return c.json({ saved, addedIds, references });
   });
 
   app.post("/api/inputs/delete", requireSameOrigin(), async (c) => {

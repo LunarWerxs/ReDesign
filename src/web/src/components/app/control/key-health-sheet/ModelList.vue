@@ -10,6 +10,7 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
+  SparklesIcon,
   SquareIcon,
   Trash2Icon,
 } from '@lucide/vue';
@@ -37,6 +38,7 @@ const emit = defineEmits<{
   'edit-model': [model: Model];
   'add-key': [pool: string];
   'edit-key': [pool: string, entry: KeyEntry];
+  'import-keys': [];
 }>();
 
 const store = useControlStore();
@@ -44,6 +46,9 @@ const { enabled: tooltipsEnabled } = useTooltipConfig();
 
 // File order is the manual order (drag-reorderable), not alphabetical.
 const activeModels = computed(() => [...store.models]);
+
+// True once at least one key exists in any pool. Drives the first-run paste CTA.
+const hasAnyKeys = computed(() => (store.keys?.pools || []).some((p) => p.total > 0));
 
 // Drag-to-reorder the model list, persisting the models.json array order. Same
 // @formkit config as RepoYeti/DevWebUI: pointer drag + touch tap-and-hold.
@@ -116,6 +121,15 @@ async function restoreModel(model: Model) {
         <ActivityIcon v-else class="size-3" />
         {{ store.liveCheckBusy ? t('keyModel.cancel') : t('keyModel.checkKeys') }}
       </Button>
+      <Button
+        variant="secondary"
+        size="xs"
+        :title="t('keyModel.pasteKeysTitle')"
+        @click="emit('import-keys')"
+      >
+        <SparklesIcon class="size-3" />
+        {{ t('keyModel.pasteKeys') }}
+      </Button>
       <Tooltip>
         <TooltipTrigger as-child>
           <Button variant="ghost" size="icon-xs" :aria-label="t('keyModel.addModel')" @click="emit('add-model')">
@@ -126,6 +140,23 @@ async function restoreModel(model: Model) {
       </Tooltip>
     </div>
   </div>
+
+  <!-- First-run: no keys anywhere yet. Lead with paste-and-autodetect. -->
+  <button
+    v-if="!hasAnyKeys && activeModels.length"
+    type="button"
+    class="mb-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10"
+    @click="emit('import-keys')"
+  >
+    <SparklesIcon class="size-5 shrink-0 text-primary" />
+    <span class="grid gap-0.5">
+      <span class="text-sm font-semibold">{{ t('keyModel.noKeysYet') }}</span>
+      <span class="text-xs text-muted-foreground">{{ t('keyModel.noKeysYetHint') }}</span>
+    </span>
+    <span class="ml-auto shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground">
+      {{ t('keyModel.pasteKeysCta') }}
+    </span>
+  </button>
 
   <!-- Each model carries its own key pool inline; expand to manage keys. Drag the grip to reorder. -->
   <div ref="modelsParent" class="grid gap-2.5">

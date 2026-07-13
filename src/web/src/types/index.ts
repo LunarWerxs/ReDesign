@@ -10,6 +10,7 @@ export interface Model {
   baseUrl?: string;
   vision: boolean;
   enabled: boolean;
+  starred?: boolean;
   color?: string;
   keys: number;
   maxTokens?: number;
@@ -22,6 +23,7 @@ export interface AvailableModel {
   id: string;
   label: string;
   source: 'provider' | 'catalog';
+  vision?: boolean;
 }
 
 export interface AvailableModelsResponse {
@@ -34,6 +36,7 @@ export interface Prompt {
   label: string;
   description?: string;
   user?: string;
+  starred?: boolean;
 }
 
 export type InputType = 'image' | 'group';
@@ -51,6 +54,13 @@ export interface ReferenceItem {
   id: string;
   name: string;
   preview: string;
+}
+
+export interface BrandAttachment {
+  id: string;
+  name: string;
+  text: string;
+  truncated: boolean;
 }
 
 export type JobStatus =
@@ -188,6 +198,8 @@ export interface SpendToDate {
 
 export interface EstimateRunCost {
   totalCost: number;
+  totalCostLow: number;
+  totalCostHigh: number;
   currency: string;
   anyEstimatePricing: boolean;
   anyUnpriced: boolean;
@@ -237,6 +249,23 @@ export interface ModelSettingsResponse {
   keys: KeySnapshot;
 }
 
+export type ImportKeyStatus = 'added' | 'duplicate' | 'unknown' | 'no_service';
+
+export interface ImportKeyResult {
+  mask: string;
+  brand: string | null;
+  label: string;
+  pools: string[];
+  status: ImportKeyStatus;
+  probed: boolean;
+}
+
+export interface ImportKeysResponse {
+  results: ImportKeyResult[];
+  added: number;
+  keys: KeySnapshot;
+}
+
 export interface UploadImage {
   name: string;
   mime: string;
@@ -249,14 +278,23 @@ export interface UploadResponse {
   saved?: unknown[];
 }
 
+export interface ReferenceUploadResponse {
+  references: ReferenceItem[];
+  addedIds?: string[];
+  saved?: unknown[];
+}
+
 export interface RunRequest {
   inputs: { ids: string[] };
   models: { ids: string[] };
   prompts: { presets: string[]; custom: string | null };
-  variants: number;
+  // Per-model copy count, keyed by model id; only models generating > 1 copy are
+  // included. Omitted entirely when every model runs a single copy.
+  modelQuantities?: Record<string, number>;
   maxImages: number;
   mock: boolean;
   reference?: { images: string[]; note: string | null };
+  brandStyleGuide?: string | null;
 }
 
 export interface HealthCheckResponse {

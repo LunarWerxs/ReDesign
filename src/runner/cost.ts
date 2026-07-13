@@ -28,6 +28,17 @@ function num(v: unknown): number {
 }
 
 /**
+ * True for the mock adapter's usage blob ({ mock: true, ... }). Mock jobs emit a
+ * tiny canned output (~1.5k tokens) with zero input and spend no real quota, so
+ * they must never feed the historical average that drives the pre-run estimate
+ * (see averageUsageByModel) - counting them drags a model's per-job token average
+ * far below its real usage and makes the "≈ $X" estimate under-shoot badly.
+ */
+function isMockUsage(usage: unknown): boolean {
+  return !!(usage && typeof usage === "object" && (usage as { mock?: unknown }).mock === true);
+}
+
+/**
  * Normalize any provider's `usage` object to { inputTokens, outputTokens }.
  * Recognizes:
  *   - Anthropic:        { input_tokens, output_tokens }
@@ -99,7 +110,7 @@ function runCost(manifest: RunCostManifestLike | null | undefined): RunCostResul
   const jobs = Array.isArray(manifest?.jobs) ? (manifest as RunCostManifestLike).jobs! : [];
 
   for (const job of jobs) {
-    if (!job || !job.usage) continue;
+    if (!job || !job.usage || isMockUsage(job.usage)) continue;
     const breakdown = costForUsage(job.modelId, job.usage);
     jobCount++;
     totalCost += breakdown.totalCost;
@@ -136,6 +147,10 @@ function spendToDate(options: store.ReadManifestOptions = {}): SpendToDateResult
   let anyEstimatePricing = false;
   let anyUnpriced = false;
   for (const run of runs) {
+    // Mock-mode runs spend no real quota, so they never count toward spend-to-date.
+    // Guards both fresh mock runs (whose manifest cost is now 0, see runReimagine) and
+    // any older mock manifests that still carry a baked-in placeholder cost on disk.
+    if ((run as { mock?: boolean }).mock) continue;
     const cost = run.cost;
     if (!cost || !cost.jobCount) continue;
     runCount++;
@@ -157,6 +172,11 @@ interface ModelAverageUsage extends NormalizedTokens {
   modelId: string;
   fromHistory: boolean; // false => DEFAULT_AVG_TOKENS fallback (no completed jobs yet for this model)
   sampleJobs: number;
+  // Observed min/max output tokens across the sampled jobs, so the estimate can show a
+  // spread (a dense screenshot emits far more HTML than a simple one). Equals the average
+  // when there is no history (default fallback) or only a single sample.
+  outputTokensLow: number;
+  outputTokensHigh: number;
 }
 
 /**
@@ -166,18 +186,20 @@ interface ModelAverageUsage extends NormalizedTokens {
  */
 function averageUsageByModel(modelIds: string[], options: store.ReadManifestOptions = {}): Record<string, ModelAverageUsage> {
   const wanted = new Set(modelIds);
-  const sums = new Map<string, { inputTokens: number; outputTokens: number; count: number }>();
+  const sums = new Map<string, { inputTokens: number; outputTokens: number; count: number; outputMin: number; outputMax: number }>();
   const runs = store.listRuns(options).slice(0, RECENT_RUNS_FOR_ESTIMATE);
 
   for (const run of runs) {
     const manifest = store.readManifest(run.runId, options);
     if (!manifest || !Array.isArray(manifest.jobs)) continue;
     for (const job of manifest.jobs as unknown as RunCostJobLike[]) {
-      if (!job || job.status !== "ok" || !job.usage || !wanted.has(job.modelId)) continue;
+      if (!job || job.status !== "ok" || !job.usage || isMockUsage(job.usage) || !wanted.has(job.modelId)) continue;
       const { inputTokens, outputTokens } = normalizeUsage(job.usage);
-      const entry = sums.get(job.modelId) || { inputTokens: 0, outputTokens: 0, count: 0 };
+      const entry = sums.get(job.modelId) || { inputTokens: 0, outputTokens: 0, count: 0, outputMin: Number.POSITIVE_INFINITY, outputMax: 0 };
       entry.inputTokens += inputTokens;
       entry.outputTokens += outputTokens;
+      entry.outputMin = Math.min(entry.outputMin, outputTokens);
+      entry.outputMax = Math.max(entry.outputMax, outputTokens);
       entry.count++;
       sums.set(job.modelId, entry);
     }
@@ -187,15 +209,25 @@ function averageUsageByModel(modelIds: string[], options: store.ReadManifestOpti
   for (const modelId of modelIds) {
     const entry = sums.get(modelId);
     if (entry && entry.count > 0) {
+      const avgOut = entry.outputTokens / entry.count;
       out[modelId] = {
         modelId,
         inputTokens: entry.inputTokens / entry.count,
-        outputTokens: entry.outputTokens / entry.count,
+        outputTokens: avgOut,
+        outputTokensLow: Number.isFinite(entry.outputMin) ? entry.outputMin : avgOut,
+        outputTokensHigh: entry.outputMax || avgOut,
         fromHistory: true,
         sampleJobs: entry.count,
       };
     } else {
-      out[modelId] = { modelId, ...DEFAULT_AVG_TOKENS, fromHistory: false, sampleJobs: 0 };
+      out[modelId] = {
+        modelId,
+        ...DEFAULT_AVG_TOKENS,
+        outputTokensLow: DEFAULT_AVG_TOKENS.outputTokens,
+        outputTokensHigh: DEFAULT_AVG_TOKENS.outputTokens,
+        fromHistory: false,
+        sampleJobs: 0,
+      };
     }
   }
   return out;
@@ -208,7 +240,9 @@ interface EstimateRunInput {
 }
 
 interface EstimateRunResult {
-  totalCost: number;
+  totalCost: number; // point estimate (per-model average usage)
+  totalCostLow: number; // same run priced at each model's cheapest observed output
+  totalCostHigh: number; // ...and its most expensive observed output
   currency: string;
   anyEstimatePricing: boolean;
   anyUnpriced: boolean;
@@ -225,6 +259,8 @@ function estimateRunCost(input: EstimateRunInput, options: store.ReadManifestOpt
   const averages = averageUsageByModel(modelIds, options);
   const byModel: EstimateRunResult["byModel"] = {};
   let totalCost = 0;
+  let totalCostLow = 0;
+  let totalCostHigh = 0;
   let anyEstimatePricing = false;
   let anyUnpriced = false;
   let anyFromDefault = false;
@@ -233,19 +269,26 @@ function estimateRunCost(input: EstimateRunInput, options: store.ReadManifestOpt
   for (const modelId of modelIds) {
     const jobs = jobCountByModel?.[modelId] ?? evenSplit;
     const avg = averages[modelId] as ModelAverageUsage;
+    // Point estimate uses the average output; the low/high bounds hold input at the
+    // average and swap in the cheapest/priciest output seen for this model, so the
+    // spread reflects how much a run's HTML length swings with screenshot complexity.
     const perJob = costForUsage(modelId, { input_tokens: avg.inputTokens, output_tokens: avg.outputTokens });
+    const perJobLow = costForUsage(modelId, { input_tokens: avg.inputTokens, output_tokens: avg.outputTokensLow });
+    const perJobHigh = costForUsage(modelId, { input_tokens: avg.inputTokens, output_tokens: avg.outputTokensHigh });
     const modelCost = perJob.totalCost * jobs;
     totalCost += modelCost;
+    totalCostLow += perJobLow.totalCost * jobs;
+    totalCostHigh += perJobHigh.totalCost * jobs;
     if (perJob.estimate) anyEstimatePricing = true;
     if (!perJob.priced) anyUnpriced = true;
     if (!avg.fromHistory) anyFromDefault = true;
     byModel[modelId] = { jobs, totalCost: modelCost, fromHistory: avg.fromHistory };
   }
 
-  return { totalCost, currency: "USD", anyEstimatePricing, anyUnpriced, anyFromDefault, byModel };
+  return { totalCost, totalCostLow, totalCostHigh, currency: "USD", anyEstimatePricing, anyUnpriced, anyFromDefault, byModel };
 }
 
-export { normalizeUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS };
+export { normalizeUsage, isMockUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS };
 export type {
   NormalizedTokens,
   CostBreakdown,

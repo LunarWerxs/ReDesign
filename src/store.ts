@@ -9,6 +9,7 @@ interface RunSummary {
   createdAt?: string;
   finishedAt: string | null;
   status: string;
+  mock: boolean;
   summary: unknown;
   title: string | null;
   counts: unknown;
@@ -186,6 +187,7 @@ function summarizeManifest(m: Manifest, fallbackRunId: string): RunSummary {
     createdAt: m.createdAt,
     finishedAt: m.finishedAt || null,
     status: m.status || "unknown",
+    mock: !!m.mock,
     summary: m.summary || null,
     title: (m.summary as any) && (m.summary as any).title ? (m.summary as any).title : null,
     counts: m.counts || null,

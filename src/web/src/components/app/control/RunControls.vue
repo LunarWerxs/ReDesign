@@ -10,10 +10,30 @@ const store = useControlStore();
 // Pre-run "≈ $X" estimate, always clearly marked as an estimate, never shown as
 // if it were the actual cost. See src/runner/cost.ts estimateRunCost() for the math
 // (per-model average usage from recent runs, or a documented default fallback).
+const fmtAmount = (v: number) => (v < 0.01 && v > 0 ? v.toFixed(4) : v.toFixed(2));
+
+// Show a low-high band alongside the point estimate when recent runs of these
+// models varied enough that a single number would be misleading (a dense
+// screenshot emits far more HTML than a simple one). Threshold keeps tight
+// spreads from adding noise.
+const showRange = computed(() => {
+  const est = store.costEstimate;
+  if (!est || est.anyFromDefault) return false;
+  const low = est.totalCostLow ?? est.totalCost;
+  const high = est.totalCostHigh ?? est.totalCost;
+  return low > 0 && high > low * 1.25;
+});
 const estimateText = computed(() => {
   const est = store.costEstimate;
   if (!est || !store.estimate.count) return null;
-  const amount = est.totalCost < 0.01 && est.totalCost > 0 ? est.totalCost.toFixed(4) : est.totalCost.toFixed(2);
+  const amount = fmtAmount(est.totalCost);
+  if (showRange.value) {
+    return t('cost.estimateWithRange', {
+      amount,
+      low: fmtAmount(est.totalCostLow),
+      high: fmtAmount(est.totalCostHigh),
+    });
+  }
   return est.anyFromDefault
     ? t('cost.estimateValueTilde', { amount })
     : t('cost.estimateValue', { amount });
@@ -23,6 +43,7 @@ const estimateTitle = computed(() => {
   if (!est) return '';
   const bits: string[] = [];
   bits.push(est.anyFromDefault ? t('cost.estimateFromDefault') : t('cost.estimateFromHistory'));
+  if (showRange.value) bits.push(t('cost.estimateRangeNote'));
   if (est.anyEstimatePricing) bits.push(t('cost.estimatePricingIsGuess'));
   return bits.join(' · ');
 });

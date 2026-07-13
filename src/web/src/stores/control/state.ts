@@ -1,6 +1,8 @@
+import { useStorage } from '@vueuse/core';
 import { computed, reactive, ref } from 'vue';
 import { ApiError } from '@/lib/api';
 import type {
+  BrandAttachment,
   EstimateRunCost,
   InputItem,
   Job,
@@ -48,12 +50,32 @@ export function createControlState() {
   const selReference = ref<string[]>([]);
   const referenceOn = ref(false);
   const mock = ref(false);
-  const variants = ref(1);
+  // Per-model copy count keyed by model id. Absence means the default of 1, so the
+  // map only ever holds entries > 1 (see setModelQty). Replaces the old single
+  // global "variants" number: each selected model can be generated N times.
+  const modelQty = ref<Record<string, number>>({});
   const maxImages = ref(8);
   const customOn = ref(false);
   const custom = ref('');
   const advancedOpen = ref(false);
   const refNote = ref('');
+  // Brand style guide: a durable brand brief appended to every generation prompt.
+  // Persisted per-browser (unlike the one-off refNote); a brand outlives a single run.
+  const brandOn = useStorage('redesign.brand-style-guide-on', false);
+  const brandStyleGuide = useStorage('redesign.brand-style-guide', '');
+  // A saved "default" style guide, separate from the field above so a user can
+  // temporarily edit/override the guide for one run without losing their default.
+  const brandStyleGuideDefault = useStorage('redesign.brand-style-guide-default', '');
+  // File attachments for the brand style guide: text is read client-side and
+  // inlined into the prompt at run time (see runs.ts startRun()). Session-only;
+  // unlike the guide text itself, attachments are heavier and not meant to persist
+  // silently across browser restarts.
+  const brandAttachments = ref<BrandAttachment[]>([]);
+  // Auto-inject the saved default the first time this browser has a default but an
+  // empty working guide (e.g. first load, or after the guide was cleared elsewhere).
+  if (!brandStyleGuide.value.trim() && brandStyleGuideDefault.value.trim()) {
+    brandStyleGuide.value = brandStyleGuideDefault.value;
+  }
 
   // ---- run progress ----
   const runId = ref<string | null>(null);
@@ -77,10 +99,11 @@ export function createControlState() {
 
   const estimate = computed(() => {
     const nP = selPrompts.value.length + (customOn.value && custom.value.trim() ? 1 : 0);
-    const v = Math.max(1, variants.value || 1);
-    const count = selInputs.value.length * selModels.value.length * nP * v;
+    // Total "model runs" = sum of each selected model's quantity (default 1).
+    const modelRuns = selModels.value.reduce((sum, id) => sum + Math.max(1, modelQty.value[id] || 1), 0);
+    const count = selInputs.value.length * modelRuns * nP;
     const text = count
-      ? `${count} job${count > 1 ? 's' : ''} (${selInputs.value.length} inputs × ${selModels.value.length} models × ${nP || 1} prompts × ${v})`
+      ? `${count} job${count > 1 ? 's' : ''} (${selInputs.value.length} inputs × ${modelRuns} model runs × ${nP || 1} prompts)`
       : 'select inputs, models & a prompt';
     return { count, text };
   });
@@ -123,12 +146,16 @@ export function createControlState() {
     selReference,
     referenceOn,
     mock,
-    variants,
+    modelQty,
     maxImages,
     customOn,
     custom,
     advancedOpen,
     refNote,
+    brandOn,
+    brandStyleGuide,
+    brandStyleGuideDefault,
+    brandAttachments,
     // run progress
     runId,
     runTitle,

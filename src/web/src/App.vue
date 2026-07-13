@@ -5,8 +5,10 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppTopbar from '@/components/app/AppTopbar.vue';
 import StatusPill from '@/components/app/StatusPill.vue';
-import { Settings as SettingsIcon } from '@lucide/vue';
+import { Settings as SettingsIcon, SlidersHorizontal as ViewOptionsIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import ViewSettings from '@/components/app/control/ViewSettings.vue';
 import KeyHealthSheet from '@/components/app/control/KeyHealthSheet.vue';
 import { useTheme } from '@/lib/theme';
 import { usePushPanel } from '@/shell/usePushPanel';
@@ -35,9 +37,22 @@ const viewerTo = computed(() => {
   return id ? { path: '/viewer', query: { run: id } } : { path: '/viewer' };
 });
 
+// Keep the View flyout (a Popover) open when the interaction that would normally
+// dismiss it actually happens inside an overlay it spawned - the run-picker Dialog,
+// an AlertDialog, or a toast - so those coexist with the flyout instead of racing it.
+function onViewFlyoutInteractOutside(e: Event) {
+  const target = (e as CustomEvent).detail?.originalEvent?.target as HTMLElement | null;
+  if (target?.closest('[role="dialog"], [role="alertdialog"], [data-sonner-toaster]')) {
+    e.preventDefault();
+  }
+}
+
 function openSettings() {
+  // Toggle: a second click on the gear closes the sidebar. The next-tick defer is kept
+  // from the original open-only version (it dodged a focus/animation race on open).
+  const next = !settingsOpen.value;
   setTimeout(() => {
-    settingsOpen.value = true;
+    settingsOpen.value = next;
   }, 0);
 }
 
@@ -69,12 +84,9 @@ onMounted(async () => {
 <template>
   <TooltipProvider :delay-duration="120">
     <div class="min-h-dvh bg-background text-foreground transition-[padding] duration-300 ease-in-out" :style="containerStyle">
-      <AppTopbar
-        :viewer-to="viewerTo"
-        :bordered="false"
-        contained
-        :sidebar="!isViewerRoute && !!controlStore.runId"
-      >
+      <!-- no :sidebar here; the header must never reserve the progress column and squish
+           its own logo/status/settings when a run starts (progress lives below the content) -->
+      <AppTopbar :viewer-to="viewerTo" :bordered="false" contained>
         <template #status>
           <StatusPill v-if="controlStore.running || controlStore.submitting" live>
             <span>{{ controlStore.runTitle || t('shell.runQueued') }} · </span>
@@ -83,6 +95,30 @@ onMounted(async () => {
         </template>
 
         <template #actions>
+          <!-- View options: pulled out of the settings sheet into its own header flyout so
+               filtering/adjusting the gallery no longer means opening Settings. Viewer route only. -->
+          <Popover v-if="isViewerRoute">
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                :aria-label="t('viewSettings.viewOptions')"
+                :title="t('viewSettings.viewOptions')"
+              >
+                <ViewOptionsIcon class="size-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              :collision-padding="12"
+              class="max-h-[min(80vh,620px)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto p-0"
+              @interact-outside="onViewFlyoutInteractOutside"
+              @focus-outside="onViewFlyoutInteractOutside"
+            >
+              <ViewSettings />
+            </PopoverContent>
+          </Popover>
+
           <Tooltip>
             <TooltipTrigger as-child>
               <Button variant="ghost" size="icon" :aria-label="t('shell.settings')" @click="openSettings">

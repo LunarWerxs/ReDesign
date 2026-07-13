@@ -106,10 +106,16 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       state.costEstimate.value = null;
       return;
     }
+    // Per-model job counts so the estimate honors each model's own quantity
+    // (inputs × prompts × that model's copies) instead of an even split.
+    const nP = state.selPrompts.value.length + (state.customOn.value && state.custom.value.trim() ? 1 : 0);
+    const base = state.selInputs.value.length * nP;
+    const jobCountByModel: Record<string, number> = {};
+    for (const id of modelIds) jobCountByModel[id] = base * Math.max(1, state.modelQty.value[id] || 1);
     const seq = ++estimateSeq;
     state.costEstimateLoading.value = true;
     try {
-      const result = await api.estimateRunCost({ modelIds, jobCount });
+      const result = await api.estimateRunCost({ modelIds, jobCount, jobCountByModel });
       if (seq === estimateSeq) state.costEstimate.value = result;
     } catch {
       if (seq === estimateSeq) state.costEstimate.value = null;
@@ -125,7 +131,12 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
   }
 
   watch(
-    () => [state.selInputs.value.length, [...state.selModels.value].sort().join(','), state.estimate.value.count],
+    () => [
+      state.selInputs.value.length,
+      [...state.selModels.value].sort().join(','),
+      state.estimate.value.count,
+      JSON.stringify(state.modelQty.value),
+    ],
     scheduleCostEstimate,
     { immediate: true },
   );
@@ -259,6 +270,14 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim()))
       return toast(t('runs.pickPrompt'));
 
+    // Only send quantities that differ from the default of 1; the backend defaults
+    // every other selected model to a single copy.
+    const modelQuantities: Record<string, number> = {};
+    for (const id of state.selModels.value) {
+      const q = state.modelQty.value[id];
+      if (q && q > 1) modelQuantities[id] = q;
+    }
+
     const body: RunRequest = {
       inputs: { ids: [...state.selInputs.value] },
       models: { ids: [...state.selModels.value] },
@@ -266,12 +285,20 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
         presets: [...state.selPrompts.value],
         custom: state.customOn.value ? state.custom.value.trim() || null : null,
       },
-      variants: Math.max(1, state.variants.value || 1),
       maxImages: Math.max(1, state.maxImages.value || 8),
       mock: state.mock.value,
     };
+    if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
     if (state.referenceOn.value && state.selReference.value.length) {
       body.reference = { images: [...state.selReference.value], note: state.refNote.value.trim() || null };
+    }
+    if (state.brandOn.value) {
+      const guideText = state.brandStyleGuide.value.trim();
+      const attachmentBlocks = state.brandAttachments.value.map(
+        (a) => `\n\n--- Attachment: ${a.name} ---\n${a.text}`,
+      );
+      const combined = [guideText, ...attachmentBlocks].join('').trim();
+      if (combined) body.brandStyleGuide = combined;
     }
 
     state.submitting.value = true;
