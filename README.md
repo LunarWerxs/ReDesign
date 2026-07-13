@@ -10,7 +10,7 @@
 
 Feed it a screenshot of any screen. It fires that screenshot at a bunch of AI models at once and hands back a grid of real, self-contained HTML redesigns, each one sitting next to the original so you can actually judge it. No more pasting the same image into ten chat tabs and eyeballing the results one at a time.
 
-It runs on your own machine and talks only to the model APIs you hand it keys for. There is one opt-in exception, off by default: a "Sync with Connections" toggle that signs you into LunarWerx's Connections account (`accounts.connections.icu`) to carry your theme across devices. Your API keys and other settings never leave your machine either way.
+It runs on your own machine and talks only to the model APIs you give it keys for. An optional "Sync with Connections" toggle can carry your theme across devices; your API keys never leave your machine.
 
 ## What it looks like
 
