@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/util";
 import * as conn from "../src/connections";
+import { unseal, sealingActive } from "../src/dpapi-seal.mjs";
 
 const STATE_FILE = path.join(ROOT, "output", ".reimagine-connections.json");
 
@@ -227,9 +228,12 @@ test("handleCallback exchanges the code, stores the refresh token, and fetches i
   const status = conn.syncStatus();
   expect(status.connected).toBe(true);
   expect(status.email).toBe("owner@example.com");
-  // Persisted to disk 0600 — the credential now lives inside the SDK's token entry.
+  // Persisted to disk 0600 — the credential now lives inside the SDK's token entry, DPAPI-sealed
+  // at rest on Windows (opaque, DPAPIv1-marked) and plaintext passthrough elsewhere.
   const raw = fs.readFileSync(STATE_FILE, "utf8");
-  const sdkTokens = JSON.parse(JSON.parse(raw).sdk[`cnx.connect.tokens.${CLIENT_ID}`]);
+  const storedToken = JSON.parse(raw).sdk[`cnx.connect.tokens.${CLIENT_ID}`];
+  if (sealingActive()) expect(storedToken.startsWith("DPAPIv1:")).toBe(true);
+  const sdkTokens = JSON.parse(unseal(storedToken)!);
   expect(sdkTokens.refreshToken).toBe("initial-refresh-token");
   const mode = fs.statSync(STATE_FILE).mode & 0o777;
   if (process.platform !== "win32") expect(mode).toBe(0o600);
@@ -294,7 +298,7 @@ test("a rotated refresh_token from the IdP is persisted and used on the next ref
   await signIn();
 
   const readSdkTokens = () =>
-    JSON.parse(JSON.parse(fs.readFileSync(STATE_FILE, "utf8")).sdk[`cnx.connect.tokens.${CLIENT_ID}`]);
+    JSON.parse(unseal(JSON.parse(fs.readFileSync(STATE_FILE, "utf8")).sdk[`cnx.connect.tokens.${CLIENT_ID}`])!);
   expect(readSdkTokens().refreshToken).toBe("rotated-refresh-token");
   expect(server.lastAuthHeader).toBeNull(); // no store call yet — rotation happened at sign-in
 

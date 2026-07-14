@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createConnect, type ConnectClient, type ConnectStore, type TokenSet } from "@cnct/connect";
 import { createLocker, type LockerClient } from "@cnct/locker";
+import { seal, unseal, wrapTokenStore } from "./dpapi-seal.mjs";
 import { ROOT } from "./util";
 
 /** Reimagine's own public "Sign in with Connections" OAuth client (PKCE, no secret). Its client_id
@@ -103,7 +104,9 @@ function connect(): ConnectClient {
     issuer: OAUTH.issuer,
     scopes: OAUTH.scopes,
     redirectUri: "http://127.0.0.1/oauth/callback",
-    store: stateStore,
+    // Wrap the store so the persisted TokenSet (the durable refresh token) is DPAPI-sealed at
+    // rest on Windows; the transient PKCE record and non-Windows hosts pass through unchanged.
+    store: wrapTokenStore(stateStore, TOKEN_KEY),
     fetch: ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as typeof fetch,
   });
   return connectClient;
@@ -125,7 +128,7 @@ function initConnections(): void {
   if (state.refreshToken && !state.sdk?.[TOKEN_KEY]) {
     const seed: TokenSet = { accessToken: "", refreshToken: state.refreshToken, expiresAt: 0 };
     state.sdk ??= {};
-    state.sdk[TOKEN_KEY] = JSON.stringify(seed);
+    state.sdk[TOKEN_KEY] = seal(JSON.stringify(seed)); // seal the seeded token at rest (Windows)
     delete state.refreshToken;
     persist();
   }
@@ -135,8 +138,10 @@ function initConnections(): void {
 function hasConnection(): boolean {
   const raw = state.sdk?.[TOKEN_KEY];
   if (!raw) return false;
+  const plain = unseal(raw); // DPAPI-sealed at rest → decrypt; legacy plaintext passes through
+  if (!plain) return false;
   try {
-    const tokens = JSON.parse(raw) as TokenSet;
+    const tokens = JSON.parse(plain) as TokenSet;
     return Boolean(tokens.refreshToken || tokens.accessToken);
   } catch (_) {
     return false;
