@@ -4,7 +4,11 @@ cd /d "%~dp0"
 
 rem Make sure the root has its clickable tray shortcut (a fresh clone won't).
 rem Create-Shortcut.ps1 also deletes a stale "Reimagine.lnk" left over from before the rename.
-if not exist "RēDesign.lnk" (
+rem The shortcut is really named "RēDesign.lnk" (ē = U+0113), but this .cmd is UTF-8 with no BOM,
+rem so a literal "ē" here gets mangled in cmd.exe's OEM codepage and the test NEVER matches —
+rem re-spawning PowerShell on every launch. The single-char "?" wildcard is ASCII-safe and
+rem matches the macron exactly (verified), so the "already created?" skip actually works.
+if not exist "R?Design.lnk" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "misc\Create-Shortcut.ps1" >nul 2>nul
 )
 
