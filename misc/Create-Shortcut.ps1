@@ -16,6 +16,6 @@ New-TrayShortcut `
   -Root $root `
   -ScriptDir $scriptDir `
   -LnkName $name `
-  -IconFile "Reimagine.ico" `
+  -IconFile "ReDesign.ico" `
   -Description "Launch ReDesign (system tray)" `
   -LegacyLnks @('ReDesign.lnk', 'Reimagine.lnk')

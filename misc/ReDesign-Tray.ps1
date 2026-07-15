@@ -1,9 +1,10 @@
 ﻿# RēDesign system-tray host (Windows). Thin adapter over the shared Tray-Host engine (misc/Tray-Host.ps1). This file owns
 # only what's genuinely ReDesign-specific: it builds a $TrayConfig hashtable (see the
 # engine's header comment for the full per-key contract), dot-sources the engine, then
-# hands off to Invoke-TrayHostSelfTest / Start-TrayHost. Launch it via Reimagine.vbs
-# (which sets the port) so there's no console flash. Lives in misc/, so the project root
-# is one level up.
+# hands off to Invoke-TrayHostSelfTest / Start-TrayHost. Launch it via Tray-Launch.vbs
+# (which auto-discovers the sibling *-Tray.ps1 and runs it hidden) so there's no console
+# flash; the port comes from this file's own param() default, not the .vbs. Lives in misc/,
+# so the project root is one level up.
 #
 # ReDesign's divergences from the shared engine defaults (see the engine header for the
 # full documented list):
@@ -69,7 +70,7 @@ $FirstRunBootstrap = {
   if (-not $bc) { return }
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = "cmd.exe"
-  $psi.Arguments = "/c cd /d `"$appRoot`" && $bc > `"$(Join-Path $scriptDir 'Reimagine-Rebuild.log')`" 2>&1"
+  $psi.Arguments = "/c cd /d `"$appRoot`" && $bc > `"$(Join-Path $scriptDir 'ReDesign-Rebuild.log')`" 2>&1"
   $psi.WorkingDirectory = $appRoot
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
@@ -83,7 +84,7 @@ $TrayConfig = @{
   Root                 = $root
   DisplayName          = "RēDesign"
   ServiceName          = "redesign"
-  IconFile             = "Reimagine.ico"
+  IconFile             = "ReDesign.ico"
   Port                 = $Port
   InfoFile             = Join-Path $rdHome "runtime.json"
   DaemonLogPath        = Join-Path $rdHome "logs\daemon.log"
@@ -91,7 +92,7 @@ $TrayConfig = @{
   EntryFile            = "src\index.ts"
   FirstRun             = $FirstRunBootstrap
   RebuildCommand       = $RebuildResolver
-  RebuildLogName       = "Reimagine-Rebuild.log"
+  RebuildLogName       = "ReDesign-Rebuild.log"
   # "Rebuild & Restart" only shows when REDESIGN_DEV=1 (public users rebuild via misc\Rebuild.bat).
   IsDevTree            = ($env:REDESIGN_DEV -eq "1")
   SentinelFile         = Join-Path $rdHome "shutdown.request"
