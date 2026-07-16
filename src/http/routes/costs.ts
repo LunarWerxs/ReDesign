@@ -7,6 +7,7 @@
  */
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
+import { requireSameOrigin } from "../origin-guard";
 import { spendToDate, estimateRunCost } from "../../runner";
 import { runStoreOptions } from "../runQueue";
 
@@ -19,7 +20,7 @@ interface EstimateBody {
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/costs", (c) => c.json(spendToDate(runStoreOptions())));
 
-  app.post("/api/costs/estimate", async (c) => {
+  app.post("/api/costs/estimate", requireSameOrigin(), async (c) => {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as EstimateBody;
     const modelIds = Array.isArray(body.modelIds) ? body.modelIds.map(String).filter(Boolean) : [];
     const jobCount = Math.max(0, parseInt(String(body.jobCount), 10) || 0);
