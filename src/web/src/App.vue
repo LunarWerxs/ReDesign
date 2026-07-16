@@ -16,7 +16,13 @@ import AppContainer from '@/shell/AppContainer.vue';
 import AppFooter from '@/shell/AppFooter.vue';
 import { useControlStore } from '@/stores/control';
 import { useViewerStore } from '@/stores/viewer';
+import { applyWindowSizeHint } from '@/lib/window-size-hint';
 import { t } from '@/i18n';
+
+// A portable (--app) window forwarded into an already-running Chromium instance ignores
+// --window-size and the saved placement; the daemon/tray/start.cmd tag its URL with the size
+// it should be and we correct it here before first paint. No-op in a browser tab or un-hinted.
+applyWindowSizeHint();
 
 // Install the reactive theme watcher once for the whole app.
 useTheme();

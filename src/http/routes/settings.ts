@@ -16,6 +16,7 @@ import { requireSameOrigin, PORT, HOST } from "../origin-guard";
 import { loadAppSettings, saveAppSettings } from "../../app-settings";
 import { readInstanceInfo, updateInstanceInfo, instanceFilePath } from "../../instance";
 import { openPortableWindow } from "../../portable-window.mjs";
+import { WINDOW_SIZE_HINT_PARAM, windowSizeHintFor } from "../../window-size";
 import {
   autoUpdateEnabled,
   getAutoUpdateIntervalSecs,
@@ -98,8 +99,23 @@ export function register(app: Hono, _deps: Deps): void {
     const url = readInstanceInfo()?.url || `http://${HOST}:${PORT}`;
     const profileDir = join(dirname(instanceFilePath()), "portable-profile");
     // First-run size only — openPortableWindow yields to the profile's saved placement once
-    // the user has resized the window themselves (see PORTABLE_WINDOW_SIZE above).
-    const result = await openPortableWindow(url, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
+    // the user has resized the window themselves (see PORTABLE_WINDOW_SIZE above). A forwarded
+    // --app launch (a window already open on this profile) ignores --window-size AND the saved
+    // placement, so also tag the URL with the size this window should have and the page
+    // corrects itself with resizeTo (src/web/src/lib/window-size-hint.ts). The query string is
+    // not part of Chromium's placement key; a URL that won't parse just goes out un-hinted.
+    let target = url;
+    try {
+      const hint = windowSizeHintFor(profileDir, url, PORTABLE_WINDOW_SIZE);
+      if (hint) {
+        const u = new URL(url);
+        u.searchParams.set(WINDOW_SIZE_HINT_PARAM, hint);
+        target = u.toString();
+      }
+    } catch {
+      /* unparseable base URL: open it un-hinted rather than fail the route */
+    }
+    const result = await openPortableWindow(target, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
     return c.json(result);
   });
 }

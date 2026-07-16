@@ -103,11 +103,13 @@ $TrayConfig = @{
   # first slice of a run's ProgressCard visible), so a COLD tray start (tray boots the
   # daemon and opens the window itself, before the daemon's own POST /api/portable-window
   # path exists) stops opening a never-seen profile at ~the whole work area. start.cmd's
-  # open path (misc/Open-Ui.ps1) carries the same numbers. NO PortableWindowSizeHint: this
-  # web build has no ?window-size applier (no resizeTo anywhere in src/web/src), so the
-  # hint would ride every URL as an inert param — enable it only after porting devwebui's
-  # web/src/lib/window-size-hint.ts.
-  PortableWindowSize   = @{ Width = 840; Height = 760 }
+  # open path (misc/Open-Ui.ps1) carries the same numbers. PortableWindowSizeHint is safe
+  # here: the web build now applies ?window-size via resizeTo
+  # (src/web/src/lib/window-size-hint.ts), the only fix that reaches a FORWARDED --app launch
+  # (a window already open on the profile, which ignores --window-size and the saved
+  # placement alike).
+  PortableWindowSize     = @{ Width = 840; Height = 760 }
+  PortableWindowSizeHint = $true
   SelfTestMarker       = "REDESIGN_TRAY_SELFTEST"
   MenuOpenLabel        = "Open RēDesign"
   MutexName            = "Local\redesign.tray.$hash"

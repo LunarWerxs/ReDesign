@@ -262,12 +262,12 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
   // First-run portable-window sizing: the ADAPTER opts into the engine's PortableWindowSize
   // with the daemon's measured 840x760 (PORTABLE_WINDOW_SIZE in src/http/routes/settings.ts,
   // pinned by tests/portable-window-size.test.ts) so a cold tray start stops opening a
-  // never-seen profile at ~the whole work area — and does NOT enable the ?window-size hint,
-  // which would be an inert param for a web build with no resizeTo applier. ADAPTER config.
-  it("opts into first-run portable-window sizing with the daemon's measured numbers", () => {
+  // never-seen profile at ~the whole work area — and enables the ?window-size hint, now that
+  // the web build applies it via resizeTo (src/web/src/lib/window-size-hint.ts). ADAPTER config.
+  it("opts into first-run portable-window sizing and the ?window-size hint", () => {
     const tray = fs.readFileSync(trayPath, "utf8");
     expect(/PortableWindowSize\s*=\s*@\{\s*Width\s*=\s*840;\s*Height\s*=\s*760\s*\}/.test(tray)).toBe(true);
-    expect(/PortableWindowSizeHint\s*=\s*\$true/i.test(tray)).toBe(false);
+    expect(/PortableWindowSizeHint\s*=\s*\$true/i.test(tray)).toBe(true);
   });
 
   // start.cmd's open path (misc/Open-Ui.ps1) sizes a never-seen window the same way — and
