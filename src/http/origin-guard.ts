@@ -1,37 +1,24 @@
 /**
- * Reject state-changing / key-spending requests that come from another origin (a drive-by page,
- * or a sandboxed model-output iframe whose Origin is "null"). Same-origin UI requests and tool
- * requests with no Origin header are allowed. Ported verbatim from server.js's originAllowed().
+ * ReDesign's thin app-local wiring of the shared cross-site (CSRF) guard. Every mutating /api route
+ * wraps `requireSameOrigin()`, which now returns the kit's shared `loopbackGuard` — the single
+ * audited Sec-Fetch-Site + Origin + Host guard (src/loopback-guard.mjs), vendored from lunarwerx-ui
+ * — in place of ReDesign's former hand-rolled Origin-allowlist. Same posture (mutating routes only;
+ * GETs stay open), stronger guard (also catches the simple-request CORS bypass + DNS-rebinding).
  *
- * RēDesign is NOT CORS-permissive like DevWebUI, do not swap this for `hono/cors` (that would
- * loosen the security posture).
+ * ReDesign is loopback-only (no tunnel), so the guard applies verbatim; never wire it on /oauth/*
+ * (those are legit cross-site OAuth returns). PORT/HOST stay here — they are this app's bind config,
+ * read by the settings route.
  */
-import type { Context, MiddlewareHandler } from "hono";
+import type { MiddlewareHandler } from "hono";
+import { loopbackGuard } from "../loopback-guard.mjs";
 
 const PORT = Number.parseInt(process.env.PORT || "", 10) || 5178;
 const HOST = process.env.HOST || "127.0.0.1";
 
-function originAllowed(c: Context): boolean {
-  const origin = c.req.header("origin");
-  if (!origin) return true; // curl / CLI / same-origin navigations
-  const allowed = [
-    `http://${HOST}:${PORT}`,
-    `http://localhost:${PORT}`,
-    `http://127.0.0.1:${PORT}`,
-    // Vite dev server origin (npm run dev:web → :5173, proxied here). Harmless in prod (nothing
-    // serves there); a real cross-origin attacker carries its own origin and is still rejected.
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-  ];
-  return allowed.includes(origin);
-}
-
-/** Hono middleware form: 403s a cross-origin mutating request before the route handler runs. */
+/** The shared cross-site guard as per-route middleware. Kept as a factory so the existing
+ *  `requireSameOrigin()` call sites across the route modules are unchanged. */
 function requireSameOrigin(): MiddlewareHandler {
-  return async (c, next) => {
-    if (!originAllowed(c)) return c.json({ error: "cross-origin request blocked" }, 403);
-    await next();
-  };
+  return loopbackGuard;
 }
 
-export { originAllowed, requireSameOrigin, PORT, HOST };
+export { requireSameOrigin, PORT, HOST };
