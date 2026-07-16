@@ -259,6 +259,27 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(/--no-default-browser-check/i.test(engine)).toBe(true);
   });
 
+  // First-run portable-window sizing: the ADAPTER opts into the engine's PortableWindowSize
+  // with the daemon's measured 840x760 (PORTABLE_WINDOW_SIZE in src/http/routes/settings.ts,
+  // pinned by tests/portable-window-size.test.ts) so a cold tray start stops opening a
+  // never-seen profile at ~the whole work area — and does NOT enable the ?window-size hint,
+  // which would be an inert param for a web build with no resizeTo applier. ADAPTER config.
+  it("opts into first-run portable-window sizing with the daemon's measured numbers", () => {
+    const tray = fs.readFileSync(trayPath, "utf8");
+    expect(/PortableWindowSize\s*=\s*@\{\s*Width\s*=\s*840;\s*Height\s*=\s*760\s*\}/.test(tray)).toBe(true);
+    expect(/PortableWindowSizeHint\s*=\s*\$true/i.test(tray)).toBe(false);
+  });
+
+  // start.cmd's open path (misc/Open-Ui.ps1) sizes a never-seen window the same way — and
+  // ONLY a never-seen one: --window-size is gated on the same saved-placement probe the
+  // engine uses, so a size the user picked themselves keeps winning on that path too.
+  it("Open-Ui.ps1 first-run-sizes the portable window behind the placement probe", () => {
+    const openUi = fs.readFileSync(path.join(repoRoot, "misc", "Open-Ui.ps1"), "utf8");
+    expect(/function\s+Get-RememberedPlacement/i.test(openUi)).toBe(true);
+    expect(/--window-size=/.test(openUi)).toBe(true);
+    expect(/Width\s*=\s*840;\s*Height\s*=\s*760/.test(openUi)).toBe(true);
+  });
+
   // Dynamic-port + instance-pointer wiring (matches RepoYeti's tray): the tray must read the
   // runtime.json pointer the daemon writes and validate it via /api/health before trusting it,
   // rather than assuming the preferred port is where the daemon actually landed. The

@@ -97,6 +97,17 @@ $TrayConfig = @{
   IsDevTree            = ($env:REDESIGN_DEV -eq "1")
   SentinelFile         = Join-Path $rdHome "shutdown.request"
   OnStrayDaemon        = "warn"
+  # Portable-window sizing (engine: Open-AppUi). First-run size = the daemon's measured
+  # PORTABLE_WINDOW_SIZE (src/http/routes/settings.ts — the layout hard-caps content at
+  # --container-max = 800px, so 840 outer; 760 tall keeps the input/options stack plus the
+  # first slice of a run's ProgressCard visible), so a COLD tray start (tray boots the
+  # daemon and opens the window itself, before the daemon's own POST /api/portable-window
+  # path exists) stops opening a never-seen profile at ~the whole work area. start.cmd's
+  # open path (misc/Open-Ui.ps1) carries the same numbers. NO PortableWindowSizeHint: this
+  # web build has no ?window-size applier (no resizeTo anywhere in src/web/src), so the
+  # hint would ride every URL as an inert param — enable it only after porting devwebui's
+  # web/src/lib/window-size-hint.ts.
+  PortableWindowSize   = @{ Width = 840; Height = 760 }
   SelfTestMarker       = "REDESIGN_TRAY_SELFTEST"
   MenuOpenLabel        = "Open RēDesign"
   MutexName            = "Local\redesign.tray.$hash"

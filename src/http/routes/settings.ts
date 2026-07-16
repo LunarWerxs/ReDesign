@@ -23,6 +23,27 @@ import {
   setAutoUpdateIntervalSecs,
 } from "../../auto-update";
 
+/**
+ * First-run outer size of the portable app window (what Chromium's `--window-size` takes).
+ * Only applies to a window the dedicated profile has NEVER seen — the kit's
+ * openPortableWindow probes the profile's saved placement first, so a size the user picked
+ * themselves (or a maximize) wins on every later launch. Without it a never-seen window
+ * opens at Chromium's default of ~the whole work area (~1905x2092 on a 4K display).
+ *
+ * Measured against the real Control page, not guessed. Width: the layout hard-caps content
+ * at `--container-max` = 800px (src/web/src/styles/kit-base.css, applied by
+ * src/web/src/shell/AppContainer.vue), so 800px container + 15px scrollbar + ~16px frame =
+ * 831 outer is the floor below which the design width gets cropped. Height is a density
+ * pick sized for the working state, not the empty one: the first-run stack (58px topbar +
+ * Inputs + Options + footer) is only ~500px, but starting a run inserts a ProgressCard
+ * below it — a 718px viewport keeps the full input/options stack visible plus a ~200px
+ * first slice of that card — 760 outer (outer = viewport + ~34 title + ~8 frame height;
+ * Chromium draws its title bar inside the client area). The tray and start.cmd launchers
+ * carry the same numbers (misc/ReDesign-Tray.ps1 PortableWindowSize, misc/Open-Ui.ps1) —
+ * keep all three in step.
+ */
+export const PORTABLE_WINDOW_SIZE = { width: 840, height: 760 };
+
 function snapshot() {
   return {
     autoUpdate: autoUpdateEnabled(),
@@ -76,7 +97,9 @@ export function register(app: Hono, _deps: Deps): void {
   app.post("/api/portable-window", requireSameOrigin(), async (c) => {
     const url = readInstanceInfo()?.url || `http://${HOST}:${PORT}`;
     const profileDir = join(dirname(instanceFilePath()), "portable-profile");
-    const result = await openPortableWindow(url, { profileDir });
+    // First-run size only — openPortableWindow yields to the profile's saved placement once
+    // the user has resized the window themselves (see PORTABLE_WINDOW_SIZE above).
+    const result = await openPortableWindow(url, { profileDir, initialSize: PORTABLE_WINDOW_SIZE });
     return c.json(result);
   });
 }
