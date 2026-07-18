@@ -38,5 +38,9 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     emptyOutDir: true,
+    // @vueuse/core ships /* #__PURE__ */ comments in positions rolldown can't bind to a call
+    // expression (e.g. before an object literal), so it flags them as INVALID_ANNOTATION even
+    // though the annotation is inert there. Silence that one benign check to keep builds quiet.
+    rollupOptions: { checks: { invalidAnnotation: false } },
   },
 });
