@@ -36,3 +36,6 @@ tmp/
 # Personal sample screenshots — users drop their own here
 /input/*
 !/input/example-dashboard.png
+
+# Local root rebuild convenience wrapper (delegates to misc/Rebuild.bat)
+/Rebuild.bat
