@@ -6,9 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "npm run check:i18n && vite build",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json",
+    "//typecheck": "tsconfig.app.json covers src/ only, so the test/ specs need the second pass or they rot untyped.",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && vue-tsc --noEmit -p tsconfig.vitest.json",
     "check:i18n": "node scripts/i18n-check.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "//test": "Vitest, run via `npm run test`. NOT `bun test`: bun's runner has no Vue SFC compiler, so .vue imports resolve to a string path and @vue/test-utils throws a WeakMap key error. CI uses `npm run test` for the same reason.",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@formkit/drag-and-drop": "^0.6.1",
@@ -28,11 +32,14 @@
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.0",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
+    "happy-dom": "^20.10.6",
     "tailwindcss": "^4.3.2",
     "tw-animate-css": "^1.4.0",
     "typescript": "^6.0.3",
     "vite": "^8.1.3",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.3.6"
   }
 }

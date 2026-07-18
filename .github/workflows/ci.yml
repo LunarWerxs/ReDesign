@@ -31,7 +31,7 @@ jobs:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
 
   web:
-    name: web (i18n + build)
+    name: web (i18n + typecheck + test + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -44,4 +44,8 @@ jobs:
           cache: "npm"
           cache-dependency-path: src/web/package-lock.json
       - run: npm ci
-      - run: npm run build # vue-tsc type-check + vite bundle (build script itself runs check:i18n first)
+      # `build` does NOT type-check (it is check:i18n + vite build, and vite strips types without
+      # checking them), so vue-tsc needs its own step. Covers src/ and the test/ specs.
+      - run: npm run typecheck
+      - run: npm run test # Vitest: pure-lib units + component render (no backend needed)
+      - run: npm run build # vite bundle (build script runs check:i18n first)
