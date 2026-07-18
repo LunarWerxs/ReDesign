@@ -23,6 +23,8 @@ interface Job {
   keyMask: string | null;
   attempts: number;
   ms: number;
+  /** Pre-flight wait (screenshot captioning for a text-only model), excluded from `ms`. */
+  prepMs?: number;
   usage: unknown;
   cost?: import("./cost").CostBreakdown | null;
   wrapped: boolean;

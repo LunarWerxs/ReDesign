@@ -94,10 +94,13 @@ export interface Job {
   file?: string | null;
   error?: string | null;
   ms?: number;
+  /** Pre-flight wait (screenshot captioning for a text-only model), excluded from `ms`. */
+  prepMs?: number;
   wrapped?: boolean;
   truncated?: boolean;
   usage?: unknown;
   cost?: JobCost | null;
+  note?: string;
 }
 
 export interface Counts {

@@ -317,6 +317,11 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       const hasVision = model.vision !== false; // default to vision-capable
       const t0 = Date.now();
       let lastErr: string | null = null;
+      // Pre-flight (captioning) time, kept OUT of job.ms. A text-only model waits on
+      // a vision model's caption before it can start, and charging that wait to the
+      // model made it look far slower than it generates — the UI lists these numbers
+      // side by side, so they have to measure the same thing.
+      let prepMs = 0;
 
       if (signal?.aborted) {
         job.status = "cancelled";
@@ -359,6 +364,7 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
             refCaption = await describeReference();
             if (refCaption) effectivePrompt += textReferenceBlock(refCaption, referenceNote);
           }
+          prepMs = Date.now() - t0;
         }
         if (brandStyleGuide) effectivePrompt += brandStyleGuideBlock(brandStyleGuide);
         job.status = "running";
@@ -481,7 +487,8 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
         }
       }
 
-      job.ms = Date.now() - t0;
+      job.ms = Math.max(0, Date.now() - t0 - prepMs);
+      if (prepMs) job.prepMs = prepMs;
       job.finishedAt = new Date().toISOString();
 
       // Exactly-once accounting for every job, including pre-flight cancellation.
