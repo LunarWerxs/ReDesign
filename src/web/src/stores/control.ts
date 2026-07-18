@@ -16,13 +16,16 @@ export const useControlStore = defineStore('control', () => {
   const state = createControlState();
   // Shared self-update state machine (check/apply guards), see @/lib/useSelfUpdate.
   const selfUpdate = useSelfUpdate<UpdateStatus, UpdateApplyResult>(api);
-  const appLifecycleActions = createAppLifecycleActions(state, {
-    checkForUpdate: selfUpdate.checkForUpdate,
-  });
   const selectionContentActions = createSelectionContentActions(state);
   const keysModelsActions = createKeysModelsActions(state);
   const runsActions = createRunsActions(state, {
     refreshKeys: keysModelsActions.refreshKeys,
+  });
+  // Created after runs so bootstrap can re-attach to whatever the server is still
+  // running (the daemon outlives the tab, see runs.ts resumeRuns).
+  const appLifecycleActions = createAppLifecycleActions(state, {
+    checkForUpdate: selfUpdate.checkForUpdate,
+    resumeRuns: runsActions.resumeRuns,
   });
   // "Sync my settings with Connections" (opt-in cloud sync of theme), see @/stores/control/sync.
   const syncActions = createSyncActions();
@@ -68,7 +71,7 @@ export const useControlStore = defineStore('control', () => {
     brandStyleGuide: state.brandStyleGuide,
     brandStyleGuideDefault: state.brandStyleGuideDefault,
     brandAttachments: state.brandAttachments,
-    // run progress
+    // run progress (single-run views of the focused run, plus the queue behind it)
     runId: state.runId,
     runTitle: state.runTitle,
     runStatus: state.runStatus,
@@ -77,6 +80,9 @@ export const useControlStore = defineStore('control', () => {
     running: state.running,
     submitting: state.submitting,
     jobList: state.jobList,
+    activeRuns: state.activeRuns,
+    backlogRuns: state.backlogRuns,
+    anyRunActive: state.anyRunActive,
     // live check
     liveCheckArmed: state.liveCheckArmed,
     liveCheckBusy: state.liveCheckBusy,
@@ -139,6 +145,7 @@ export const useControlStore = defineStore('control', () => {
     resetLiveCheck: keysModelsActions.resetLiveCheck,
     startRun: runsActions.startRun,
     cancelRun: runsActions.cancelRun,
+    focusRun: runsActions.focusRun,
     refreshCostEstimate: runsActions.refreshCostEstimate,
     loadSyncStatus: syncActions.loadSyncStatus,
     enableSync: syncActions.enableSync,

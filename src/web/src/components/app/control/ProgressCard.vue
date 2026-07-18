@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
-import { ImageIcon, SquareIcon } from '@lucide/vue';
+import { ImageIcon, SquareIcon, XIcon } from '@lucide/vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
-import type { JobStatus } from '@/types';
+import type { Job, JobStatus } from '@/types';
 
 const store = useControlStore();
 
@@ -42,6 +42,14 @@ const runningCostLabel = computed(() => {
 function jobCostLabel(job: { cost?: { totalCost: number } | null }) {
   if (!job.cost || !job.cost.totalCost) return '';
   return job.cost.totalCost < 0.01 ? job.cost.totalCost.toFixed(4) : job.cost.totalCost.toFixed(2);
+}
+
+// The runner's per-job note explains the non-obvious cases (a text-only model fed
+// an auto caption, an output truncated at the token limit) — worth surfacing, since
+// those are exactly the rows a user asks "why was that one so slow/short?" about.
+function jobTooltip(job: Job): string {
+  if (job.status === 'error' && job.error) return job.error;
+  return job.note || '';
 }
 </script>
 
@@ -82,8 +90,40 @@ function jobCostLabel(job: { cost?: { totalCost: number } | null }) {
           <span v-if="runningCostLabel" class="ml-auto font-mono">{{ runningCostLabel }}</span>
         </template>
       </div>
+      <!-- Runs stacked behind this one. The server has always queued a second
+           submission FIFO; this strip is what makes that queue visible and
+           steerable (click to watch, × to drop it before it starts). -->
+      <div v-if="store.backlogRuns.length" class="mb-2.5 flex flex-wrap items-center gap-1.5 text-xs">
+        <span class="text-muted-foreground">{{ t('progress.upNext') }}</span>
+        <span
+          v-for="queued in store.backlogRuns"
+          :key="queued.runId"
+          class="flex items-center gap-1 rounded-full border bg-muted/30 py-0.5 pl-2.5 pr-0.5"
+        >
+          <button
+            type="button"
+            class="max-w-[160px] truncate text-muted-foreground hover:text-foreground"
+            :title="t('progress.watchThisRun', { run: queued.runId })"
+            @click="store.focusRun(queued.runId)"
+          >
+            {{ queued.title }}
+            <span v-if="queued.queuePosition" class="text-muted-foreground/70">
+              · {{ t('progress.position', { n: queued.queuePosition }) }}
+            </span>
+          </button>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="size-5 rounded-full text-muted-foreground hover:text-destructive"
+            :title="t('progress.cancelQueued')"
+            @click="store.cancelRun(queued.runId)"
+          >
+            <XIcon class="size-3" />
+          </Button>
+        </span>
+      </div>
       <div class="grid max-h-[320px] gap-1.5 overflow-auto">
-        <Tooltip v-for="job in store.jobList" :key="job.id" :disabled="!(job.status === 'error' && job.error)">
+        <Tooltip v-for="job in store.jobList" :key="job.id" :disabled="!jobTooltip(job)">
           <TooltipTrigger as-child>
             <div
               class="grid grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
@@ -94,11 +134,15 @@ function jobCostLabel(job: { cost?: { totalCost: number } | null }) {
                 }}{{ job.variant > 1 ? ' v' + job.variant : '' }}
               </span>
               <span class="tabular-nums text-muted-foreground/70">
-                {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : '' }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : '' }}
+                {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : ''
+                }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : ''
+                }}<span v-if="job.prepMs && (job.status === 'ok' || job.status === 'error')" class="text-muted-foreground/50">
+                  {{ t('progress.prepMs', { ms: job.prepMs }) }}
+                </span>
               </span>
             </div>
           </TooltipTrigger>
-          <TooltipContent v-if="job.status === 'error' && job.error" class="max-w-xs">{{ job.error }}</TooltipContent>
+          <TooltipContent v-if="jobTooltip(job)" class="max-w-xs">{{ jobTooltip(job) }}</TooltipContent>
         </Tooltip>
       </div>
     </CardContent>

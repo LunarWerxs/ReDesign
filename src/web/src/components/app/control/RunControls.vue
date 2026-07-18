@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { PlayIcon, SquareIcon, Loader2Icon } from '@lucide/vue';
+import { PlayIcon, SquareIcon, Loader2Icon, ListPlusIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
@@ -38,6 +38,15 @@ const estimateText = computed(() => {
     ? t('cost.estimateValueTilde', { amount })
     : t('cost.estimateValue', { amount });
 });
+// The server runs a FIFO queue of runs, so Run stays live while one is generating:
+// pressing it again stacks another batch behind the current one rather than being
+// refused. The label says which of the two is about to happen.
+const runLabel = computed(() => {
+  if (store.submitting) return t('runControls.queueing');
+  if (!store.anyRunActive) return t('runControls.run');
+  return t('runControls.queueAnother', { count: store.activeRuns.length }, store.activeRuns.length);
+});
+
 const estimateTitle = computed(() => {
   const est = store.costEstimate;
   if (!est) return '';
@@ -62,13 +71,14 @@ const estimateTitle = computed(() => {
       <SquareIcon class="size-4" /> {{ t('runControls.cancel') }}
     </Button>
     <Button
-      :disabled="store.submitting || store.running"
-      :title="t('runControls.startRun')"
+      :disabled="store.submitting"
+      :title="store.anyRunActive ? t('runControls.queueRun') : t('runControls.startRun')"
       @click="store.startRun()"
     >
       <Loader2Icon v-if="store.submitting" class="size-4 animate-spin" />
+      <ListPlusIcon v-else-if="store.anyRunActive" class="size-4" />
       <PlayIcon v-else class="size-4" />
-      {{ store.submitting ? t('runControls.queueing') : t('runControls.run') }}
+      {{ runLabel }}
     </Button>
   </div>
 </template>

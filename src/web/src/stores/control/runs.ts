@@ -1,10 +1,9 @@
-import { ref, watch } from 'vue';
-import { useEventSource } from '@vueuse/core';
+import { watch } from 'vue';
 import { toast } from 'vue-sonner';
 import { api, ApiError, eventsUrl } from '@/lib/api';
 import { t } from '@/i18n';
 import type { Manifest, RunEvent, RunRequest, RunSummary } from '@/types';
-import { errMessage } from './state';
+import { errMessage, isActiveStatus } from './state';
 import type { ControlState } from './state';
 
 export interface RunsDeps {
@@ -60,15 +59,40 @@ if (typeof window !== 'undefined') {
 const ESTIMATE_DEBOUNCE_MS = 300;
 
 export function createRunsActions(state: ControlState, deps: RunsDeps) {
-  const sourceUrl = ref<string>();
   let estimateTimer: ReturnType<typeof setTimeout> | null = null;
   let estimateSeq = 0;
-  const { data, close } = useEventSource(sourceUrl, [], {
-    autoReconnect: { retries: -1, delay: 2500 },
-    immediate: false,
-  });
 
-  watch(data, (raw) => {
+  // ── Live run subscriptions ──────────────────────────────────────────────────
+  // One SSE stream per tracked run, not one global stream. The server has always
+  // accepted a second run while one is in flight and streams it as `queued` with a
+  // position (src/http/runQueue.ts), so a client that only ever watched a single
+  // stream was the reason a queue was invisible. A stream per run means the backlog
+  // reports its position live, and re-subscribing after a refresh re-attaches to
+  // whatever is still going (the server replays its last manifest as a snapshot).
+  const sources = new Map<string, EventSource>();
+
+  function unsubscribe(runId: string): void {
+    const es = sources.get(runId);
+    if (!es) return;
+    sources.delete(runId);
+    try {
+      es.close();
+    } catch {
+      /* already closed */
+    }
+  }
+
+  function subscribe(runId: string): void {
+    if (sources.has(runId) || typeof EventSource === 'undefined') return;
+    const es = new EventSource(eventsUrl(runId));
+    sources.set(runId, es);
+    es.onmessage = (e: MessageEvent<string>) => handleEvent(runId, e.data);
+    // No onerror handler on purpose: EventSource reconnects on its own using the
+    // server's `retry: 3000`, and a reconnect to a finished run just replays its
+    // final manifest as `done`, which unsubscribes us below.
+  }
+
+  function handleEvent(runId: string, raw: string): void {
     if (!raw) return;
     let ev: RunEvent;
     try {
@@ -79,16 +103,18 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     if (ev.type === 'start' || ev.type === 'snapshot') {
       ingestManifest(ev.manifest);
     } else if (ev.type === 'job') {
-      state.jobs.set(ev.job.id, ev.job);
-      state.runStatus.value = 'running';
+      const entry = state.trackRun(runId);
+      entry.jobs.set(ev.job.id, ev.job);
+      entry.status = 'running';
+      entry.queuePosition = null;
     } else if (ev.type === 'done') {
       ingestManifest(ev.manifest);
-      finishRun(ev.manifest && ev.manifest.status);
+      finishRun(runId, ev.manifest && ev.manifest.status);
     } else if (ev.type === 'error') {
       toast.error(t('runs.error'), { description: ev.message });
-      finishRun('error');
+      finishRun(runId, 'error');
     }
-  });
+  }
 
   async function refreshRuns() {
     try {
@@ -212,6 +238,18 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     const removed = snapshot.filter((run) => uniqueIds.includes(run.runId));
     state.runs.value = snapshot.filter((run) => !uniqueIds.includes(run.runId));
 
+    // Drop the progress card for anything being deleted so it can't outlive its run.
+    // Only for runs that have FINISHED: the server refuses to delete an active one
+    // (runQueue.ts deleteRuns), and tearing its stream down here optimistically
+    // would strand a run that keeps generating with nothing listening to it.
+    const focusedBefore = state.focusedRunId.value;
+    for (const id of uniqueIds) {
+      const tracked = state.trackedRuns.get(id);
+      if (tracked && isActiveStatus(tracked.status)) continue;
+      unsubscribe(id);
+      state.untrackRun(id);
+    }
+
     const pending: PendingDelete = {
       ids: uniqueIds,
       runs: removed,
@@ -229,6 +267,21 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
           clearTimeout(pending.timer);
           pendingDeletes.delete(pending);
           state.runs.value = mergeRuns(state.runs.value, pending.runs, pending.snapshot);
+          // Undo restores the row *and* the progress card the user was looking at.
+          if (focusedBefore && uniqueIds.includes(focusedBefore) && !state.trackedRuns.has(focusedBefore)) {
+            void api
+              .run(focusedBefore)
+              .then((m) => {
+                ingestManifest(m);
+                // Re-attach if it turns out the run is still going, so the restored
+                // card streams instead of freezing on the manifest we just fetched.
+                if (isActiveStatus(m?.status)) subscribe(focusedBefore);
+                focusRun(focusedBefore);
+              })
+              .catch(() => {
+                /* row is back; the card just stays closed */
+              });
+          }
           toast(t('runs.restored', { count: pending.ids.length }, pending.ids.length));
         },
       },
@@ -237,31 +290,78 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     return { deleted: uniqueIds, skipped: [], runs: state.runs.value };
   }
 
-  function ingestManifest(m: Manifest) {
-    if (!m) return;
-    state.queuePosition.value = m.queue && m.queue.position ? m.queue.position : null;
-    state.total.value = (m.counts && m.counts.total) || (m.jobs ? m.jobs.length : state.total.value);
-    if (m.summary && m.summary.title && m.runId === state.runId.value) state.runTitle.value = m.summary.title;
-    state.runStatus.value = m.status;
-    if (m.jobs) for (const j of m.jobs) state.jobs.set(j.id, j);
+  function ingestManifest(m: Manifest | null | undefined) {
+    if (!m || !m.runId) return;
+    const entry = state.trackRun(m.runId);
+    entry.queuePosition = m.queue && m.queue.position ? m.queue.position : null;
+    entry.total = (m.counts && m.counts.total) || (m.jobs ? m.jobs.length : entry.total);
+    if (m.summary && m.summary.title) entry.title = m.summary.title;
+    entry.status = m.status;
+    if (m.jobs) for (const j of m.jobs) entry.jobs.set(j.id, j);
   }
 
-  function subscribe(id: string) {
-    state.jobs.clear();
-    state.queuePosition.value = null;
-    state.total.value = 0;
-    sourceUrl.value = eventsUrl(id);
-    // The server closes the stream when the run ends; that's expected, stay silent.
+  /** Point the progress card at a tracked run (or clear it). */
+  function focusRun(runId: string | null) {
+    state.focusedRunId.value = runId;
   }
 
-  function finishRun(status?: string | null) {
-    close();
-    state.running.value = false;
+  function finishRun(runId: string, status?: string | null) {
+    unsubscribe(runId);
+    const entry = state.trackedRuns.get(runId);
+    if (entry) entry.queuePosition = null;
+    if (entry && isActiveStatus(entry.status)) entry.status = status || 'done';
     deps.refreshKeys();
     refreshRuns();
+    // Hand the card to whatever was queued behind this run, so a batch of queued
+    // runs walks forward on its own instead of stranding the user on a dead card.
+    if (state.focusedRunId.value === runId) {
+      const next = state.backlogRuns.value[0];
+      if (next) focusRun(next.runId);
+    }
     if (status === 'cancelled') toast(t('runs.cancelled'));
     else if (status === 'error') toast.error(t('runs.failed'));
     else toast.success(t('runs.finished'));
+  }
+
+  /**
+   * Re-attach after a reload. The server keeps running with the browser closed and
+   * writes every run's manifest to disk, so anything still queued/running is picked
+   * back up live, and the last run being watched is restored read-only if it ended
+   * while the tab was away.
+   */
+  async function resumeRuns() {
+    const remembered = state.focusedRunId.value;
+    for (const summary of state.runs.value) {
+      if (!isActiveStatus(summary.status)) continue;
+      // bootstrap() runs again on every Control remount, and this summary list is
+      // read from disk — staler than what SSE has already pushed into a run we are
+      // streaming. Seed a run only the first time; after that the stream owns it.
+      if (!sources.has(summary.runId)) {
+        state.trackRun(summary.runId, {
+          title: summary.title || summary.summary?.title || summary.runId,
+          status: summary.status,
+          total: summary.counts?.total ?? summary.total ?? 0,
+        });
+      }
+      subscribe(summary.runId);
+    }
+    // What to show: the run being watched if it's still going, else whatever is
+    // generating now (more useful than a finished card), else the remembered run
+    // restored from disk — that last case is the "I refreshed and lost it" fix.
+    if (remembered && state.trackedRuns.has(remembered)) return;
+    const live = state.activeRuns.value[0];
+    if (live) return focusRun(live.runId);
+    if (!remembered) return;
+    if (!state.runs.value.some((r) => r.runId === remembered)) return focusRun(null); // deleted since
+    try {
+      const manifest = await api.run(remembered);
+      ingestManifest(manifest);
+      // The run list is a disk read and can lag the runner by a beat, so a run it
+      // reported as finished may still be going. Attach if this fresher read says so.
+      if (isActiveStatus(manifest?.status)) subscribe(remembered);
+    } catch {
+      focusRun(null);
+    }
   }
 
   async function startRun() {
@@ -301,19 +401,19 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       if (combined) body.brandStyleGuide = combined;
     }
 
+    // Runs already in flight stay tracked: the server queues this one behind them
+    // and streams its position, so the queue builds up instead of being refused.
+    const queuedBehind = state.activeRuns.value.length;
     state.submitting.value = true;
     try {
       const { runId: id } = await api.startRun(body);
-      state.running.value = true;
-      state.runId.value = id;
-      state.runTitle.value = id;
-      state.runStatus.value = 'queued';
-      state.queuePosition.value = null;
-      state.total.value = 0;
-      state.jobs.clear();
+      state.trackRun(id, { title: id, status: 'queued', total: 0 });
       subscribe(id);
+      // Watch the newest submission unless something is already generating — then
+      // stay on the live run and let the backlog strip show what's behind it.
+      if (!queuedBehind) focusRun(id);
       refreshRuns();
-      toast(t('runs.queued'));
+      toast(queuedBehind ? t('runs.queuedBehind', { count: queuedBehind }, queuedBehind) : t('runs.queued'));
     } catch (e) {
       toast.error(t('runs.startFailed'), { description: errMessage(e) });
     } finally {
@@ -321,14 +421,24 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     }
   }
 
-  async function cancelRun() {
-    if (!state.runId.value) return;
+  async function cancelRun(runId?: string) {
+    const id = runId || state.focusedRunId.value;
+    if (!id) return;
     try {
-      await api.cancelRun(state.runId.value);
+      await api.cancelRun(id);
     } catch (e) {
       toast.error(t('runs.cancelFailed'), { description: errMessage(e) });
     }
   }
 
-  return { refreshRuns, deleteRuns, startRun, cancelRun, refreshCostEstimate, scheduleCostEstimate };
+  return {
+    refreshRuns,
+    deleteRuns,
+    startRun,
+    cancelRun,
+    focusRun,
+    resumeRuns,
+    refreshCostEstimate,
+    scheduleCostEstimate,
+  };
 }
