@@ -43,7 +43,9 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
   const vbsPath = path.join(repoRoot, "misc", "Tray-Launch.vbs");
   const trayPath = path.join(repoRoot, "misc", "ReDesign-Tray.ps1");
   const enginePath = path.join(repoRoot, "misc", "Tray-Host.ps1");
-  const icoPath = path.join(repoRoot, "misc", "Reimagine.ico");
+  // Reimagine.ico until the ReDesign rename; misc/ReDesign.ico is the tracked asset the tray
+  // adapter actually loads (IconFile = "ReDesign.ico"), so these expectations followed it.
+  const icoPath = path.join(repoRoot, "misc", "ReDesign.ico");
   const shortcutPath = path.join(repoRoot, "misc", "Create-Shortcut.ps1");
   const shortcutEnginePath = path.join(repoRoot, "misc", "New-TrayShortcut.ps1");
 
@@ -347,7 +349,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(/Rebuild\.bat/i.test(tray)).toBe(true);
     expect(/npm run build/i.test(tray)).toBe(true);
     expect(/IsDevTree\s*=\s*\(\$env:REDESIGN_DEV -eq "1"\)/i.test(tray)).toBe(true);
-    expect(/RebuildLogName\s*=\s*["']Reimagine-Rebuild\.log["']/i.test(tray)).toBe(true);
+    expect(/RebuildLogName\s*=\s*["']ReDesign-Rebuild\.log["']/i.test(tray)).toBe(true);
 
     const engine = fs.readFileSync(enginePath, "utf8");
     expect(/Rebuild && Restart/i.test(engine)).toBe(true);
