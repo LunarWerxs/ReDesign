@@ -206,7 +206,6 @@ export default {
     brandStyleGuideDefaultCleared: 'Default style guide cleared',
     brandStyleGuideHasDefault: 'A default style guide is saved and auto-applied to new runs.',
     brandStyleGuideNoDefault: 'No default style guide set.',
-    brandAttachmentsTitle: 'Attachments',
     brandAttachmentsAddFiles: 'Add files',
     brandAttachmentsAdding: 'adding',
     brandAttachmentsPasteOrDrop: 'Paste or drop text files (.txt, .md…)',

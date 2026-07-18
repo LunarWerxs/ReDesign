@@ -90,6 +90,11 @@ const KEY_RE = /(?<![\w$])\$?t\(\s*(['"`])([\w.]+)\1/g;
 // `errKey: 'x.y'` object-literal properties are the one sanctioned indirection: passed
 // through to lib/asyncAction.ts's withToast(), which calls t(opts.errKey) internally.
 const ERR_KEY_RE = /\berrKey:\s*(['"`])([\w.]+)\1/g;
+// A key can also be held as a bare string literal in a lookup table and passed to t()
+// indirectly, e.g. ImportKeysDialog's STATUS_META[x].label → t(STATUS_META[r.status].label).
+// Count any string literal whose value is exactly a known en.ts key as a reference. This only
+// clears false UNUSED warnings; it never sources a MISSING error (only t()/errKey call sites do).
+const KEY_LITERAL_RE = /(['"`])([\w.]+)\1/g;
 for (const file of sourceFiles) {
   const src = readFileSync(file, "utf8");
   for (const m of src.matchAll(KEY_RE)) {
@@ -99,6 +104,9 @@ for (const file of sourceFiles) {
   for (const m of src.matchAll(ERR_KEY_RE)) {
     referenced.add(m[2]);
     if (!enKeys.has(m[2])) errors.push(`MISSING KEY   ${rel(file)} → errKey: '${m[2]}' has no entry in en.ts`);
+  }
+  for (const m of src.matchAll(KEY_LITERAL_RE)) {
+    if (enKeys.has(m[2])) referenced.add(m[2]);
   }
 }
 
