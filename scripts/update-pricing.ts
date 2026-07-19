@@ -229,7 +229,7 @@ function priceFromCloudPrice(catalog: CloudPriceCatalog, key: string): SourcedPr
 /** Look up one model's price in the OpenRouter catalog. Returns null if missing/unusable. */
 function priceFromOpenRouter(catalog: OpenRouterCatalog, key: string): SourcedPrice | null {
   const entry = catalog.data.find((m) => m.id === key);
-  if (!entry || !entry.pricing) return null;
+  if (!entry?.pricing) return null;
   const input = Number(entry.pricing.prompt);
   const output = Number(entry.pricing.completion);
   if (!Number.isFinite(input) || !Number.isFinite(output) || input <= 0 || output <= 0) return null;

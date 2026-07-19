@@ -6,7 +6,7 @@ import { KeyManager, CLASS } from "../src/keyManager";
 import { keyId } from "../src/util";
 
 describe("keyManager: rotation, cooldown, classification, persistence", () => {
-  const tmpState = path.join(os.tmpdir(), "reimagine-test-" + process.pid + ".json");
+  const tmpState = path.join(os.tmpdir(), `reimagine-test-${process.pid}.json`);
 
   afterAll(() => {
     for (const suffix of ["", ".2", ".3", ".4", ".5", ".6", ".e2e", ".e2e2", ".rot", ".ref"]) {
@@ -59,7 +59,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   });
 
   it("all-cooldown returns available=false with waitMs", () => {
-    const km2 = new KeyManager({ stateFile: tmpState + ".2" });
+    const km2 = new KeyManager({ stateFile: `${tmpState}.2` });
     km2.registerPool("OPENAI_API_KEYS"); // 2 keys
     for (let i = 0; i < 2; i++) {
       const a = km2.acquire("OPENAI_API_KEYS");
@@ -72,7 +72,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   });
 
   it("explicit retryAfter drives cooldown", () => {
-    const km3 = new KeyManager({ stateFile: tmpState + ".3" });
+    const km3 = new KeyManager({ stateFile: `${tmpState}.3` });
     km3.registerPool("DEEPSEEK_API_KEYS");
     const ad = km3.acquire("DEEPSEEK_API_KEYS");
     km3.report("DEEPSEEK_API_KEYS", ad.keyId as string, { errorClass: CLASS.RATE_LIMIT, retryAfterMs: 2000 });
@@ -82,7 +82,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   });
 
   it("bad_request leaves the key available (0 cooldown)", () => {
-    const km4 = new KeyManager({ stateFile: tmpState + ".4" });
+    const km4 = new KeyManager({ stateFile: `${tmpState}.4` });
     km4.registerPool("OPENAI_API_KEYS");
     const ab = km4.acquire("OPENAI_API_KEYS");
     km4.report("OPENAI_API_KEYS", ab.keyId as string, { errorClass: CLASS.BAD_REQUEST, message: "400" });
@@ -90,7 +90,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   });
 
   it("AUTH / NO_BALANCE keep their long cooldown even if a Retry-After is present", () => {
-    const km5 = new KeyManager({ stateFile: tmpState + ".5" });
+    const km5 = new KeyManager({ stateFile: `${tmpState}.5` });
     km5.registerPool("DEEPSEEK_API_KEYS");
     const aAuth = km5.acquire("DEEPSEEK_API_KEYS");
     km5.report("DEEPSEEK_API_KEYS", aAuth.keyId as string, { errorClass: CLASS.AUTH, retryAfterMs: 2000, message: "401" });
@@ -106,7 +106,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   it("a physical key shared across two pools is propagated as dead to both", () => {
     process.env.GEMINI_FLASH_API_KEYS = "AIza-shared-xyz,AIza-flash-only";
     process.env.GEMINI_PRO_API_KEYS = "AIza-shared-xyz,AIza-pro-only";
-    const km6 = new KeyManager({ stateFile: tmpState + ".6" });
+    const km6 = new KeyManager({ stateFile: `${tmpState}.6` });
     km6.registerPool("GEMINI_FLASH_API_KEYS");
     km6.registerPool("GEMINI_PRO_API_KEYS");
     const sharedId = keyId("AIza-shared-xyz");

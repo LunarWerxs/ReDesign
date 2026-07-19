@@ -107,10 +107,11 @@ function runCost(manifest: RunCostManifestLike | null | undefined): RunCostResul
   let jobCount = 0;
   let anyEstimatePricing = false;
   let anyUnpriced = false;
-  const jobs = Array.isArray(manifest?.jobs) ? (manifest as RunCostManifestLike).jobs! : [];
+  const manifestJobs = manifest?.jobs;
+  const jobs = Array.isArray(manifestJobs) ? manifestJobs : [];
 
   for (const job of jobs) {
-    if (!job || !job.usage || isMockUsage(job.usage)) continue;
+    if (!job?.usage || isMockUsage(job.usage)) continue;
     const breakdown = costForUsage(job.modelId, job.usage);
     jobCount++;
     totalCost += breakdown.totalCost;
@@ -152,7 +153,7 @@ function spendToDate(options: store.ReadManifestOptions = {}): SpendToDateResult
     // any older mock manifests that still carry a baked-in placeholder cost on disk.
     if ((run as { mock?: boolean }).mock) continue;
     const cost = run.cost;
-    if (!cost || !cost.jobCount) continue;
+    if (!cost?.jobCount) continue;
     runCount++;
     totalCost += cost.totalCost;
     if (cost.anyEstimatePricing) anyEstimatePricing = true;
@@ -193,7 +194,7 @@ function averageUsageByModel(modelIds: string[], options: store.ReadManifestOpti
     const manifest = store.readManifest(run.runId, options);
     if (!manifest || !Array.isArray(manifest.jobs)) continue;
     for (const job of manifest.jobs as unknown as RunCostJobLike[]) {
-      if (!job || job.status !== "ok" || !job.usage || isMockUsage(job.usage) || !wanted.has(job.modelId)) continue;
+      if (job?.status !== "ok" || !job.usage || isMockUsage(job.usage) || !wanted.has(job.modelId)) continue;
       const { inputTokens, outputTokens } = normalizeUsage(job.usage);
       const entry = sums.get(job.modelId) || { inputTokens: 0, outputTokens: 0, count: 0, outputMin: Number.POSITIVE_INFINITY, outputMax: 0 };
       entry.inputTokens += inputTokens;

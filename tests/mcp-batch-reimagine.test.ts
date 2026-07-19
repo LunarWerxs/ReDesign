@@ -6,6 +6,36 @@ import * as store from "../src/store";
 import * as inputResolver from "../src/inputResolver";
 import { TOOLS } from "../src/mcp/tools";
 
+// TOOLS entries return Promise<unknown> (see src/mcp/tools.ts); these mirror the runtime shapes
+// this suite actually receives so the `as X` casts below stay honest instead of reaching for `any`.
+interface BatchQueuedResult {
+  runId: string;
+  note: string;
+  jobs?: unknown; // absent on the wait:false path; asserted below
+}
+
+interface RunManifestStatus {
+  status: string;
+}
+
+interface BatchDigestJob {
+  input: string;
+  model: string;
+  prompt: string;
+  variant: number;
+  status: string;
+  outputFile: string | null;
+  caption: string | null;
+  error: string | null;
+}
+
+interface BatchDigest {
+  runId: string;
+  status: string;
+  jobs: BatchDigestJob[];
+  captionSummary: string;
+}
+
 // Boot a real Bun.serve instance on an ephemeral port and point the MCP tool table's HTTP
 // client at it via REDESIGN_URL (see src/mcp/tools.ts's base()). This exercises batch_reimagine
 // exactly as an MCP client would call it, through the tool table, over real HTTP, without
@@ -49,16 +79,16 @@ describe("MCP tool: batch_reimagine", () => {
       prompts: "faithful-refresh",
       mock: true,
       label: "mcp-batch-nowait",
-    })) as { runId: string; note: string };
+    })) as BatchQueuedResult;
     expect(typeof result.runId).toBe("string");
     expect(result.runId.length).toBeGreaterThan(0);
     expect(typeof result.note).toBe("string");
-    expect((result as any).jobs).toBeUndefined();
+    expect(result.jobs).toBeUndefined();
     createdRunIds.push(result.runId);
 
     // Let the queued mock run actually finish before the suite ends (it's fast under mock).
     for (let i = 0; i < 40; i++) {
-      const manifest = (await tool("get_run").run({ runId: result.runId })) as any;
+      const manifest = (await tool("get_run").run({ runId: result.runId })) as RunManifestStatus;
       if (manifest.status !== "queued" && manifest.status !== "running") break;
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -75,7 +105,7 @@ describe("MCP tool: batch_reimagine", () => {
         wait: true,
         timeout_secs: 60,
         label: "mcp-batch-wait",
-      })) as any;
+      })) as BatchDigest;
       createdRunIds.push(digest.runId);
 
       expect(digest.status).toBe("done");
@@ -92,10 +122,13 @@ describe("MCP tool: batch_reimagine", () => {
       // deepseek-v4-pro is text-only in models.json, the runner captions the input for it, and
       // the caption lands in the job's .meta.json sidecar (src/runner/reimagine.ts). Confirm the
       // digest surfaces it via the /output-raw/*.meta.json read path.
-      const dsJob = digest.jobs.find((j: any) => j.model === "deepseek-v4-pro");
+      const dsJob = digest.jobs.find((j) => j.model === "deepseek-v4-pro");
       expect(dsJob).toBeTruthy();
-      expect(typeof dsJob.caption).toBe("string");
-      expect(dsJob.caption.length).toBeGreaterThan(0);
+      if (!dsJob) throw new Error("deepseek-v4-pro job not found in digest.jobs");
+      const dsCaption = dsJob.caption;
+      expect(typeof dsCaption).toBe("string");
+      if (typeof dsCaption !== "string") throw new Error("expected deepseek-v4-pro caption to be a string");
+      expect(dsCaption.length).toBeGreaterThan(0);
       expect(/1\/2|2\/2/.test(digest.captionSummary)).toBe(true);
 
       // Sanity: the manifest this digest was built from is really on disk.
@@ -115,7 +148,7 @@ describe("MCP tool: batch_reimagine", () => {
       wait: true,
       timeout_secs: 1,
       label: "mcp-batch-shorttimeout",
-    })) as any;
+    })) as BatchDigest;
     createdRunIds.push(digest.runId);
     expect(typeof digest.runId).toBe("string");
     expect(["queued", "running", "done"]).toContain(digest.status);

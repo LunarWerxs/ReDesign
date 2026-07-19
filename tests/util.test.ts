@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import * as util from "../src/util";
 import { buildPoolLimits, runJobsByPool } from "../src/runner";
+import type { Model } from "../src/config/models";
 
 describe("util: key parsing & helpers", () => {
   it("getKeyPool merges comma + indexed, trims, dedupes", () => {
@@ -46,7 +47,7 @@ describe("util: key parsing & helpers", () => {
 
   it("buildPoolLimits caps per-pool concurrency by key count and max", () => {
     const fakePoolLimits = buildPoolLimits(
-      [{ keyEnv: "POOL_A" }, { keyEnv: "POOL_B" }, { keyEnv: "POOL_A" }, { keyEnv: "POOL_EMPTY" }] as any,
+      [{ keyEnv: "POOL_A" }, { keyEnv: "POOL_B" }, { keyEnv: "POOL_A" }, { keyEnv: "POOL_EMPTY" }] as unknown as Model[],
       { poolSize: (name: string) => ({ POOL_A: 3, POOL_B: 10, POOL_EMPTY: 0 } as Record<string, number>)[name] || 0 },
       4
     );

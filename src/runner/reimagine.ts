@@ -125,7 +125,11 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
   // text-only models. Prefer one already selected for the run.
   const visionHelper: Model | null =
     models.find((m) => m.vision !== false && km.poolSize(m.keyEnv) > 0) ||
-    loadModels().find((m) => m.vision !== false && m.enabled !== false && (km.registerPool(m.keyEnv), km.poolSize(m.keyEnv) > 0)) ||
+    loadModels().find((m) => {
+      if (m.vision === false || m.enabled === false) return false;
+      km.registerPool(m.keyEnv);
+      return km.poolSize(m.keyEnv) > 0;
+    }) ||
     null;
 
   function fallbackRunSummary(): RunSummaryInfo {

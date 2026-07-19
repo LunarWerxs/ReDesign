@@ -71,8 +71,6 @@ export async function main(argv: string[]): Promise<void> {
       // first with `redesign serve`. Only writes JSON-RPC to stdout.
       await runStdioMcp();
       break;
-
-    case "help":
     default:
       printHelp();
       break;

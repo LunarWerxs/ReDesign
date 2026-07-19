@@ -13,12 +13,11 @@ import { serveFile } from "./fileServing";
  * compiled (a `src/web/dist` shipped next to the binary), same two-candidate resolve as
  * util.ts's ROOT, kept local here since RepoYeti/DevWebUI's web dir sits at a different depth. */
 function resolveWebRoot(): string {
-  const candidates = [
-    normalize(join(import.meta.dir, "..", "web", "dist")), // dev: src/http/../web/dist
-    normalize(join(dirname(process.execPath), "src", "web", "dist")), // compiled: next to the binary
-  ];
+  const devCandidate = normalize(join(import.meta.dir, "..", "web", "dist")); // dev: src/http/../web/dist
+  const compiledCandidate = normalize(join(dirname(process.execPath), "src", "web", "dist")); // compiled: next to the binary
+  const candidates = [devCandidate, compiledCandidate];
   for (const c of candidates) if (existsSync(join(c, "index.html"))) return c;
-  return candidates[0]!;
+  return devCandidate;
 }
 const WEB_ROOT = resolveWebRoot();
 

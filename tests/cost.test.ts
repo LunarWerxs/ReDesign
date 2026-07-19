@@ -142,7 +142,7 @@ describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
       prompts: [],
       models: [],
       jobs: [],
-    } as any);
+    } as store.Manifest);
 
     const result = spendToDate({ activeRunIds: [] });
     expect(result.totalCost).toBeGreaterThanOrEqual(1.23);
@@ -178,7 +178,7 @@ describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
         { id: "j1", modelId: historyModel, status: "ok", usage: { input_tokens: 2000, output_tokens: 8000 } },
         { id: "j2", modelId: historyModel, status: "ok", usage: { input_tokens: 4000, output_tokens: 12000 } },
       ],
-    } as any);
+    } as store.Manifest);
     try {
       const averages = averageUsageByModel([historyModel], { activeRunIds: [] });
       const avg = averages[historyModel]!;

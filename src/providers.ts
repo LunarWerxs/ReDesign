@@ -108,7 +108,7 @@ function classifyHttp(status: number, headers: Headers | null | undefined, bodyT
  * Keeping the timer armed through the body read prevents a provider that sends
  * headers then stalls the stream from hanging a job forever.
  */
-async function requestJSON(url: string, options: RequestInit, timeoutMs: number | null | undefined, externalSignal: AbortSignal | null | undefined): Promise<any> {
+async function requestJSON<T = unknown>(url: string, options: RequestInit, timeoutMs: number | null | undefined, externalSignal: AbortSignal | null | undefined): Promise<T> {
   const ctrl = new AbortController();
   const onAbort = () => ctrl.abort();
   if (externalSignal) {
@@ -174,6 +174,17 @@ interface ProviderResult {
   raw: unknown;
 }
 
+interface AnthropicContentBlock {
+  type: string;
+  text?: string;
+}
+
+interface AnthropicResponse {
+  content?: AnthropicContentBlock[];
+  stop_reason?: string | null;
+  usage?: unknown;
+}
+
 // Anthropic Messages API (Claude). Vision via base64 image blocks.
 async function anthropicCall(req: ProviderRequest): Promise<ProviderResult> {
   const { model, apiKey, systemContract, userPrompt, images = [], timeoutMs, signal } = req;
@@ -184,13 +195,13 @@ async function anthropicCall(req: ProviderRequest): Promise<ProviderResult> {
   const body: Record<string, unknown> = { model: model.apiModel, max_tokens: model.maxTokens || 8000, system: systemContract, messages: [{ role: "user", content }] };
   if (model.supportsTemperature && model.temperature != null) body.temperature = model.temperature;
 
-  const data = await requestJSON(
+  const data = await requestJSON<AnthropicResponse>(
     `${model.baseUrl.replace(/\/$/, "")}/messages`,
     { method: "POST", headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" }, body: JSON.stringify(body) },
     timeoutMs,
     signal
   );
-  const text = Array.isArray(data.content) ? data.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("") : "";
+  const text = Array.isArray(data.content) ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
   if (!text.trim()) throw new ProviderError(`empty response (stop_reason=${data.stop_reason})`, { errorClass: CLASS.BAD_REQUEST });
   return { text, usage: data.usage || null, finishReason: data.stop_reason || null, raw: data };
 }
@@ -198,6 +209,22 @@ async function anthropicCall(req: ProviderRequest): Promise<ProviderResult> {
 // OpenAI-compatible Chat Completions. Powers GPT 5.5, DeepSeek, Qwen.
 // Quirks from models.json: tokenParam (max_tokens vs max_completion_tokens),
 // supportsTemperature.
+interface OpenAIMessagePart {
+  text?: string;
+}
+
+interface OpenAIChoice {
+  message?: {
+    content?: string | OpenAIMessagePart[];
+  };
+  finish_reason?: string;
+}
+
+interface OpenAIChatResponse {
+  choices?: OpenAIChoice[];
+  usage?: unknown;
+}
+
 async function openaiCall(req: ProviderRequest): Promise<ProviderResult> {
   const { model, apiKey, systemContract, userPrompt, images = [], timeoutMs, signal } = req;
   let userContent: unknown;
@@ -214,7 +241,7 @@ async function openaiCall(req: ProviderRequest): Promise<ProviderResult> {
   body[model.tokenParam || "max_tokens"] = model.maxTokens || 8000;
   if (model.supportsTemperature && model.temperature != null) body.temperature = model.temperature;
 
-  const data = await requestJSON(
+  const data = await requestJSON<OpenAIChatResponse>(
     `${model.baseUrl.replace(/\/$/, "")}/chat/completions`,
     { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` }, body: JSON.stringify(body) },
     timeoutMs,
@@ -225,10 +252,31 @@ async function openaiCall(req: ProviderRequest): Promise<ProviderResult> {
   let text = "";
   if (msg) {
     if (typeof msg.content === "string") text = msg.content;
-    else if (Array.isArray(msg.content)) text = msg.content.map((p: any) => p.text || "").join("");
+    else if (Array.isArray(msg.content)) text = msg.content.map((p) => p.text || "").join("");
   }
   if (!text.trim()) throw new ProviderError(`empty response (finish_reason=${choice?.finish_reason})`, { errorClass: CLASS.BAD_REQUEST });
   return { text, usage: data.usage || null, finishReason: choice?.finish_reason, raw: data };
+}
+
+interface GeminiPart {
+  text?: string;
+}
+
+interface GeminiCandidate {
+  content?: { parts?: GeminiPart[] };
+  finishReason?: string;
+}
+
+interface GeminiResponse {
+  promptFeedback?: { blockReason?: string };
+  candidates?: GeminiCandidate[];
+  usageMetadata?: unknown;
+}
+
+interface GeminiRequestBody {
+  systemInstruction: { parts: Array<{ text: string }> };
+  contents: Array<{ role: string; parts: unknown[] }>;
+  generationConfig: { maxOutputTokens: number; temperature?: number };
 }
 
 // Google Generative Language API (Gemini). Vision via inline_data parts.
@@ -237,10 +285,10 @@ async function geminiCall(req: ProviderRequest): Promise<ProviderResult> {
   const parts: unknown[] = [{ text: userPrompt }];
   for (const img of images) parts.push({ inline_data: { mime_type: img.mime, data: img.data } });
 
-  const body: Record<string, any> = { systemInstruction: { parts: [{ text: systemContract }] }, contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: model.maxTokens || 8000 } };
+  const body: GeminiRequestBody = { systemInstruction: { parts: [{ text: systemContract }] }, contents: [{ role: "user", parts }], generationConfig: { maxOutputTokens: model.maxTokens || 8000 } };
   if (model.supportsTemperature && model.temperature != null) body.generationConfig.temperature = model.temperature;
 
-  const data = await requestJSON(
+  const data = await requestJSON<GeminiResponse>(
     `${model.baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(model.apiModel)}:generateContent`,
     { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": apiKey }, body: JSON.stringify(body) },
     timeoutMs,
@@ -248,7 +296,7 @@ async function geminiCall(req: ProviderRequest): Promise<ProviderResult> {
   );
   if (data.promptFeedback?.blockReason) throw new ProviderError(`blocked: ${data.promptFeedback.blockReason}`, { errorClass: CLASS.BAD_REQUEST });
   const cand = data.candidates?.[0];
-  const text = cand?.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p: any) => p.text || "").join("") : "";
+  const text = cand?.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || "").join("") : "";
   if (!text.trim()) {
     const reason = cand ? cand.finishReason : "no_candidates";
     const hint = reason === "MAX_TOKENS" ? ", raise maxTokens in models.json" : "";

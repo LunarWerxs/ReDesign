@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll } from "bun:test";
 import fs from "node:fs";
 import { createApp } from "../src/http/app";
 import * as store from "../src/store";
+import type { Manifest } from "../src/store";
 
 describe("store: stale run manifests", () => {
   const staleNow = new Date("2026-07-01T12:00:00Z");
@@ -28,7 +29,7 @@ describe("store: stale run manifests", () => {
   });
 
   it("settles a stale running manifest into a terminal error and recounts unfinished jobs", () => {
-    store.writeManifest(staleRunId, runningManifest(staleRunId) as any);
+    store.writeManifest(staleRunId, runningManifest(staleRunId) as Manifest);
     const settled = store.readManifest(staleRunId, { staleAfterMs: 0, now: staleNow, reason: "test stale run" })!;
     expect(settled.status).toBe("error");
     expect(settled.counts).toEqual({ total: 2, done: 2, ok: 1, error: 1, skipped: 0 });
@@ -39,7 +40,7 @@ describe("store: stale run manifests", () => {
   });
 
   it("does not settle an active in-memory run as stale", () => {
-    store.writeManifest(activeRunId, runningManifest(activeRunId) as any);
+    store.writeManifest(activeRunId, runningManifest(activeRunId) as Manifest);
     const active = store.readManifest(activeRunId, {
       staleAfterMs: 0,
       now: staleNow,
@@ -60,7 +61,7 @@ describe("store: run id path-traversal guard", () => {
 
   it("writeManifest rejects traversal ids instead of resolving outside OUTPUT_DIR", () => {
     for (const id of traversalIds) {
-      expect(() => store.writeManifest(id, { runId: id, status: "ok" } as any)).toThrow();
+      expect(() => store.writeManifest(id, { runId: id, status: "ok" } as Manifest)).toThrow();
     }
   });
 

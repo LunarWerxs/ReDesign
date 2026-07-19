@@ -136,7 +136,7 @@ async function runJobsByPool<J>(jobs: J[], { totalConcurrency, poolLimits, keyFo
           const pool = poolOrder[cursor % poolOrder.length] as string;
           cursor = (cursor + 1) % poolOrder.length;
           const q = queues.get(pool);
-          if (!q || !q.length) continue;
+          if (!q?.length) continue;
           if ((activeByPool.get(pool) || 0) >= (limits.get(pool) as number)) continue;
 
           const job = q.shift() as J;

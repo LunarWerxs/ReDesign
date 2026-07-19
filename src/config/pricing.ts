@@ -25,7 +25,7 @@ function loadPricing(): PricingFileData {
 
 function priceForModel(modelId: string): ModelPrice | null {
   const data = loadPricing();
-  return (data.prices && data.prices[modelId]) || null;
+  return (data.prices?.[modelId]) || null;
 }
 
 function pricingLastUpdated(): string | null {

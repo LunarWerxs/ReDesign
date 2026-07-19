@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as store from "../store";
 import { resolveInside } from "../util";
 
@@ -57,7 +58,7 @@ function fileEtag(st: fs.Stats, suffix = ""): string {
 
 function requestFresh(c: Context, st: fs.Stats, etag: string): boolean {
   const inm = c.req.header("if-none-match");
-  if (inm && inm.split(",").map((s) => s.trim()).includes(etag)) return true;
+  if (inm?.split(",").map((s) => s.trim()).includes(etag)) return true;
   const ims = c.req.header("if-modified-since");
   if (!ims) return false;
   const since = Date.parse(ims);
@@ -124,7 +125,7 @@ function outputHeightMeasureScript(): string {
 }
 
 function injectOutputHeightMeasure(html: string): string {
-  const script = "\n" + outputHeightMeasureScript() + "\n";
+  const script = `\n${outputHeightMeasureScript()}\n`;
   const matches = Array.from(String(html).matchAll(/<\/body\s*>/gi));
   const last = matches.at(-1);
   if (last && typeof last.index === "number") return html.slice(0, last.index) + script + html.slice(last.index);
@@ -148,7 +149,7 @@ async function serveFile(c: Context, baseDir: string, relPath: unknown, { downlo
     full = resolveInside(baseDir, relPath).full;
   } catch (err) {
     const e = err as StatusError;
-    return c.text(e.message || "Bad request", (e.status || 400) as any);
+    return c.text(e.message || "Bad request", (e.status || 400) as ContentfulStatusCode);
   }
   let st: fs.Stats;
   try {
@@ -186,7 +187,7 @@ function outputRelFromFull(full: string): string {
 }
 
 function outputWrapperHtml(relPath: string): string {
-  const rawUrl = "/output-raw/" + encPathUrl(relPath);
+  const rawUrl = `/output-raw/${encPathUrl(relPath)}`;
   const fileLabel = path.basename(relPath);
   const relJson = JSON.stringify(relPath);
   return `<!DOCTYPE html>
@@ -255,7 +256,7 @@ async function serveOutputWrapper(c: Context, relPath: unknown): Promise<Respons
     full = resolveInside(store.OUTPUT_DIR, relPath).full;
   } catch (err) {
     const e = err as StatusError;
-    return c.text(e.message || "Bad request", (e.status || 400) as any);
+    return c.text(e.message || "Bad request", (e.status || 400) as ContentfulStatusCode);
   }
   let st: fs.Stats;
   try {

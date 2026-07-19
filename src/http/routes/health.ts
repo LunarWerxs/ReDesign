@@ -7,10 +7,12 @@
  * pinging AI provider keys). Ported from server.js.
  */
 import type { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import { getKeyManager } from "../../runner";
 import { resolveModels } from "../../config";
+import type { SelectionInput } from "../../util";
 import { healthCheckModel, type HealthCheckResult } from "../../healthCheck";
 import { filteredKeySnapshot } from "../../server/settings";
 
@@ -31,7 +33,7 @@ export function register(app: Hono, _deps: Deps): void {
     c.req.raw.signal.addEventListener("abort", () => controller.abort());
 
     const km = getKeyManager();
-    const models = resolveModels((body.models as any) || "all");
+    const models = resolveModels((body.models as SelectionInput) || "all");
     const results: HealthCheckResult[] = [];
     try {
       for (const m of models) {
@@ -47,7 +49,7 @@ export function register(app: Hono, _deps: Deps): void {
     } catch (err) {
       const e = err as CancelledLike & Error;
       if (controller.signal.aborted || e?.cancelled || e?.name === "AbortError") {
-        return c.json({ cancelled: true, error: "health check cancelled", results, keys: filteredKeySnapshot(km) }, 499 as any);
+        return c.json({ cancelled: true, error: "health check cancelled", results, keys: filteredKeySnapshot(km) }, 499 as ContentfulStatusCode);
       }
       throw err;
     }

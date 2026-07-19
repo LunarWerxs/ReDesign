@@ -9,6 +9,7 @@ import {
   AUTO_UPDATE_INTERVAL_MAX_S,
   AUTO_UPDATE_INTERVAL_DEFAULT_S,
 } from "../src/auto-update";
+import type { UpdateStatus, UpdateApplyResult } from "../src/updater-engine.mjs";
 
 // The auto-update orchestrator's decision logic, driven through injected hooks so nothing actually
 // pulls git / spawns / exits. Gates applying strictly on updateAvailable && canApply, and only
@@ -22,8 +23,7 @@ afterEach(() => {
 });
 
 // A full UpdateStatus with sensible defaults; overrides tweak the fields under test.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function status(over: Record<string, unknown>): any {
+function status(over: Partial<UpdateStatus>): UpdateStatus {
   return {
     ok: true,
     service: "redesign",
@@ -41,8 +41,7 @@ function status(over: Record<string, unknown>): any {
     ...over,
   };
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyResult(over: Record<string, unknown>): any {
+function applyResult(over: Partial<UpdateApplyResult>): UpdateApplyResult {
   return { ok: true, message: "updated", restartRequired: true, status: status({}), output: [], ...over };
 }
 

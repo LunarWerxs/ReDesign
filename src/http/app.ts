@@ -10,6 +10,7 @@
  * rewritten to return Response objects on every error path.
  */
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { mountWeb } from "./web";
 import { requireSameOrigin } from "./origin-guard";
 import type { Deps } from "./deps";
@@ -87,7 +88,7 @@ export function createApp(hooks: AppHooks = {}): Hono {
   app.onError((err, c) => {
     const e = err as StatusError;
     const status = e.status || e.statusCode || 500;
-    return c.json({ error: e.message }, status as any);
+    return c.json({ error: e.message }, status as ContentfulStatusCode);
   });
 
   return app;

@@ -145,8 +145,8 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
   for (const m of loadModels()) totalKeys += km.poolSize(m.keyEnv);
   const moved = boundPort !== PORT ? C.dim(`  (port ${PORT} was busy)`) : "";
   console.log(C.bold("\n  RēDesign") + C.dim(" (ReDesign), screenshot → many AIs → reimagined UIs\n"));
-  console.log("  ▸ UI:      " + C.cyan(`http://${HOST}:${boundPort}/`) + moved);
-  console.log("  ▸ Viewer:  " + C.cyan(`http://${HOST}:${boundPort}/viewer`));
+  console.log(`  ▸ UI:      ${C.cyan(`http://${HOST}:${boundPort}/`)}${moved}`);
+  console.log(`  ▸ Viewer:  ${C.cyan(`http://${HOST}:${boundPort}/viewer`)}`);
   console.log(C.dim(`  ▸ ${loadModels().length} models · ${totalKeys} keys loaded · inputs in ./input\n`));
   if (settled.length) {
     console.log(C.dim(`  ▸ finalized ${settled.length} interrupted run${settled.length === 1 ? "" : "s"}\n`));

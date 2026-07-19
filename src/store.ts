@@ -181,6 +181,14 @@ function readManifest(runId: string, options: ReadManifestOptions = {}): Manifes
   return maybeSettleStaleManifest(runId, mp, manifest, st, normalizeStaleOptions(options)).manifest;
 }
 
+function summaryTitle(summary: unknown): string | null {
+  if (summary && typeof summary === "object" && "title" in summary) {
+    const title = (summary as { title?: unknown }).title;
+    return title ? (title as string) : null;
+  }
+  return null;
+}
+
 function summarizeManifest(m: Manifest, fallbackRunId: string): RunSummary {
   return {
     runId: m.runId || fallbackRunId,
@@ -189,7 +197,7 @@ function summarizeManifest(m: Manifest, fallbackRunId: string): RunSummary {
     status: m.status || "unknown",
     mock: !!m.mock,
     summary: m.summary || null,
-    title: (m.summary as any) && (m.summary as any).title ? (m.summary as any).title : null,
+    title: summaryTitle(m.summary),
     counts: m.counts || null,
     cost: m.cost,
     models: m.config ? (m.config.modelIds as string[]) : [],

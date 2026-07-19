@@ -40,7 +40,7 @@
     "test": "bun test tests",
     "typecheck": "tsc --noEmit && bun run check:libtypes",
     "check:libtypes": "bun run scripts/check-lib-types.mjs",
-    "lint": "biome lint .",
+    "lint": "biome lint --error-on-warnings .",
     "format": "biome format --write .",
     "check": "bun run typecheck && bun run lint && bun run check:kit",
     "check:kit": "node ../lunarwerx-ui/sync.mjs --check --app redesign"

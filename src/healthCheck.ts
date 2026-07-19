@@ -1,5 +1,5 @@
 import { mapLimit } from "./util";
-import { CLASS, type KeyManager } from "./keyManager";
+import { CLASS, type ErrorClass, type KeyManager } from "./keyManager";
 import { getAdapter, type ProviderError } from "./providers";
 import type { Model } from "./config/models";
 
@@ -22,7 +22,7 @@ function throwIfAborted(signal: AbortSignal | null | undefined): void {
 
 interface Verdict {
   status: "alive" | "dead" | "no_balance" | "throttled" | "inconclusive";
-  report: string;
+  report: ErrorClass;
 }
 
 // Map a ping outcome to a friendly status + the class to report to the manager.
@@ -106,7 +106,7 @@ async function healthCheckModel(km: KeyManager, model: Model, { timeoutMs = 3000
     }
     const verdict = interpret(ok, err);
     km.report(model.keyEnv, entry.id, {
-      errorClass: verdict.report as any,
+      errorClass: verdict.report,
       retryAfterMs: err?.retryAfterMs,
       message: err?.message,
     });

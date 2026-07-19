@@ -43,7 +43,7 @@ describe("update-pricing: perTokenToPerMtok", () => {
 describe("update-pricing: priceFromLiteLLM", () => {
   const catalog: LiteLLMCatalog = {
     "claude-opus-4-8": { input_cost_per_token: 0.000005, output_cost_per_token: 0.000025 },
-    "dashscope/qwen3.5-plus": { tiered_pricing: [{ input_cost_per_token: 4e-7 }] } as any,
+    "dashscope/qwen3.5-plus": { tiered_pricing: [{ input_cost_per_token: 4e-7 }] },
     "zero-cost-model": { input_cost_per_token: 0, output_cost_per_token: 0 },
   };
 
@@ -144,7 +144,7 @@ describe("update-pricing: resolvePrice (LiteLLM -> CloudPrice -> OpenRouter fall
 
   it("falls back to CloudPrice when LiteLLM is missing the model (qwen-3.5-plus case)", () => {
     const litellm: LiteLLMCatalog = {
-      "dashscope/qwen3.5-plus": { tiered_pricing: [] } as any, // no flat cost fields
+      "dashscope/qwen3.5-plus": { tiered_pricing: [] }, // no flat cost fields
     };
     const cloudprice: CloudPriceCatalog = {
       "dashscope/qwen3.5-plus": { input_cost_per_token: 4e-7, output_cost_per_token: 2.4e-6 },
@@ -162,7 +162,7 @@ describe("update-pricing: resolvePrice (LiteLLM -> CloudPrice -> OpenRouter fall
   it("falls back to OpenRouter when both LiteLLM and CloudPrice are missing the model", () => {
     const litellm: LiteLLMCatalog = {};
     const cloudprice: CloudPriceCatalog = {
-      "dashscope/qwen3.5-plus": { tiered_pricing: [] } as any, // no flat cost fields, same as LiteLLM
+      "dashscope/qwen3.5-plus": { tiered_pricing: [] }, // no flat cost fields, same as LiteLLM
     };
     const openrouter: OpenRouterCatalog = {
       data: [{ id: "qwen/qwen3.5-plus-02-15", pricing: { prompt: "0.00000026", completion: "0.00000156" } }],
@@ -254,7 +254,7 @@ describe("update-pricing: buildNextPrices", () => {
       "gemini-3.5-flash": { input_cost_per_token: 0.0000015, output_cost_per_token: 0.000009 },
       "gemini-3.1-pro-preview": { input_cost_per_token: 0.000002, output_cost_per_token: 0.000012 },
       "deepseek-v4-pro": { input_cost_per_token: 4.35e-7, output_cost_per_token: 8.7e-7 },
-      "dashscope/qwen3.5-plus": {} as any, // LiteLLM: no flat cost fields
+      "dashscope/qwen3.5-plus": {}, // LiteLLM: no flat cost fields
     };
     const cloudprice: CloudPriceCatalog = {
       "dashscope/qwen3.5-plus": { input_cost_per_token: 4e-7, output_cost_per_token: 2.4e-6 },

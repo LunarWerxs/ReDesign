@@ -183,7 +183,11 @@ export async function serveCmd(args: Args): Promise<void> {
   setAutoUpdateHooks({
     relaunch: () => {
       try {
-        const child = spawn(process.argv[0]!, process.argv.slice(1), {
+        // process.argv[0] is the node executable path; process.execPath is the documented,
+        // always-defined equivalent, used here only as the guard's fallback (never expected to
+        // actually differ at runtime).
+        const execPath = process.argv[0] ?? process.execPath;
+        const child = spawn(execPath, process.argv.slice(1), {
           cwd: process.cwd(),
           detached: true,
           stdio: "ignore",

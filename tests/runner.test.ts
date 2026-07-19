@@ -6,6 +6,26 @@ import { KeyManager } from "../src/keyManager";
 import * as inputResolver from "../src/inputResolver";
 import * as store from "../src/store";
 import { runReimagine } from "../src/runner";
+// Narrow, test-local view of a resolved run manifest (the fields these tests actually
+// read). It is store.Manifest with the optionality removed: the public type keeps these
+// fields optional for callers reading a half-written manifest off disk, but a run that
+// has just resolved always has them, so a cast at the call site stands in for that.
+// store.Job carries an `[key: string]: unknown` index signature, so the per-job fields
+// these tests read come back as `unknown`. Naming them here is what lets the assertions
+// below stay readable without a String()/cast at every use.
+type ManifestJob = store.Job & {
+  modelId?: string;
+  file?: string | null;
+  note?: string | null;
+};
+
+interface RunManifest {
+  runId: string;
+  status: string;
+  counts: store.Counts;
+  jobs: ManifestJob[];
+  config: { reference?: { images: string[]; count: number; note: string | null } | null };
+}
 
 const TINY_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
@@ -13,7 +33,7 @@ const TINY_PNG = Buffer.from(
 );
 
 describe("runner: end-to-end mock run with key rotation", () => {
-  const tmpState = path.join(os.tmpdir(), "reimagine-test-runner-" + process.pid + ".json");
+  const tmpState = path.join(os.tmpdir(), `reimagine-test-runner-${process.pid}.json`);
 
   afterAll(() => {
     for (const suffix of [".e2e", ".e2e2", ".rot", ".ref"]) {
@@ -22,8 +42,8 @@ describe("runner: end-to-end mock run with key rotation", () => {
   });
 
   it("rejects an empty input selection clearly", async () => {
-    const e2eKm = new KeyManager({ stateFile: tmpState + ".e2e" });
-    const manifest: any = await runReimagine({
+    const e2eKm = new KeyManager({ stateFile: `${tmpState}.e2e` });
+    const manifest: store.Manifest | { error: string } = await runReimagine({
       keyManager: e2eKm,
       mock: true,
       inputs: { ids: ["__nonexistent-input-id__"] },
@@ -33,15 +53,15 @@ describe("runner: end-to-end mock run with key rotation", () => {
       label: "selftest",
     }).catch((e: Error) => ({ error: e.message }));
     expect(manifest.error).toBeTruthy();
-    expect(/No inputs/.test(manifest.error)).toBe(true);
+    expect(/No inputs/.test(String(manifest.error))).toBe(true);
   });
 
   const realInputs = inputResolver.listInputs();
   const maybeIt = realInputs.length ? it : it.skip;
 
   maybeIt("clean mock run over real input/: every job succeeds and produces a valid HTML file + sidecar meta", async () => {
-    const e2eKm2 = new KeyManager({ stateFile: tmpState + ".e2e2" });
-    const m2: any = await runReimagine({
+    const e2eKm2 = new KeyManager({ stateFile: `${tmpState}.e2e2` });
+    const m2 = (await runReimagine({
       keyManager: e2eKm2,
       mock: true,
       inputs: { ids: [realInputs[0]!.id] },
@@ -49,15 +69,15 @@ describe("runner: end-to-end mock run with key rotation", () => {
       prompts: { presets: ["faithful-refresh", "minimalist"] },
       variants: 1,
       label: "selftest",
-    });
+    })) as RunManifest;
     try {
       expect(m2.counts.done).toBe(m2.counts.total);
       expect(m2.counts.ok).toBe(m2.counts.total);
       expect(m2.status).toBe("done");
 
-      const dsJob = m2.jobs.find((j: any) => j.modelId === "deepseek-v4-pro");
+      const dsJob = m2.jobs.find((j) => j.modelId === "deepseek-v4-pro");
       expect(dsJob).toBeTruthy();
-      expect(/caption/i.test(dsJob.note || "")).toBe(true);
+      expect(/caption/i.test(dsJob?.note || "")).toBe(true);
 
       if (dsJob?.file) {
         const metaPath = path.join(store.OUTPUT_DIR, dsJob.file.replace(/\.html$/, ".meta.json").split("/").join(path.sep));
@@ -66,8 +86,12 @@ describe("runner: end-to-end mock run with key rotation", () => {
         expect(!!dsMeta.captionBy).toBe(true);
       }
 
-      const okJob = m2.jobs.find((j: any) => j.status === "ok");
-      const file = path.join(store.OUTPUT_DIR, okJob.file.split("/").join(path.sep));
+      const okJob = m2.jobs.find((j) => j.status === "ok");
+      // Assert the job exists rather than defaulting its path to "": a missing okJob means
+      // the run produced nothing, and that should fail here and say so, not resolve to
+      // OUTPUT_DIR and fail later with an unrelated EISDIR.
+      expect(okJob?.file).toBeTruthy();
+      const file = path.join(store.OUTPUT_DIR, String(okJob?.file).split("/").join(path.sep));
       const html = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
       expect(html.includes("<!DOCTYPE html>")).toBe(true);
       expect(html.length).toBeGreaterThan(200);
@@ -80,8 +104,8 @@ describe("runner: end-to-end mock run with key rotation", () => {
   maybeIt("rotation: succeeds after skipping 2 known-bad keys, and those keys are now cooling", async () => {
     process.env.MOCK_BAD_SUBSTR = "BADKEY";
     process.env.QWEN_API_KEYS = "BADKEY-1,BADKEY-2,good-3,good-4";
-    const rotKm = new KeyManager({ stateFile: tmpState + ".rot" });
-    const mr: any = await runReimagine({
+    const rotKm = new KeyManager({ stateFile: `${tmpState}.rot` });
+    const mr = (await runReimagine({
       keyManager: rotKm,
       mock: true,
       inputs: { ids: [realInputs[0]!.id] },
@@ -89,10 +113,10 @@ describe("runner: end-to-end mock run with key rotation", () => {
       prompts: { presets: ["minimalist"] },
       variants: 1,
       label: "rot",
-    });
+    })) as RunManifest;
     delete process.env.MOCK_BAD_SUBSTR;
     try {
-      const rjob = mr.jobs[0];
+      const rjob = mr.jobs[0]!;
       expect(rjob.status).toBe("ok");
       expect(rjob.attempts).toBe(3);
       expect(rotKm.snapshot().pools[0]!.entries.filter((e) => !e.availableNow).length).toBe(2);
@@ -111,8 +135,8 @@ describe("runner: end-to-end mock run with key rotation", () => {
     } catch (_) {}
     if (!refMade) return;
 
-    const refKm = new KeyManager({ stateFile: tmpState + ".ref" });
-    const mref: any = await runReimagine({
+    const refKm = new KeyManager({ stateFile: `${tmpState}.ref` });
+    const mref = (await runReimagine({
       keyManager: refKm,
       mock: true,
       inputs: { ids: [realInputs[0]!.id] },
@@ -121,13 +145,13 @@ describe("runner: end-to-end mock run with key rotation", () => {
       reference: { images: ["__selftest_ref.png"], note: "match this palette" },
       variants: 1,
       label: "reftest",
-    });
+    })) as RunManifest;
     try {
       expect(mref.config.reference?.count).toBe(1);
-      const metaOf = (j: any) =>
-        JSON.parse(fs.readFileSync(path.join(store.OUTPUT_DIR, j.file.replace(/\.html$/, ".meta.json").split("/").join(path.sep)), "utf8"));
-      const visJob = mref.jobs.find((j: any) => j.modelId === "gemini-3.5-flash" && j.status === "ok");
-      const txtJob = mref.jobs.find((j: any) => j.modelId === "deepseek-v4-pro" && j.status === "ok");
+      const metaOf = (j: ManifestJob) =>
+        JSON.parse(fs.readFileSync(path.join(store.OUTPUT_DIR, (j.file || "").replace(/\.html$/, ".meta.json").split("/").join(path.sep)), "utf8"));
+      const visJob = mref.jobs.find((j) => j.modelId === "gemini-3.5-flash" && j.status === "ok");
+      const txtJob = mref.jobs.find((j) => j.modelId === "deepseek-v4-pro" && j.status === "ok");
       if (visJob) {
         const mm = metaOf(visJob);
         expect(mm.reference?.images.includes("__selftest_ref.png")).toBe(true);

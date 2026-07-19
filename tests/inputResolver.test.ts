@@ -58,7 +58,7 @@ describe("inputResolver", () => {
     const tmpUpload = fs.mkdtempSync(path.join(os.tmpdir(), "reimg-upload-"));
     try {
       const uploaded = inputResolver.saveUploadedImages(
-        [{ name: "Clipboard Shot.png", mime: "image/png", data: "data:image/png;base64," + TINY_PNG.toString("base64") }],
+        [{ name: "Clipboard Shot.png", mime: "image/png", data: `data:image/png;base64,${TINY_PNG.toString("base64")}` }],
         { inputDir: tmpUpload, now: new Date("2026-06-25T12:00:00Z") }
       );
       expect(uploaded.saved.length).toBe(1);
@@ -72,7 +72,7 @@ describe("inputResolver", () => {
       );
       expect(uploadedAgain.saved[0]!.rel).not.toBe(uploaded.saved[0]!.rel);
 
-      let badUpload: any = null;
+      let badUpload: unknown = null;
       try {
         inputResolver.saveUploadedImages(
           [{ name: "fake.png", mime: "image/png", data: Buffer.from("not really a png").toString("base64") }],
@@ -81,7 +81,9 @@ describe("inputResolver", () => {
       } catch (e) {
         badUpload = e;
       }
-      expect(badUpload?.status).toBe(400);
+      const badUploadStatus =
+        badUpload instanceof Error && "status" in badUpload ? (badUpload as Error & { status?: number }).status : undefined;
+      expect(badUploadStatus).toBe(400);
     } finally {
       try { fs.rmSync(tmpUpload, { recursive: true, force: true }); } catch (_) {}
     }
