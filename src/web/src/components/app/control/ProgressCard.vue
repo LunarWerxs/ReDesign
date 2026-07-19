@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { RouterLink } from 'vue-router';
+import { useVirtualList } from '@vueuse/core';
 import { ImageIcon, SquareIcon, XIcon } from '@lucide/vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -51,6 +52,24 @@ function jobTooltip(job: Job): string {
   if (job.status === 'error' && job.error) return job.error;
   return job.note || '';
 }
+
+// A fan-out is inputs × models × prompts × copies, so a run the UI itself can build
+// reaches ~900 jobs — and every row used to sit in the DOM at once, which is enough
+// to stall the renderer while the run is still streaming into it. Only the rows in
+// view are mounted now.
+//
+// The pitch below MUST match the row's own geometry: a 30px row (h-[30px]) plus the
+// 6px gap it carries as mb-1.5. The row height is explicit rather than derived from
+// padding so a future content change can't silently desync the two.
+const JOB_ROW_PITCH_PX = 36;
+const {
+  list: visibleJobs,
+  containerProps: jobListContainer,
+  wrapperProps: jobListWrapper,
+} = useVirtualList(
+  computed(() => store.jobList),
+  { itemHeight: JOB_ROW_PITCH_PX, overscan: 8 },
+);
 </script>
 
 <template>
@@ -122,28 +141,30 @@ function jobTooltip(job: Job): string {
           </Button>
         </span>
       </div>
-      <div class="grid max-h-[320px] gap-1.5 overflow-auto">
-        <Tooltip v-for="job in store.jobList" :key="job.id" :disabled="!jobTooltip(job)">
-          <TooltipTrigger as-child>
-            <div
-              class="grid grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
-            >
-              <span class="size-3 rounded-full" :class="dot(job.status)" />
-              <span class="truncate text-muted-foreground">
-                {{ job.inputId }} · <b class="text-foreground">{{ job.modelId }}</b> · {{ job.promptId
-                }}{{ job.variant > 1 ? ' v' + job.variant : '' }}
-              </span>
-              <span class="tabular-nums text-muted-foreground/70">
-                {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : ''
-                }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : ''
-                }}<span v-if="job.prepMs && (job.status === 'ok' || job.status === 'error')" class="text-muted-foreground/50">
-                  {{ t('progress.prepMs', { ms: job.prepMs }) }}
+      <div v-bind="jobListContainer" class="max-h-[320px]">
+        <div v-bind="jobListWrapper">
+          <Tooltip v-for="{ data: job } in visibleJobs" :key="job.id" :disabled="!jobTooltip(job)">
+            <TooltipTrigger as-child>
+              <div
+                class="mb-1.5 grid h-[30px] grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 text-xs"
+              >
+                <span class="size-3 rounded-full" :class="dot(job.status)" />
+                <span class="truncate text-muted-foreground">
+                  {{ job.inputId }} · <b class="text-foreground">{{ job.modelId }}</b> · {{ job.promptId
+                  }}{{ job.variant > 1 ? ' v' + job.variant : '' }}
                 </span>
-              </span>
-            </div>
-          </TooltipTrigger>
-          <TooltipContent v-if="jobTooltip(job)" class="max-w-xs">{{ jobTooltip(job) }}</TooltipContent>
-        </Tooltip>
+                <span class="tabular-nums text-muted-foreground/70">
+                  {{ jobCostLabel(job) ? '$' + jobCostLabel(job) + ' · ' : ''
+                  }}{{ job.status === 'ok' || job.status === 'error' ? (job.ms || 0) + 'ms' : ''
+                  }}<span v-if="job.prepMs && (job.status === 'ok' || job.status === 'error')" class="text-muted-foreground/50">
+                    {{ t('progress.prepMs', { ms: job.prepMs }) }}
+                  </span>
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent v-if="jobTooltip(job)" class="max-w-xs">{{ jobTooltip(job) }}</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </CardContent>
   </Card>
