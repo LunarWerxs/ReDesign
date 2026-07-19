@@ -20,6 +20,7 @@
     "bun": ">=1.2.0"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "start": "bun run src/index.ts serve",
     "serve": "bun run src/index.ts serve",
     "build": "npm --prefix src/web install && npm --prefix src/web run build",
