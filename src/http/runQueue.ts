@@ -8,6 +8,9 @@
  */
 import * as store from "../store";
 import { runReimagine } from "../runner";
+// `reference` arrives as untyped JSON off the wire; runReimagine validates the shape
+// itself, so this only names the target type instead of widening the whole body to any.
+import type { ReferenceOptions } from "../runner/reimagine";
 import { normalizeSelectionIds, type SelectionInput } from "../util";
 // Lazy (dynamic) import, not a static one: auto-update.ts itself imports hasActiveRun from
 // this module, so a static import here would create a module-init circular dependency.
@@ -36,6 +39,15 @@ interface RunBody {
   poolConcurrency?: number | string;
   reference?: unknown;
   brandStyleGuide?: string | null;
+  /**
+   * Whether this submission may start on its own once the runner is free.
+   *
+   * Defaults to true, which is the behavior every non-browser caller (the MCP
+   * tools, the CLI) has always relied on: POST and it runs. The control panel
+   * sends false, because its two buttons are "Add to queue" and "Run queue" —
+   * nothing it submits spends a key until the user presses the second one.
+   */
+  autoStart?: boolean;
   [key: string]: unknown;
 }
 
@@ -45,6 +57,8 @@ interface RunEntry {
   lastManifest: store.Manifest | null;
   finished: boolean;
   status: "queued" | "running" | "finished";
+  /** False while the run is parked in the queue waiting for an explicit "Run queue". */
+  released: boolean;
   body: RunBody;
   heartbeat?: ReturnType<typeof setInterval>;
 }
@@ -92,7 +106,7 @@ function selectedIds(selection: SelectionInput): string[] {
   return normalizeSelectionIds(selection, { extraKeys: ["ids", "presets"] });
 }
 
-function queuedManifest(runId: string, body: RunBody, position: number): store.Manifest {
+function queuedManifest(runId: string, body: RunBody, position: number, held = false): store.Manifest {
   const prompts = body.prompts || {};
   const promptIds = selectedIds(prompts as SelectionInput);
   if (prompts.custom) promptIds.push("custom");
@@ -113,7 +127,7 @@ function queuedManifest(runId: string, body: RunBody, position: number): store.M
       poolConcurrency: body.poolConcurrency || null,
       reference: body.reference || null,
     },
-    queue: { position },
+    queue: { position, held },
     inputs: [],
     prompts: [],
     models: [],
@@ -125,9 +139,13 @@ function queuedManifest(runId: string, body: RunBody, position: number): store.M
 function updateQueuedManifests(): void {
   runQueue.forEach((runId, idx) => {
     const entry = activeRuns.get(runId);
-    if (!entry || entry.status !== "queued") return;
-    const existing = entry.lastManifest || queuedManifest(runId, entry.body || {}, idx + 1);
-    const manifest: store.Manifest = { ...existing, status: "queued", queue: { position: idx + 1 } };
+    if (entry?.status !== "queued") return;
+    const existing = entry.lastManifest || queuedManifest(runId, entry.body || {}, idx + 1, !entry.released);
+    const manifest: store.Manifest = {
+      ...existing,
+      status: "queued",
+      queue: { position: idx + 1, held: !entry.released },
+    };
     store.writeManifest(runId, manifest);
     broadcast(runId, { type: "snapshot", runId, manifest });
   });
@@ -136,19 +154,24 @@ function updateQueuedManifests(): void {
 function enqueueRun(body: RunBody): string {
   const runId = store.newRunId(body.label);
   const controller = new AbortController();
+  // Only an explicit `autoStart: false` parks the run. Anything else — including a
+  // body from an older client that has never heard of the flag — keeps the original
+  // submit-and-run behavior, so the MCP tools and CLI are unaffected by the queue gate.
+  const released = body.autoStart !== false;
   const entry: RunEntry = {
     clients: new Set(),
     controller,
     lastManifest: null,
     finished: false,
     status: "queued",
+    released,
     body,
   };
   activeRuns.set(runId, entry);
   startHeartbeat(entry);
 
   runQueue.push(runId);
-  entry.lastManifest = queuedManifest(runId, body, runQueue.length);
+  entry.lastManifest = queuedManifest(runId, body, runQueue.length, !released);
   store.writeManifest(runId, entry.lastManifest);
   updateQueuedManifests();
   pumpRunQueue();
@@ -156,21 +179,65 @@ function enqueueRun(body: RunBody): string {
   return runId;
 }
 
+/**
+ * Let every run currently parked in the queue start. Returns how many were waiting
+ * on this, so the caller can say "running 3" rather than guess.
+ *
+ * Deliberately a snapshot of *now*: anything added after this returns is parked
+ * again and needs its own release. That is what makes the control panel's "Add to
+ * queue" label honest — a run never starts spending keys without a press behind it.
+ */
+function releaseQueue(): number {
+  let released = 0;
+  for (const runId of runQueue) {
+    const entry = activeRuns.get(runId);
+    if (!entry || entry.released || entry.status !== "queued") continue;
+    entry.released = true;
+    released++;
+  }
+  if (released) updateQueuedManifests();
+  pumpRunQueue();
+  return released;
+}
+
+/** How many runs are parked waiting for a release (for the control panel's button state). */
+function heldRunCount(): number {
+  let held = 0;
+  for (const runId of runQueue) {
+    const entry = activeRuns.get(runId);
+    if (entry && !entry.released && entry.status === "queued") held++;
+  }
+  return held;
+}
+
 function pumpRunQueue(): void {
   if (currentRunId) return;
-  while (runQueue.length) {
-    const runId = runQueue.shift() as string;
-    const entry = activeRuns.get(runId);
-    if (!entry || entry.controller.signal.aborted || entry.finished) continue;
-    currentRunId = runId;
-    entry.status = "running";
-    updateQueuedManifests();
-    runQueuedEntry(runId, entry);
-    return;
+  // Drop entries that died while waiting (cancelled, or already finished), wherever they
+  // sit. This used to fall out of shift()-ing them off the front; now that a held run can
+  // sit in front of them, they have to be swept explicitly or they'd never be collected.
+  for (let i = runQueue.length - 1; i >= 0; i--) {
+    const queuedId = runQueue[i];
+    const queued = queuedId ? activeRuns.get(queuedId) : undefined;
+    if (!queued || queued.controller.signal.aborted || queued.finished) runQueue.splice(i, 1);
+  }
+  // Start the first *released* run. A held one keeps its place and is skipped rather than
+  // consumed, so it still runs in submission order once a "Run queue" press reaches it.
+  const idx = runQueue.findIndex((id) => activeRuns.get(id)?.released === true);
+  if (idx !== -1) {
+    const [runId] = runQueue.splice(idx, 1);
+    const entry = runId ? activeRuns.get(runId) : undefined;
+    if (runId && entry) {
+      currentRunId = runId;
+      entry.status = "running";
+      updateQueuedManifests();
+      runQueuedEntry(runId, entry);
+      return;
+    }
   }
   // Queue fully drained (nothing running, nothing waiting), a deferred auto-update restart
   // (see src/auto-update.ts) can now fire safely without interrupting an in-flight run.
-  void maybeApplyDeferredRestart();
+  // Held runs count as waiting: restarting would orphan work the user has lined up.
+  if (!runQueue.length) void maybeApplyDeferredRestart();
 }
 
 function runQueuedEntry(runId: string, entry: RunEntry): void {
@@ -180,7 +247,7 @@ function runQueuedEntry(runId: string, entry: RunEntry): void {
     inputs: body.inputs || "all",
     models: body.models || "all",
     prompts: body.prompts || {},
-    reference: (body.reference as any) || null,
+    reference: (body.reference as ReferenceOptions | null | undefined) || null,
     brandStyleGuide: typeof body.brandStyleGuide === "string" ? body.brandStyleGuide : null,
     variants: body.variants || 1,
     modelQuantities: body.modelQuantities || undefined,
@@ -254,7 +321,7 @@ function cancelRun(runId: string): boolean {
 }
 
 function normalizeRunDeleteIds(body: { ids?: unknown; id?: unknown } | null | undefined): string[] {
-  const raw: unknown[] = Array.isArray(body?.ids) ? (body!.ids as unknown[]) : body?.id ? [body.id] : [];
+  const raw: unknown[] = Array.isArray(body?.ids) ? (body?.ids as unknown[]) : body?.id ? [body.id] : [];
   return Array.from(
     new Set(
       raw
@@ -309,6 +376,8 @@ export {
   runStoreOptions,
   ORPHANED_RUN_MESSAGE,
   enqueueRun,
+  releaseQueue,
+  heldRunCount,
   cancelRun,
   normalizeRunDeleteIds,
   deleteRuns,

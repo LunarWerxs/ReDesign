@@ -133,7 +133,10 @@ export interface Manifest {
   summary?: RunSummaryMeta | null;
   counts?: Counts;
   cost?: RunCost;
-  queue?: { position?: number } | null;
+  // `held` means the run is parked in the queue and will not start until a "Run queue"
+  // press releases it (src/http/runQueue.ts releaseQueue). Absent on runs submitted by
+  // the MCP tools or CLI, which still start on their own.
+  queue?: { position?: number; held?: boolean } | null;
   inputs: InputItem[];
   prompts: Prompt[];
   models: Model[];
@@ -298,6 +301,10 @@ export interface RunRequest {
   mock: boolean;
   reference?: { images: string[]; note: string | null };
   brandStyleGuide?: string | null;
+  // The control panel always sends false: "Add to queue" parks the run, and only a
+  // "Run queue" press starts it. Omitting the flag keeps the server's original
+  // submit-and-run behavior, which the MCP tools and CLI still rely on.
+  autoStart?: boolean;
 }
 
 export interface HealthCheckResponse {

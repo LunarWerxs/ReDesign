@@ -107,6 +107,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       entry.jobs.set(ev.job.id, ev.job);
       entry.status = 'running';
       entry.queuePosition = null;
+      entry.queueHeld = false;
     } else if (ev.type === 'done') {
       ingestManifest(ev.manifest);
       finishRun(runId, ev.manifest && ev.manifest.status);
@@ -294,6 +295,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     if (!m || !m.runId) return;
     const entry = state.trackRun(m.runId);
     entry.queuePosition = m.queue && m.queue.position ? m.queue.position : null;
+    entry.queueHeld = !!(m.queue && m.queue.held);
     entry.total = (m.counts && m.counts.total) || (m.jobs ? m.jobs.length : entry.total);
     if (m.summary && m.summary.title) entry.title = m.summary.title;
     entry.status = m.status;
@@ -364,7 +366,14 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     }
   }
 
-  async function startRun() {
+  /**
+   * Build the run body from the current selection and park it in the server's queue.
+   *
+   * Named for what it does: this no longer starts anything. The server holds every
+   * submission carrying `autoStart: false` until `runQueue()` below releases it, so
+   * the user can stack several batches up and then commit to spending keys once.
+   */
+  async function addToQueue() {
     if (!state.selInputs.value.length) return toast(t('runs.pickInput'));
     if (!state.selModels.value.length) return toast(t('runs.pickModel'));
     if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim()))
@@ -387,6 +396,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       },
       maxImages: Math.max(1, state.maxImages.value || 8),
       mock: state.mock.value,
+      autoStart: false,
     };
     if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
     if (state.referenceOn.value && state.selReference.value.length) {
@@ -407,7 +417,10 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     state.submitting.value = true;
     try {
       const { runId: id } = await api.startRun(body);
-      state.trackRun(id, { title: id, status: 'queued', total: 0 });
+      // `queueHeld` is seeded rather than waited for: the server confirms it on the
+      // first snapshot, but the "Run queue" button has to light up on this click,
+      // not a round trip later.
+      state.trackRun(id, { title: id, status: 'queued', queueHeld: true, total: 0 });
       subscribe(id);
       // Watch the newest submission unless something is already generating — then
       // stay on the live run and let the backlog strip show what's behind it.
@@ -418,6 +431,38 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       toast.error(t('runs.startFailed'), { description: errMessage(e) });
     } finally {
       state.submitting.value = false;
+    }
+  }
+
+  /**
+   * Release everything "Add to queue" has parked, in submission order.
+   *
+   * Only what is already queued when this fires is released — the server takes a
+   * snapshot (releaseQueue in src/http/runQueue.ts). Anything added afterwards is
+   * parked again and needs its own press, so the queue can never start spending
+   * keys on a batch the user hasn't explicitly committed to.
+   */
+  async function runQueue() {
+    const held = state.heldRuns.value;
+    if (!held.length) return;
+    state.startingQueue.value = true;
+    try {
+      const { started } = await api.startQueue();
+      if (!started) {
+        // Nothing was actually held server-side (another tab released it first, or the
+        // daemon restarted underneath us). Re-read so the button state stops lying.
+        refreshRuns();
+        return;
+      }
+      // Show the run that is about to generate rather than leaving the card on a
+      // finished one; the rest of the batch stays visible in the backlog strip.
+      const first = held[0];
+      if (first) focusRun(first.runId);
+      toast(t('runs.queueStarted', { count: started }, started));
+    } catch (e) {
+      toast.error(t('runs.queueStartFailed'), { description: errMessage(e) });
+    } finally {
+      state.startingQueue.value = false;
     }
   }
 
@@ -434,7 +479,8 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
   return {
     refreshRuns,
     deleteRuns,
-    startRun,
+    addToQueue,
+    runQueue,
     cancelRun,
     focusRun,
     resumeRuns,

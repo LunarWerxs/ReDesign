@@ -13,6 +13,7 @@ const apiMock = {
   runs: vi.fn(async (): Promise<RunSummary[]> => []),
   run: vi.fn(async (_id: string): Promise<Manifest> => manifest("unknown", "done")),
   startRun: vi.fn(async () => ({ runId: "new-run" })),
+  startQueue: vi.fn(async () => ({ started: 1, held: 0 })),
   cancelRun: vi.fn(async () => ({ ok: true })),
   deleteRuns: vi.fn(async () => ({ deleted: [] as string[], skipped: [], runs: [] as RunSummary[] })),
   estimateRunCost: vi.fn(async () => null),
@@ -87,7 +88,7 @@ function harness() {
   return { state, actions };
 }
 
-/** A selection valid enough for startRun() to get past its guards. */
+/** A selection valid enough for addToQueue() to get past its guards. */
 function ready(state: ReturnType<typeof createControlState>) {
   state.selInputs.value = ["i1"];
   state.selModels.value = ["m1"];
@@ -100,18 +101,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   apiMock.runs.mockResolvedValue([]);
   apiMock.startRun.mockResolvedValue({ runId: "new-run" });
+  apiMock.startQueue.mockResolvedValue({ started: 1, held: 0 });
 });
 
-describe("startRun", () => {
+describe("addToQueue", () => {
   it("queues a second run behind the live one instead of replacing it", async () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run1", { type: "start", runId: "run1", manifest: manifest("run1", "running") });
 
     apiMock.startRun.mockResolvedValueOnce({ runId: "run2" });
-    await actions.startRun();
+    await actions.addToQueue();
 
     expect(state.trackedRuns.has("run1")).toBe(true);
     expect(state.trackedRuns.has("run2")).toBe(true);
@@ -126,7 +128,7 @@ describe("startRun", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "solo" });
-    await actions.startRun();
+    await actions.addToQueue();
 
     expect(state.focusedRunId.value).toBe("solo");
     expect(state.running.value).toBe(true);
@@ -134,9 +136,77 @@ describe("startRun", () => {
 
   it("refuses to submit without an input, a model and a prompt", async () => {
     const { state, actions } = harness();
-    await actions.startRun();
+    await actions.addToQueue();
     expect(apiMock.startRun).not.toHaveBeenCalled();
     expect(state.trackedRuns.size).toBe(0);
+  });
+
+  // The whole point of the split: submitting must not spend a key. If this ever
+  // regresses, "Add to queue" silently becomes "Run" again and a mis-click can
+  // launch a 900-job fan-out.
+  it("parks the run instead of starting it", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    await actions.addToQueue();
+
+    expect(apiMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(apiMock.startQueue).not.toHaveBeenCalled();
+    expect(state.heldRuns.value.map((r) => r.runId)).toEqual(["new-run"]);
+  });
+});
+
+describe("runQueue", () => {
+  it("releases the parked runs and focuses the one about to generate", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
+    await actions.addToQueue();
+    apiMock.startRun.mockResolvedValueOnce({ runId: "run2" });
+    await actions.addToQueue();
+    expect(state.heldRuns.value).toHaveLength(2);
+
+    apiMock.startQueue.mockResolvedValueOnce({ started: 2, held: 0 });
+    await actions.runQueue();
+
+    expect(apiMock.startQueue).toHaveBeenCalledTimes(1);
+    expect(state.focusedRunId.value).toBe("run1");
+  });
+
+  it("does nothing when the queue is empty, so the press can't fire on stale state", async () => {
+    const { actions } = harness();
+    await actions.runQueue();
+    expect(apiMock.startQueue).not.toHaveBeenCalled();
+  });
+
+  // A queued run stops being "held" the moment the server says it is running, so the
+  // button greys out instead of offering to start something already generating.
+  it("drops a run out of heldRuns once the server reports it running", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
+    await actions.addToQueue();
+    expect(state.heldRuns.value).toHaveLength(1);
+
+    feed("run1", { type: "start", runId: "run1", manifest: manifest("run1", "running") });
+
+    expect(state.heldRuns.value).toHaveLength(0);
+    expect(state.anyRunActive.value).toBe(true);
+  });
+
+  // A run submitted by the MCP tools or the CLI carries no `held` flag: it starts on
+  // its own, so "Run queue" must not claim to be waiting on it.
+  it("ignores runs that were never held", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
+    await actions.addToQueue();
+    feed("run1", {
+      type: "snapshot",
+      runId: "run1",
+      manifest: manifest("run1", "queued", { queue: { position: 1 } }),
+    });
+
+    expect(state.heldRuns.value).toHaveLength(0);
   });
 });
 
@@ -145,10 +215,10 @@ describe("streamed progress", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run1", { type: "start", runId: "run1", manifest: manifest("run1", "running") });
     apiMock.startRun.mockResolvedValueOnce({ runId: "run2" });
-    await actions.startRun();
+    await actions.addToQueue();
 
     feed("run2", { type: "job", runId: "run2", job: { id: "j1", status: "ok" } });
 
@@ -161,10 +231,10 @@ describe("streamed progress", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run1", { type: "start", runId: "run1", manifest: manifest("run1", "running") });
     apiMock.startRun.mockResolvedValueOnce({ runId: "run2" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run2", { type: "snapshot", runId: "run2", manifest: manifest("run2", "queued", { queue: { position: 1 } }) });
 
     feed("run1", { type: "done", runId: "run1", manifest: manifest("run1", "done") });
@@ -178,7 +248,7 @@ describe("streamed progress", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
 
     feed("run1", { type: "error", runId: "run1", message: "boom" });
 
@@ -261,7 +331,7 @@ describe("deleteRuns", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run1", { type: "start", runId: "run1", manifest: manifest("run1", "running") });
 
     // The flyout lets any row be selected; the server refuses an active delete, so
@@ -277,7 +347,7 @@ describe("deleteRuns", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
     feed("run1", { type: "done", runId: "run1", manifest: manifest("run1", "done") });
     await nextTick();
 
@@ -293,7 +363,7 @@ describe("cancelRun", () => {
     const { state, actions } = harness();
     ready(state);
     apiMock.startRun.mockResolvedValueOnce({ runId: "run1" });
-    await actions.startRun();
+    await actions.addToQueue();
 
     await actions.cancelRun();
     expect(apiMock.cancelRun).toHaveBeenLastCalledWith("run1");

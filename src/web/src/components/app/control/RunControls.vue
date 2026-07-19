@@ -38,14 +38,23 @@ const estimateText = computed(() => {
     ? t('cost.estimateValueTilde', { amount })
     : t('cost.estimateValue', { amount });
 });
-// The server runs a FIFO queue of runs, so Run stays live while one is generating:
-// pressing it again stacks another batch behind the current one rather than being
-// refused. The label says which of the two is about to happen.
-const runLabel = computed(() => {
+// Submitting and running are two separate presses. "Add to queue" only ever parks a
+// batch on the server (runs.ts addToQueue sends autoStart: false); "Run queue" is what
+// releases the parked batches and starts spending keys. Splitting them means a
+// mis-click can't launch a 900-job fan-out, and several batches can be lined up first.
+const queueLabel = computed(() => {
   if (store.submitting) return t('runControls.queueing');
-  if (!store.anyRunActive) return t('runControls.run');
-  return t('runControls.queueAnother', { count: store.activeRuns.length }, store.activeRuns.length);
+  return t('runControls.addToQueue');
 });
+const heldCount = computed(() => store.heldRuns.length);
+const runQueueLabel = computed(() =>
+  heldCount.value ? t('runControls.runQueueWithCount', { count: heldCount.value }) : t('runControls.runQueue'),
+);
+const runQueueTitle = computed(() =>
+  heldCount.value
+    ? t('runControls.runQueueHint', { count: heldCount.value }, heldCount.value)
+    : t('runControls.runQueueEmptyHint'),
+);
 
 const estimateTitle = computed(() => {
   const est = store.costEstimate;
@@ -71,14 +80,23 @@ const estimateTitle = computed(() => {
       <SquareIcon class="size-4" /> {{ t('runControls.cancel') }}
     </Button>
     <Button
+      variant="secondary"
       :disabled="store.submitting"
-      :title="store.anyRunActive ? t('runControls.queueRun') : t('runControls.startRun')"
-      @click="store.startRun()"
+      :title="t('runControls.addToQueueHint')"
+      @click="store.addToQueue()"
     >
       <Loader2Icon v-if="store.submitting" class="size-4 animate-spin" />
-      <ListPlusIcon v-else-if="store.anyRunActive" class="size-4" />
+      <ListPlusIcon v-else class="size-4" />
+      {{ queueLabel }}
+    </Button>
+    <Button
+      :disabled="!heldCount || store.startingQueue"
+      :title="runQueueTitle"
+      @click="store.runQueue()"
+    >
+      <Loader2Icon v-if="store.startingQueue" class="size-4 animate-spin" />
       <PlayIcon v-else class="size-4" />
-      {{ runLabel }}
+      {{ runQueueLabel }}
     </Button>
   </div>
 </template>

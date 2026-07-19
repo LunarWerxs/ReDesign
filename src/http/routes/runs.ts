@@ -13,7 +13,7 @@ import { streamSSE } from "hono/streaming";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import * as store from "../../store";
-import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
+import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, releaseQueue, heldRunCount, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
 
 export function register(app: Hono, _deps: Deps): void {
   // Static segments ("delete") are registered before the "/:id" param routes below, Hono's
@@ -77,6 +77,13 @@ export function register(app: Hono, _deps: Deps): void {
     const body = (await c.req.json().catch(() => ({}))) || {};
     const runId = enqueueRun(body);
     return c.json({ runId });
+  });
+
+  // Start everything the control panel has parked with `autoStart: false`. Idempotent:
+  // pressing it with nothing held simply reports 0 and leaves the running queue alone.
+  app.post("/api/queue/start", requireSameOrigin(), (c) => {
+    const started = releaseQueue();
+    return c.json({ started, held: heldRunCount() });
   });
 
   app.post("/api/runs/:id/cancel", requireSameOrigin(), (c) => {

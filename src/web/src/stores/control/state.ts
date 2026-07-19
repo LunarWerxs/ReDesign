@@ -23,6 +23,8 @@ export interface TrackedRun {
   title: string;
   status: string;
   queuePosition: number | null;
+  /** Parked in the queue: it has a position but won't start until "Run queue" is pressed. */
+  queueHeld: boolean;
   total: number;
   jobs: Map<string, Job>;
   /** Client-side submit order, so the queue strip lists runs the way they were queued. */
@@ -112,7 +114,8 @@ export function createControlState() {
   // one the progress card is showing; the rest are the queue behind it.
   const trackedRuns = reactive(new Map<string, TrackedRun>());
   const focusedRunId = useStorage<string | null>('redesign.focused-run', null);
-  const submitting = ref(false); // POST /api/run in flight (Run disabled, no Cancel yet)
+  const submitting = ref(false); // POST /api/run in flight (Add to queue disabled, no Cancel yet)
+  const startingQueue = ref(false); // POST /api/queue/start in flight (Run queue disabled)
   let trackSeq = 0;
 
   /** Register (or return) a tracked run. Never clobbers an entry we're already streaming. */
@@ -127,6 +130,7 @@ export function createControlState() {
       title: init.title || id,
       status: init.status || 'queued',
       queuePosition: init.queuePosition ?? null,
+      queueHeld: init.queueHeld ?? false,
       total: init.total ?? 0,
       jobs: new Map<string, Job>(),
       seq: ++trackSeq,
@@ -170,6 +174,11 @@ export function createControlState() {
   /** The queue *behind* whatever the progress card is showing. */
   const backlogRuns = computed(() => activeRuns.value.filter((r) => r.runId !== focusedRunId.value));
   const anyRunActive = computed(() => activeRuns.value.length > 0);
+  /**
+   * Runs parked by "Add to queue" and waiting for a "Run queue" press. Drives that
+   * button's enabled state and its count, so it can't be pressed on an empty queue.
+   */
+  const heldRuns = computed(() => activeRuns.value.filter((r) => r.status === 'queued' && r.queueHeld));
 
   // ---- live check (two-step confirm) ----
   const liveCheckArmed = ref(false);
@@ -253,6 +262,7 @@ export function createControlState() {
     activeRuns,
     backlogRuns,
     anyRunActive,
+    heldRuns,
     runId,
     runTitle,
     runStatus,
@@ -260,6 +270,7 @@ export function createControlState() {
     total,
     running,
     submitting,
+    startingQueue,
     // live check
     liveCheckArmed,
     liveCheckBusy,

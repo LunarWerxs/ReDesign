@@ -112,6 +112,7 @@ export const api = {
     request<RunDeleteResponse>('/api/runs/delete', postJson({ ids })),
   run: (id: string) => request<Manifest>(`/api/runs/${encodeURIComponent(id)}`),
   startRun: (body: RunRequest) => request<{ runId: string }>('/api/run', postJson(body)),
+  startQueue: () => request<{ started: number; held: number }>('/api/queue/start', { method: 'POST' }),
   cancelRun: (id: string) =>
     request<{ ok: boolean }>(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   healthCheck: (opts?: { signal?: AbortSignal }) =>
