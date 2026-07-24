@@ -50,8 +50,8 @@ describe("inputResolver", () => {
     expect(imgs[0]!.mime.startsWith("image/")).toBe(true);
   });
 
-  it("real input/ folder is discovered too", () => {
-    expect(inputResolver.listInputs().length).toBeGreaterThanOrEqual(1);
+  it("a missing input folder is safe and returns no items", () => {
+    expect(inputResolver.listInputs(path.join(tmpIn, "does-not-exist"))).toEqual([]);
   });
 
   it("saveUploadedImages writes a pasted screenshot into input/, returns the new selected id, avoids overwriting, and rejects mismatched bytes", () => {
