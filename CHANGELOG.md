@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [1.4.0] - 2026-07-24
+
+### Added
+
 - Add an **All runs** gallery to the viewer. Each run gets a durable thumbnail from its input;
   older runs can backfill one from a surviving input or a headless render of their first
   successful output.
@@ -12,6 +16,9 @@
   results.
 - Add image clipboard support to the screenshot and reference drop zones, including a
   right-click **Paste** action and routing tests that keep the two targets separate.
+
+### Changed
+
 - Open the viewer without a run at the new run gallery instead of silently choosing the newest
   run. Output stars and hidden-item choices now survive refreshes, while live jobs update over SSE
   instead of repeatedly polling and replacing the full manifest.
@@ -21,8 +28,41 @@
 - Consolidate the three presentation toggles under **Appearance**, simplify model/prompt selected
   states, clarify Connections sign-in/disconnect actions, and surface the installed app version
   beside update controls.
+- Make daemon restarts and tray health checks more resilient: runtime pointers follow port
+  changes, foreign processes are rejected, and transient failed probes no longer kill a healthy
+  daemon.
+- Correct DeepSeek scheduling and cost accounting so the shared screenshot description is not
+  charged twice or truncated while a model is still waiting for it.
+
+### Fixed
+
 - Fix the shared updater integration tests on Windows installations where `bun` resolves through
   an npm command shim.
+- Remove the CI test's dependency on a local sample image so the daemon suite is hermetic on all
+  three release operating systems.
+- Keep tall dialogs inside the viewport and make the localization key scan understand indirect
+  references.
+
+## [1.3.0] - 2026-07-16
+
+### Added
+
+- Add measured first-run sizing for portable windows and carry the intended size through Chromium
+  launches that are forwarded into an existing browser process.
+- Seal Connections OAuth refresh tokens at rest with Windows DPAPI.
+- Add behavioral coverage for portable-window placement, loopback request guards, token sealing,
+  and tray launch behavior.
+
+### Changed
+
+- Finish the Reimagine-to-ReDesign launcher asset rename and share the hardened daemon
+  restart/wait helpers with the other LunarWerx desktop tools.
+- Replace heuristic tray daemon detection with an authenticated loopback health check.
+
+### Security
+
+- Apply the shared loopback-origin guard to the HTTP service and protect the last unguarded
+  mutating cost-estimate route.
 
 ## v1.2.0 - 2026-07-13
 
