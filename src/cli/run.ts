@@ -47,6 +47,9 @@ export async function runCmd(args: Args): Promise<void> {
       : null,
     variants: Number.parseInt(String(args.variants), 10) || 1,
     mock: !!args.mock || process.env.MOCK === "1",
+    // --ground: feed vision models a full written inventory of the screenshot so they
+    // reimagine every element instead of dropping/misreading content (one caption per input).
+    groundWithDescription: !!args.ground,
     concurrency: Number.parseInt(String(args.concurrency), 10) || undefined,
     poolConcurrency: Number.parseInt(String(args["pool-concurrency"]), 10) || undefined,
     maxImagesPerInput: Number.parseInt(String(args["max-images"]), 10) || undefined,

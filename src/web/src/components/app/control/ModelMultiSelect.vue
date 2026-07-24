@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { ChevronDownIcon, PlusIcon, SearchIcon, StarIcon } from '@lucide/vue';
+import { CheckIcon, ChevronDownIcon, PlusIcon, SearchIcon } from '@lucide/vue';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,10 +36,24 @@ function matches(m: Model) {
 }
 
 const filtered = computed(() => store.models.filter(matches));
-const starred = computed(() => filtered.value.filter((m) => m.starred));
-const rest = computed(() => filtered.value.filter((m) => !m.starred));
 
-// Group the non-starred models by provider (VS Code Copilot-style sections).
+/**
+ * Top tier, "Selected": everything currently ticked, plus everything starred, with the starred
+ * ones first — a star means "keep this at the very top", so it outranks a plain tick. It is
+ * deliberately a UNION and not just the ticked set: a starred-but-unticked model is exactly the
+ * one-click pick the star exists for, and burying it in the drawer would defeat starring.
+ * Members are listed flat, with no provider sub-headings: at this point the owner has already
+ * chosen these, so which vendor they came from is noise (the provider grouping is a way to
+ * FIND a model, and it stays where finding happens — the "All models" drawer below).
+ */
+const pinned = computed(() => [
+  ...filtered.value.filter((m) => m.starred),
+  ...filtered.value.filter((m) => !m.starred && store.selModels.includes(m.id)),
+]);
+const pinnedIds = computed(() => new Set(pinned.value.map((m) => m.id)));
+const rest = computed(() => filtered.value.filter((m) => !pinnedIds.value.has(m.id)));
+
+// Group the remaining models by provider (VS Code Copilot-style sections).
 const restGroups = computed(() => {
   const groups = new Map<string, Model[]>();
   for (const m of rest.value) {
@@ -57,7 +71,9 @@ const restGroups = computed(() => {
 
 // A search forces the "All models" drawer open so matches aren't hidden behind it.
 const restOpen = computed(() => showAll.value || !!q.value);
-const anyStarredConfigured = computed(() => store.models.some((m) => m.starred));
+// Keep the (empty) Selected header on screen when something IS pinned but the search hides it,
+// so the section doesn't silently vanish mid-typing.
+const anyPinned = computed(() => store.models.some((m) => m.starred || store.selModels.includes(m.id)));
 </script>
 
 <template>
@@ -92,14 +108,14 @@ const anyStarredConfigured = computed(() => store.models.some((m) => m.starred))
           {{ t('modelSelect.noMatches') }}
         </p>
 
-        <!-- Starred tier -->
-        <template v-if="starred.length || (anyStarredConfigured && !q)">
+        <!-- Selected tier: ticked + starred, starred first, no provider sub-headings -->
+        <template v-if="pinned.length || (anyPinned && !q)">
           <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <StarIcon class="size-3 fill-current text-amber-400" />
-            {{ t('modelSelect.starred') }}
+            <CheckIcon class="size-3 text-muted-foreground" />
+            {{ t('modelSelect.selected') }}
           </div>
-          <ModelRow v-for="m in starred" :key="m.id" :model="m" />
-          <p v-if="!starred.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('modelSelect.starredEmpty') }}</p>
+          <ModelRow v-for="m in pinned" :key="m.id" :model="m" />
+          <p v-if="!pinned.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('modelSelect.selectedEmpty') }}</p>
         </template>
 
         <!-- All models drawer (grouped by provider) -->

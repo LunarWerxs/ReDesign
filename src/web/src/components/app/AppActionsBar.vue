@@ -29,6 +29,10 @@ import { t } from '@/i18n';
 // Refresh and API keys need parent context (route-specific refresh; the key
 // sheet lives at the App root), so they're emitted. Theme / cancel / shutdown
 // are self-contained. `close` lets the containing menu dismiss itself.
+//
+// hideKeys/hideTheme apply to BOTH layouts. They were originally honoured only by the `menu`
+// branch, so the settings sheet's icon rail (2026-07-21) rendered a second theme toggle next to
+// its own, plus a keys button that reopens the sheet you're already in.
 const emit = defineEmits<{ refresh: []; keys: []; close: []; 'recent-runs': [] }>();
 const props = withDefaults(
   defineProps<{
@@ -164,7 +168,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
         <span class="text-[11px] text-muted-foreground">{{ t('actions.refreshDescription') }}</span>
       </TooltipContent>
     </Tooltip>
-    <Tooltip>
+    <Tooltip v-if="!props.hideKeys">
       <TooltipTrigger as-child>
         <Button variant="ghost" size="icon-sm" :aria-label="t('actions.apiKeys')" @click="onKeys">
           <KeyRoundIcon class="size-4" />
@@ -175,7 +179,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
         <span class="text-[11px] text-muted-foreground">{{ t('actions.apiKeysDescription') }}</span>
       </TooltipContent>
     </Tooltip>
-    <Tooltip>
+    <Tooltip v-if="!props.hideTheme">
       <TooltipTrigger as-child>
         <Button
           variant="ghost"

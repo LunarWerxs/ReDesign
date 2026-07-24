@@ -2,13 +2,13 @@
 import { computed, ref, useTemplateRef } from 'vue';
 import { onClickOutside } from '@vueuse/core';
 import {
+  CheckIcon,
   ChevronDownIcon,
   Loader2Icon,
   MoreHorizontalIcon,
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
-  StarIcon,
   Trash2Icon,
   WandIcon,
 } from '@lucide/vue';
@@ -63,9 +63,15 @@ function matches(p: Prompt) {
 }
 
 const filtered = computed(() => store.prompts.filter(matches));
-const starred = computed(() => filtered.value.filter((p) => p.starred));
-const rest = computed(() => filtered.value.filter((p) => !p.starred));
-const anyStarredConfigured = computed(() => store.prompts.some((p) => p.starred));
+// Same "Selected" top tier as the models picker (ModelMultiSelect.vue): ticked + starred,
+// starred first, so what you've chosen stays in view instead of scrolling away into the list.
+const pinned = computed(() => [
+  ...filtered.value.filter((p) => p.starred),
+  ...filtered.value.filter((p) => !p.starred && store.selPrompts.includes(p.id)),
+]);
+const pinnedIds = computed(() => new Set(pinned.value.map((p) => p.id)));
+const rest = computed(() => filtered.value.filter((p) => !pinnedIds.value.has(p.id)));
+const anyPinned = computed(() => store.prompts.some((p) => p.starred || store.selPrompts.includes(p.id)));
 // A search forces the drawer open so matches aren't hidden behind it.
 const restOpen = computed(() => showAll.value || !!q.value);
 
@@ -228,14 +234,14 @@ function useCustom() {
           {{ t('promptSelect.noMatches') }}
         </p>
 
-        <!-- Starred tier -->
-        <template v-if="starred.length || (anyStarredConfigured && !q)">
+        <!-- Selected tier: ticked + starred, starred first -->
+        <template v-if="pinned.length || (anyPinned && !q)">
           <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <StarIcon class="size-3 fill-current text-amber-400" />
-            {{ t('promptSelect.starred') }}
+            <CheckIcon class="size-3 text-muted-foreground" />
+            {{ t('promptSelect.selected') }}
           </div>
-          <PromptRow v-for="p in starred" :key="p.id" :prompt="p" @edit="openEdit" />
-          <p v-if="!starred.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('promptSelect.starredEmpty') }}</p>
+          <PromptRow v-for="p in pinned" :key="p.id" :prompt="p" @edit="openEdit" />
+          <p v-if="!pinned.length" class="px-1 pb-1 text-xs text-muted-foreground">{{ t('promptSelect.selectedEmpty') }}</p>
         </template>
 
         <!-- All prompts drawer -->

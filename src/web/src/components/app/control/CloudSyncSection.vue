@@ -1,10 +1,16 @@
 <script setup lang="ts">
+// Cloud sync has no on/off toggle (2026-07-21): being signed in IS the on state, Disconnect is
+// the off state. Two states only —
+//   · signed out → one row, "Sync settings" with the sign-in button in line with the label.
+//   · signed in  → who you're signed in as, when it last synced, Sync now, Disconnect.
+// (loadSyncStatus in stores/control/sync.ts enables sync on the daemon as soon as it sees a
+// connected account, so there is nothing left for the owner to switch on afterwards.)
 import { computed, onMounted, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import { CloudIcon, CheckIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon, LogOutIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
 import SettingsGroup from '@/shell/SettingsGroup.vue';
+import SettingsRow from '@/shell/SettingsRow.vue';
 import InfoHint from '@/shell/InfoHint.vue';
 import { useControlStore } from '@/stores/control';
 import { formatAgo } from '@/lib/relativeTime';
@@ -19,28 +25,6 @@ function signIn(): void {
   // Open the OAuth flow in a NEW tab so the current app state isn't lost (the new tab lands on
   // /?connected=1 after auth).
   window.open('/oauth/login', '_blank', 'noopener,noreferrer');
-}
-
-/** Master toggle. ON with no connection yet → send through sign-in first. */
-async function onToggle(enabled: boolean): Promise<void> {
-  confirmDisconnect.value = false;
-  if (enabled) {
-    if (!store.syncStatus?.ok || !store.syncStatus.connected) {
-      signIn();
-      return;
-    }
-    try {
-      await store.enableSync();
-    } catch {
-      toast.error(t('cloudSync.enableFailed'));
-    }
-  } else {
-    try {
-      await store.disableSync();
-    } catch {
-      toast.error(t('cloudSync.disableFailed'));
-    }
-  }
 }
 
 async function syncNow(): Promise<void> {
@@ -71,10 +55,15 @@ async function disconnect(): Promise<void> {
   }
 }
 
+// Narrowed once here rather than re-testing `.ok` at every template site (SyncStatus is a
+// union, and a template-side `status?.ok && status.name` doesn't narrow for vue-tsc).
+const account = computed(() => (store.syncStatus?.ok ? store.syncStatus : null));
+/** Signed in and syncing: the only state that shows the identity block. */
+const connected = computed(() => !!account.value?.connected);
+
 const syncedAgo = computed(() => {
-  const s = store.syncStatus;
-  if (!s?.ok || !s.lastSyncedAt) return null;
-  return formatAgo(now.value, new Date(s.lastSyncedAt).getTime(), t);
+  const last = account.value?.lastSyncedAt;
+  return last ? formatAgo(now.value, new Date(last).getTime(), t) : null;
 });
 
 const syncError = computed(() => (store.syncStatus && !store.syncStatus.ok ? store.syncStatus : null));
@@ -85,78 +74,79 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5">
-    <SettingsGroup :label="t('cloudSync.label')" :description="t('cloudSync.privacyNote')">
-      <!-- not connected yet → the primary action is signing in with Connections -->
-      <div v-if="!store.syncStatus || (!store.syncStatus.ok && !store.syncStatus.retryAfterSeconds) || (store.syncStatus.ok && !store.syncStatus.connected)" class="flex flex-col gap-2.5 px-3.5 py-3">
-        <span class="flex items-center gap-1.5 text-[12.5px] font-medium text-foreground">
-          <CloudIcon class="size-3.5 shrink-0 text-sky-500" />
-          {{ t('cloudSync.title') }}
-          <InfoHint :text="t('cloudSync.enableHint')" />
-        </span>
-        <Button size="sm" class="self-start" @click="signIn">
-          <CloudIcon class="size-3.5" />
+  <SettingsGroup :label="t('cloudSync.label')" :description="t('cloudSync.privacyNote')">
+    <!-- signed out (or still loading the status) → sign in, and syncing starts -->
+    <SettingsRow v-if="!connected" :label="t('cloudSync.title')">
+      <template #icon>
+        <CloudIcon class="size-[18px] shrink-0 text-sky-500" />
+      </template>
+      <template #info>
+        <InfoHint :text="t('cloudSync.enableHint')" />
+      </template>
+      <template #control>
+        <Loader2Icon v-if="store.syncLoading" class="size-3.5 animate-spin text-muted-foreground" />
+        <Button v-else size="sm" @click="signIn">
           {{ t('cloudSync.signIn') }}
           <ExternalLinkIcon class="size-3.5 opacity-70" />
         </Button>
-      </div>
+      </template>
+    </SettingsRow>
 
-      <template v-else>
-        <!-- master toggle -->
-        <div class="flex items-center justify-between gap-3 px-3.5 py-2.5">
-          <span class="text-[13px] text-foreground">{{ t('cloudSync.enableLabel') }}</span>
-          <Loader2Icon v-if="store.syncLoading" class="size-3.5 animate-spin text-muted-foreground" />
-          <Switch
-            v-else
-            :model-value="store.syncStatus.ok && store.syncStatus.enabled"
-            :aria-label="t('cloudSync.enableLabel')"
-            @update:model-value="(v) => onToggle(!!v)"
+    <!-- signed in → identity, freshness, and the two actions -->
+    <template v-else>
+      <SettingsRow>
+        <template #icon>
+          <img
+            v-if="account?.picture"
+            :src="account.picture"
+            alt=""
+            class="size-[18px] shrink-0 rounded-full object-cover"
           />
-        </div>
+          <CloudIcon v-else class="size-[18px] shrink-0 text-sky-500" />
+        </template>
+        <template #label>
+          <span class="truncate">
+            {{ t('cloudSync.signedInAs', { name: account?.name || account?.email || '' }) }}
+          </span>
+        </template>
+        <template #description>
+          <span class="flex items-center gap-1 text-success">
+            <CheckIcon class="size-3 shrink-0" />
+            {{ syncedAgo ? t('cloudSync.syncedAgo', { time: syncedAgo }) : t('cloudSync.neverSynced') }}
+          </span>
+        </template>
+        <template #control>
+          <Button variant="outline" size="sm" :disabled="store.syncActionBusy" @click="syncNow">
+            <Loader2Icon v-if="store.syncActionBusy" class="size-3.5 animate-spin" />
+            <RefreshCwIcon v-else class="size-3.5" />
+            {{ t('cloudSync.syncNow') }}
+          </Button>
+        </template>
+      </SettingsRow>
 
-        <!-- connecting / loading -->
-        <div v-if="store.syncLoading && !(store.syncStatus.ok && store.syncStatus.enabled)" class="flex items-center gap-2 px-3.5 py-3 text-[12.5px] text-muted-foreground">
-          <Loader2Icon class="size-3.5 animate-spin" />
-          {{ t('cloudSync.connecting') }}
-        </div>
-
-        <!-- enabled + connected: signed-in identity, last-synced, sync now, disconnect -->
-        <div v-else-if="store.syncStatus.ok && store.syncStatus.enabled && store.syncStatus.connected" class="flex flex-col gap-2.5 px-3.5 py-3">
-          <div class="flex items-center justify-between gap-3">
-            <img v-if="store.syncStatus.ok && store.syncStatus.picture" :src="store.syncStatus.picture" alt="" class="size-6 rounded-full object-cover shrink-0" />
-            <span class="flex min-w-0 flex-col gap-0.5">
-              <span class="truncate text-[12.5px] text-foreground/90">{{ t('cloudSync.signedInAs', { name: store.syncStatus.name || store.syncStatus.email }) }}</span>
-              <span class="flex items-center gap-1 text-[12px] text-success">
-                <CheckIcon class="size-3 shrink-0" />
-                {{ syncedAgo ? t('cloudSync.syncedAgo', { time: syncedAgo }) : t('cloudSync.neverSynced') }}
-              </span>
-            </span>
-            <Button variant="outline" size="sm" class="shrink-0" :disabled="store.syncActionBusy" @click="syncNow">
-              <Loader2Icon v-if="store.syncActionBusy" class="size-3.5 animate-spin" />
-              <RefreshCwIcon v-else class="size-3.5" />
-              {{ t('cloudSync.syncNow') }}
-            </Button>
-          </div>
+      <SettingsRow :label="t('cloudSync.disconnectLabel')">
+        <template #control>
           <Button
             :variant="confirmDisconnect ? 'destructive' : 'ghost'"
             size="sm"
-            class="self-start"
+            :disabled="store.syncLoading"
             @click="disconnect"
             @blur="confirmDisconnect = false"
           >
-            <LogOutIcon class="size-3.5" />
+            <Loader2Icon v-if="store.syncLoading" class="size-3.5 animate-spin" />
+            <LogOutIcon v-else class="size-3.5" />
             {{ confirmDisconnect ? t('cloudSync.disconnectConfirm') : t('cloudSync.disconnect') }}
           </Button>
-        </div>
+        </template>
+      </SettingsRow>
+    </template>
 
-        <!-- inline, non-blocking error -->
-        <p v-if="syncError" class="px-3.5 pb-3 text-[11.5px] text-destructive">
-          {{ syncError.error }}
-          <template v-if="syncError.retryAfterSeconds">
-, {{ t('cloudSync.retryHint', { seconds: syncError.retryAfterSeconds }) }}
-          </template>
-        </p>
+    <!-- inline, non-blocking error -->
+    <p v-if="syncError" class="px-3.5 py-2 text-[11.5px] text-destructive">
+      {{ syncError.error }}
+      <template v-if="syncError.retryAfterSeconds">
+        , {{ t('cloudSync.retryHint', { seconds: syncError.retryAfterSeconds }) }}
       </template>
-    </SettingsGroup>
-  </div>
+    </p>
+  </SettingsGroup>
 </template>

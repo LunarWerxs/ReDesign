@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, useTemplateRef } from 'vue';
-import { ClipboardPasteIcon, Loader2Icon } from '@lucide/vue';
+import { Loader2Icon } from '@lucide/vue';
 import { useControlStore } from '@/stores/control';
 import { clipboardImageFiles, uploadableImageFiles } from '@/composables/useImageUpload';
 import { t } from '@/i18n';
+import PasteMenu from './PasteMenu.vue';
 
 const store = useControlStore();
 const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
+const pasteMenu = useTemplateRef<InstanceType<typeof PasteMenu>>('pasteMenu');
 const dragOver = ref(false);
 const uploading = ref(false);
-
-// Right-click → "Paste" flyout.
-const menuOpen = ref(false);
-const menuX = ref(0);
-const menuY = ref(0);
 
 async function handle(files: FileList | File[] | null, source: string) {
   uploading.value = true;
@@ -46,36 +43,6 @@ function onDrop(e: DragEvent) {
   handle(e.dataTransfer?.files ?? null, 'drop');
 }
 
-// ── right-click → Paste flyout ────────────────────────────────────────────────
-function openMenu(e: MouseEvent) {
-  e.preventDefault();
-  menuX.value = e.clientX;
-  menuY.value = e.clientY;
-  menuOpen.value = true;
-}
-function closeMenu() {
-  menuOpen.value = false;
-}
-async function pasteFromClipboard() {
-  closeMenu();
-  try {
-    const items = await navigator.clipboard.read();
-    const files: File[] = [];
-    for (const item of items) {
-      const type = item.types.find((t) => t.startsWith('image/'));
-      if (!type) continue;
-      const blob = await item.getType(type);
-      files.push(new File([blob], `pasted-${Date.now()}.${type.split('/')[1] || 'png'}`, { type }));
-    }
-    if (files.length) await handle(files, 'paste');
-  } catch {
-    /* clipboard read blocked or empty, ignore */
-  }
-}
-function onEscape(e: KeyboardEvent) {
-  if (e.key === 'Escape') closeMenu();
-}
-
 // Document-level paste + drop so screenshots can be dropped/pasted anywhere.
 function onDocDragOver(e: DragEvent) {
   if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
@@ -85,6 +52,11 @@ function onDocDrop(e: DragEvent) {
   if (!inZone && uploadableImageFiles(e.dataTransfer?.files).length) e.preventDefault();
 }
 function onPaste(e: ClipboardEvent) {
+  // The reference zone stops its own paste from bubbling this far, but a paste aimed at a
+  // descendant of it (a tile, the note textarea) still reaches the document. Screenshots are
+  // the fallback target for a paste aimed at NOTHING in particular, never for one aimed at
+  // another drop zone — pasting one image into both lists at once is never what was meant.
+  if (e.target instanceof Element && e.target.closest('[data-reference-drop]')) return;
   const files = clipboardImageFiles(e.clipboardData);
   if (!files.length) return;
   e.preventDefault();
@@ -95,13 +67,11 @@ onMounted(() => {
   document.addEventListener('dragover', onDocDragOver);
   document.addEventListener('drop', onDocDrop);
   document.addEventListener('paste', onPaste);
-  window.addEventListener('keydown', onEscape);
 });
 onUnmounted(() => {
   document.removeEventListener('dragover', onDocDragOver);
   document.removeEventListener('drop', onDocDrop);
   document.removeEventListener('paste', onPaste);
-  window.removeEventListener('keydown', onEscape);
 });
 </script>
 
@@ -118,7 +88,7 @@ onUnmounted(() => {
     ]"
     @click="fileInput?.click()"
     @keydown="onKeydown"
-    @contextmenu="openMenu"
+    @contextmenu="pasteMenu?.openAt($event)"
     @dragenter.prevent.stop="dragOver = true"
     @dragover.prevent.stop="dragOver = true"
     @dragleave="dragOver = false"
@@ -143,28 +113,5 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- custom right-click flyout -->
-  <Teleport to="body">
-    <div
-      v-if="menuOpen"
-      class="fixed inset-0 z-[60]"
-      @pointerdown="closeMenu"
-      @contextmenu.prevent="closeMenu"
-      @wheel="closeMenu"
-    >
-      <div
-        class="animate-in fade-in-0 zoom-in-95 fixed z-[61] min-w-[8.5rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md duration-150"
-        :style="{ left: `${menuX}px`, top: `${menuY}px` }"
-        @pointerdown.stop
-      >
-        <button
-          type="button"
-          class="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
-          @click="pasteFromClipboard"
-        >
-          <ClipboardPasteIcon class="size-4" /> {{ t('input.paste') }}
-        </button>
-      </div>
-    </div>
-  </Teleport>
+  <PasteMenu ref="pasteMenu" @paste="(files) => handle(files, 'paste')" />
 </template>

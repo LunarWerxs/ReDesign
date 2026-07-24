@@ -7,7 +7,7 @@ import path from "node:path";
 import { ensureDir, writeJSON, type SelectionInput } from "../util";
 import { CLASS, type KeyManager } from "../keyManager";
 import { resolveModels, resolvePrompts, loadPrompts, loadModels } from "../config";
-import { listInputs, resolveSelection, loadImages, resolveReferences, loadReferenceImages, type InputItem, type LoadedImage } from "../inputResolver";
+import { INPUT_DIR, listInputs, resolveSelection, loadImages, resolveReferences, loadReferenceImages, type InputItem, type LoadedImage } from "../inputResolver";
 import { getAdapter, type ProviderError } from "../providers";
 import { extractHtml } from "../extractHtml";
 import * as store from "../store";
@@ -22,6 +22,7 @@ import {
   visionReferenceBlock,
   textReferenceBlock,
   brandStyleGuideBlock,
+  groundingBlock,
 } from "./helpers";
 import { buildJobs, buildPoolLimits, runJobsByPool, type Job } from "./scheduling";
 import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
@@ -51,6 +52,13 @@ interface RunReimagineOptions {
   prompts?: { presets?: unknown; custom?: string };
   reference?: ReferenceOptions | null;
   brandStyleGuide?: string | null;
+  /**
+   * Feed VISION models a full written inventory of the screenshot alongside the image,
+   * so they reimagine from a complete understanding instead of dropping/misreading
+   * content in one pass. Reuses the caption already generated for text-only models
+   * (one shared vision call per input); text-only models are grounded by definition.
+   */
+  groundWithDescription?: boolean;
   runId?: string;
   label?: string;
 }
@@ -66,6 +74,31 @@ interface RunSummaryInfo {
  * Run a full reimagine batch. Returns the final manifest. Progress is streamed
  * via opts.onProgress(event) where event.type is start|job|done.
  */
+/**
+ * Copy the run's first input screenshot into the run's own directory as `thumb.<ext>`, and
+ * return that run-dir-relative name for the manifest.
+ *
+ * input/ is a scratch folder that gets emptied routinely, so a run summary that pointed the
+ * viewer's gallery at the ORIGINAL input path showed a broken image for nearly every past run
+ * (31 runs, 1 surviving input, when this was added on 2026-07-21). A per-run copy is a few
+ * dozen KB and outlives the source. Best-effort: any failure just leaves the run without a
+ * thumbnail, and the gallery falls back to the input path, then to a placeholder.
+ */
+function persistRunThumbnail(runId: string, inputItems: InputItem[]): string | null {
+  const rel = inputItems[0]?.preview;
+  if (!rel) return null;
+  const src = path.join(INPUT_DIR, rel.split("/").join(path.sep));
+  const name = `thumb${(path.extname(src) || ".png").toLowerCase()}`;
+  try {
+    const dir = store.runDir(runId);
+    ensureDir(dir);
+    fs.copyFileSync(src, path.join(dir, name));
+    return name;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manifest> {
   const km = opts.keyManager || getKeyManager();
   const mock = !!opts.mock;
@@ -78,8 +111,12 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       variantsByModel[id] = Math.max(1, Math.min(parseInt(String(q), 10) || 1, 10));
     }
   }
-  const reqImages = parseInt(String(opts.maxImagesPerInput), 10);
-  const maxImagesPerInput = Number.isFinite(reqImages) && reqImages > 0 ? Math.min(reqImages, 16) : 8;
+  // OPTIONAL image cap. Absent = uncapped, every input/reference image the caller selected is
+  // sent (see inputResolver capImageRels). Only the CLI's --max-images and the MCP tool's
+  // max_images still set one; the web UI's stepper was removed 2026-07-21 because a silent
+  // default quietly dropped images the user had ticked.
+  const reqImages = parseInt(String(opts.maxImagesPerInput ?? ""), 10);
+  const maxImagesPerInput = Number.isFinite(reqImages) && reqImages > 0 ? reqImages : undefined;
   const concurrency = Math.max(1, parseInt(String(opts.concurrency), 10) || cfgInt("MAX_CONCURRENCY", 12));
   const poolConcurrency = Math.max(1, parseInt(String(opts.poolConcurrency), 10) || cfgInt("MAX_POOL_CONCURRENCY", 4));
   const timeoutMs = opts.timeoutMs || cfgInt("REQUEST_TIMEOUT_MS", 120000);
@@ -106,6 +143,10 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
 
   // Optional brand style guide: appended to every job's prompt (vision and text-only alike).
   const brandStyleGuide = String(opts.brandStyleGuide || "").trim();
+
+  // Optional grounding: give vision models a full written inventory of the screenshot
+  // (the same caption text-only models already get) so they don't drop/misread content.
+  const grounding = !!opts.groundWithDescription;
 
   if (!inputItems.length) throw new Error("No inputs matched the selection (input/ folder empty?).");
   if (!models.length) throw new Error("No models matched the selection.");
@@ -175,12 +216,14 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     }
   }
 
-  // If any selected model is text-only, caption inputs for it.
+  // A vision helper captions the screenshot when a text-only model needs it OR when
+  // grounding is on (vision models then get the caption as a completeness checklist).
   const anyTextOnly = models.some((m) => m.vision === false);
-  const describer = anyTextOnly ? visionHelper : null;
+  const describer = anyTextOnly || grounding ? visionHelper : null;
 
   const runId = opts.runId || store.newRunId(opts.label);
   const jobs = buildJobs({ inputItems, models, prompts, variants, variantsByModel });
+  const thumb = persistRunThumbnail(runId, inputItems);
   const summary = fallbackRunSummary();
   const poolLimits = buildPoolLimits(models, km, poolConcurrency);
 
@@ -202,7 +245,9 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       poolLimits: Object.fromEntries(poolLimits),
       maxImagesPerInput,
       reference: referenceImages.length ? { images: referenceRels, count: referenceImages.length, note: referenceNote || null } : null,
+      grounded: grounding,
     },
+    ...(thumb ? { thumb } : {}),
     inputs: inputItems.map((i) => ({ id: i.id, name: i.name, type: i.type, imageCount: i.imageCount, preview: i.preview, images: i.images })),
     prompts: prompts.map((p) => ({ id: p.id, label: p.label, source: p.source, user: p.user })),
     models: models.map((m) => ({ id: m.id, label: m.label, provider: m.provider, vision: m.vision, color: m.color })),
@@ -305,10 +350,13 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     // a failure here just means it keeps that default, so nothing needs to surface.
     .catch(() => {});
 
-  if (anyTextOnly) {
+  // Pre-warm captions so the first job doesn't stall on them: needed for text-only
+  // models and for grounding. The reference caption is text-only-only (vision models
+  // see the reference image directly, so they never need it described).
+  if (anyTextOnly || grounding) {
     for (const input of inputItems) describeInput(input);
-    if (referenceImages.length) describeReference();
   }
+  if (anyTextOnly && referenceImages.length) describeReference();
 
   const scheduledResults = await runJobsByPool<Job>(jobs, {
     totalConcurrency: concurrency,
@@ -347,11 +395,24 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
         if (hasVision) {
           images = imagesFor(input);
           if (!images.length) job.note = "no images loaded";
+          // Optional grounding: a full written inventory of the screenshot rides along
+          // with the image so the model reimagines every element instead of dropping or
+          // inventing content. One shared caption per input (cached); its wait is charged
+          // to prepMs, not to generation time, so grounded rows stay comparable.
+          if (grounding) {
+            const capStart = Date.now();
+            caption = await describeInput(input);
+            prepMs += Date.now() - capStart;
+            if (caption) {
+              effectivePrompt += groundingBlock(caption);
+              if (!job.note) job.note = `grounded with a full description of the original${describer ? ` via ${describer.id}` : ""}`;
+            }
+          }
           // Style reference rides along at the END of the image list; the prompt
           // tells the model those trailing images are direction, not the product.
           if (referenceImages.length) {
             images = images.concat(referenceImages);
-            effectivePrompt = prompt.user + visionReferenceBlock(referenceImages.length, referenceNote);
+            effectivePrompt += visionReferenceBlock(referenceImages.length, referenceNote);
           }
         } else {
           // Text-only model (e.g. DeepSeek): feed it a vision-model caption of the

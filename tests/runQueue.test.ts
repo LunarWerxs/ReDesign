@@ -169,4 +169,40 @@ describe("run queue: the release gate", () => {
     await post("/api/queue/start");
     expect(await settle(survivor)).toBe("done");
   });
+
+  // Drag-to-reorder the parked queue: the requested order is honoured for the runs named, and
+  // each run's manifest position updates to match, so the client's position-sorted queue strip
+  // shows the new order. Held runs stay held — reorder only changes the order they'll run in.
+  maybeIt("reorders the parked queue to the requested order and renumbers positions", async () => {
+    const a = await queueRun("reorder-a");
+    const b = await queueRun("reorder-b");
+    const c = await queueRun("reorder-c");
+
+    const result = (await post("/api/queue/reorder", { order: [c, a, b] })) as { order: string[] };
+    const rank = (id: string) => result.order.indexOf(id);
+    expect(rank(c)).toBeGreaterThanOrEqual(0);
+    expect(rank(c)).toBeLessThan(rank(a));
+    expect(rank(a)).toBeLessThan(rank(b));
+
+    const posOf = async (id: string) => ((await manifestOf(id)).queue as { position?: number }).position ?? 0;
+    const [pc, pa, pb] = [await posOf(c), await posOf(a), await posOf(b)];
+    expect(pc).toBeLessThan(pa);
+    expect(pa).toBeLessThan(pb);
+
+    // All three are still parked — reordering must never release a run.
+    for (const id of [a, b, c]) expect(String((await manifestOf(id)).status)).toBe("queued");
+    for (const id of [a, b, c]) {
+      expect(((await manifestOf(id)).queue as { held?: boolean }).held).toBe(true);
+    }
+  });
+
+  // A partial/stale order from the client must not drop the runs it left out.
+  maybeIt("keeps queued runs that the requested order omits", async () => {
+    const x = await queueRun("reorder-keep-x");
+    const y = await queueRun("reorder-keep-y");
+
+    const result = (await post("/api/queue/reorder", { order: [y] })) as { order: string[] };
+    expect(result.order).toContain(x);
+    expect(result.order).toContain(y);
+  });
 });

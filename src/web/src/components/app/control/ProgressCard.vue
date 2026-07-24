@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useVirtualList } from '@vueuse/core';
-import { ImageIcon, SquareIcon, XIcon } from '@lucide/vue';
+import { dragAndDrop } from '@formkit/drag-and-drop/vue';
+import { animations, tearDown } from '@formkit/drag-and-drop';
+import { GripVerticalIcon, ImageIcon, SquareIcon, XIcon } from '@lucide/vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -10,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Job, JobStatus } from '@/types';
+import type { TrackedRun } from '@/stores/control/state';
 
 const store = useControlStore();
 
@@ -23,6 +26,59 @@ const dotClass: Record<string, string> = {
 function dot(status: JobStatus) {
   return dotClass[status] || 'bg-muted-foreground/50';
 }
+
+// The whole pipeline, one chip per batch, so "what's lined up" is a list of items rather than a
+// lone "position 1 · up next". Shown once there's more than one batch, or a single batch that
+// hasn't started generating yet (a just-parked queue). The RUNNING batch (if any) is a static
+// chip — its controls live in the card header — while the QUEUED batches below it are drag-
+// reorderable and each carries a ✕ to drop it.
+const showQueue = computed(
+  () => store.activeRuns.length > 1 || (store.activeRuns.length === 1 && store.runStatus === 'queued'),
+);
+const runningRun = computed(() => store.activeRuns.find((r) => r.status === 'running') || null);
+const queuedRuns = computed(() => store.activeRuns.filter((r) => r.status === 'queued'));
+
+function runDot(status?: string) {
+  if (status === 'running') return 'bg-warning animate-pulse';
+  if (status === 'error') return 'bg-destructive';
+  return 'bg-muted-foreground/60';
+}
+function runState(run: { status?: string; queueHeld?: boolean; queuePosition?: number | null }) {
+  if (run.status === 'running') return t('progress.generating');
+  if (run.queueHeld) return t('progress.parked');
+  return run.queuePosition ? t('progress.position', { n: run.queuePosition }) : t('progress.waiting');
+}
+
+// Drag-to-reorder the queued batches (same @formkit setup as the model list). The bound list is a
+// local copy synced from `queuedRuns` except while a drag is in flight, so an incoming SSE
+// snapshot can't yank a chip out from under the pointer; on drop we persist the new order to the
+// server (store.reorderQueue), which renumbers positions and re-broadcasts.
+const queueParent = ref<HTMLElement>();
+const queueList = ref<TrackedRun[]>([]);
+const queueDragging = ref(false);
+const canReorderQueue = computed(() => queuedRuns.value.length > 1);
+function syncQueueList() {
+  if (!queueDragging.value) queueList.value = [...queuedRuns.value];
+}
+watch(queuedRuns, syncQueueList, { immediate: true });
+dragAndDrop({
+  parent: queueParent,
+  values: queueList,
+  dragHandle: '.queue-drag',
+  draggingClass: 'opacity-70',
+  nativeDrag: false,
+  longPress: true,
+  longPressDuration: 200,
+  plugins: [animations()],
+  onDragstart: () => (queueDragging.value = true),
+  onDragend: () => {
+    const ids = queueList.value.map((r) => r.runId);
+    queueDragging.value = false;
+    void store.reorderQueue(ids);
+    syncQueueList();
+  },
+});
+onBeforeUnmount(() => queueParent.value && tearDown(queueParent.value));
 
 // Running actual-spend total for this run, updated live as job results carry
 // usage (see src/runner/cost.ts costForUsage(), accumulated per-job in
@@ -93,11 +149,10 @@ const {
       </div>
     </CardHeader>
     <CardContent>
-      <Progress :model-value="store.progress.pct" class="mb-2.5" />
+      <Progress v-if="store.runStatus !== 'queued'" :model-value="store.progress.pct" class="mb-2.5" />
       <div class="mb-2.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
         <template v-if="store.runStatus === 'queued'">
-          <span>{{ t('progress.queued') }}</span>
-          <span>{{ store.queuePosition ? t('progress.position', { n: store.queuePosition }) : t('progress.waiting') }}</span>
+          <span>{{ t('progress.queuedWaiting') }}</span>
         </template>
         <template v-else>
           <span>{{ t('progress.doneOfTotal', { done: store.progress.done, total: store.progress.total }) }}</span>
@@ -109,37 +164,71 @@ const {
           <span v-if="runningCostLabel" class="ml-auto font-mono">{{ runningCostLabel }}</span>
         </template>
       </div>
-      <!-- Runs stacked behind this one. The server has always queued a second
-           submission FIFO; this strip is what makes that queue visible and
-           steerable (click to watch, × to drop it before it starts). -->
-      <div v-if="store.backlogRuns.length" class="mb-2.5 flex flex-wrap items-center gap-1.5 text-xs">
-        <span class="text-muted-foreground">{{ t('progress.upNext') }}</span>
-        <span
-          v-for="queued in store.backlogRuns"
-          :key="queued.runId"
-          class="flex items-center gap-1 rounded-full border bg-muted/30 py-0.5 pl-2.5 pr-0.5"
-        >
-          <button
-            type="button"
-            class="max-w-[160px] truncate text-muted-foreground hover:text-foreground"
-            :title="t('progress.watchThisRun', { run: queued.runId })"
-            @click="store.focusRun(queued.runId)"
-          >
-            {{ queued.title }}
-            <span v-if="queued.queuePosition" class="text-muted-foreground/70">
-              · {{ t('progress.position', { n: queued.queuePosition }) }}
-            </span>
-          </button>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-5 rounded-full text-muted-foreground hover:text-destructive"
-            :title="t('progress.cancelQueued')"
-            @click="store.cancelRun(queued.runId)"
-          >
-            <XIcon class="size-3" />
-          </Button>
+      <!-- The whole pipeline as a list of batches: what's generating and everything queued
+           behind it. The server queues submissions FIFO; this is what makes that queue visible
+           and steerable — click a chip to watch it, × to drop it before it starts. -->
+      <div v-if="showQueue" class="mb-2.5 grid gap-1.5">
+        <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {{ t('progress.queueLabel', { count: store.activeRuns.length }) }}
         </span>
+        <div class="flex flex-wrap items-center gap-1.5 text-xs">
+          <!-- running batch: static (its Cancel/View live in the card header) -->
+          <span
+            v-if="runningRun"
+            class="flex items-center gap-1.5 rounded-full border py-0.5 pl-2 pr-2.5"
+            :class="runningRun.runId === store.runId ? 'border-primary/50 bg-accent' : 'bg-muted/30'"
+          >
+            <span class="size-2 shrink-0 rounded-full" :class="runDot(runningRun.status)" />
+            <button
+              type="button"
+              class="max-w-[180px] truncate text-muted-foreground hover:text-foreground"
+              :title="t('progress.watchThisRun', { run: runningRun.runId })"
+              @click="store.focusRun(runningRun.runId)"
+            >
+              {{ runningRun.title }}
+              <span class="text-muted-foreground/70">· {{ runState(runningRun) }}</span>
+            </button>
+          </span>
+
+          <!-- queued batches: drag-reorderable, each droppable via ✕ -->
+          <div ref="queueParent" class="flex flex-wrap items-center gap-1.5">
+            <span
+              v-for="run in queueList"
+              :key="run.runId"
+              class="flex items-center gap-1 rounded-full border py-0.5 pl-1 pr-0.5"
+              :class="run.runId === store.runId ? 'border-primary/50 bg-accent' : 'bg-muted/30'"
+            >
+              <button
+                v-if="canReorderQueue"
+                type="button"
+                class="queue-drag flex size-4 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                :aria-label="t('progress.dragToReorder')"
+                :title="t('progress.dragToReorder')"
+              >
+                <GripVerticalIcon class="size-3" />
+              </button>
+              <span v-else class="size-2 shrink-0 rounded-full" :class="runDot(run.status)" />
+              <button
+                type="button"
+                class="max-w-[180px] truncate text-muted-foreground hover:text-foreground"
+                :title="t('progress.watchThisRun', { run: run.runId })"
+                @click="store.focusRun(run.runId)"
+              >
+                {{ run.title }}
+                <span class="text-muted-foreground/70">· {{ runState(run) }}</span>
+              </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="size-5 rounded-full text-muted-foreground hover:text-destructive"
+                :title="t('progress.cancelQueued')"
+                @click="store.cancelRun(run.runId)"
+              >
+                <XIcon class="size-3" />
+              </Button>
+            </span>
+          </div>
+        </div>
       </div>
       <div v-bind="jobListContainer" class="max-h-[320px]">
         <div v-bind="jobListWrapper">

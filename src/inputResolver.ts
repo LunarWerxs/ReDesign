@@ -250,11 +250,20 @@ function loadImagesFromDir(rels: string[], dir: string): LoadedImage[] {
   });
 }
 
-// Load the actual image bytes (base64) for an item, capped to maxImages.
-function loadImages(item: InputItem, { maxImages = 8, inputDir = INPUT_DIR }: { maxImages?: number; inputDir?: string } = {}): LoadedImage[] {
-  const cap = Number.isFinite(maxImages) && maxImages > 0 ? Math.floor(maxImages) : 8;
-  const rels = item.images.slice(0, Math.max(1, cap));
-  return loadImagesFromDir(rels, inputDir);
+/**
+ * Apply an OPTIONAL per-request image cap. Absent (or not a positive number) means no cap:
+ * everything the user picked is sent (2026-07-21 — the UI's "Max ref images" stepper was
+ * removed, so a silent default of 8 would quietly drop the 9th image a user had ticked).
+ * An explicit cap still comes through the CLI's `--max-images` and the MCP `max_images`.
+ */
+function capImageRels(rels: string[], maxImages?: number): string[] {
+  if (maxImages == null || !Number.isFinite(maxImages) || maxImages <= 0) return [...rels];
+  return rels.slice(0, Math.max(1, Math.floor(maxImages)));
+}
+
+// Load the actual image bytes (base64) for an item, capped to maxImages when one is given.
+function loadImages(item: InputItem, { maxImages, inputDir = INPUT_DIR }: { maxImages?: number; inputDir?: string } = {}): LoadedImage[] {
+  return loadImagesFromDir(capImageRels(item.images, maxImages), inputDir);
 }
 
 // ---------------------------------------------------------------- references
@@ -295,10 +304,10 @@ function resolveReferences(selection: SelectionInput, refDir: string = REFERENCE
   return out;
 }
 
-// Load reference image bytes (base64) for a set of dir-relative paths.
-function loadReferenceImages(rels: string[], { maxImages = 8, refDir = REFERENCE_DIR }: { maxImages?: number; refDir?: string } = {}): LoadedImage[] {
-  const cap = Number.isFinite(maxImages) && maxImages > 0 ? Math.floor(maxImages) : 8;
-  return loadImagesFromDir((rels || []).slice(0, Math.max(1, cap)), refDir);
+// Load reference image bytes (base64) for a set of dir-relative paths. Uncapped unless the
+// caller passes an explicit maxImages (see capImageRels).
+function loadReferenceImages(rels: string[], { maxImages, refDir = REFERENCE_DIR }: { maxImages?: number; refDir?: string } = {}): LoadedImage[] {
+  return loadImagesFromDir(capImageRels(rels || [], maxImages), refDir);
 }
 
 export {

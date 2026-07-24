@@ -146,6 +146,7 @@ export interface Manifest {
 
 export interface RunSummary {
   runId: string;
+  createdAt?: string;
   title?: string;
   summary?: RunSummaryMeta | null;
   status: RunStatus;
@@ -153,6 +154,14 @@ export interface RunSummary {
   cost?: RunCost;
   total?: number;
   mock?: boolean;
+  /** Queue state for a still-queued run, so a reload can resume it as parked vs released
+   *  (see stores/control/runs.ts resumeRuns). Absent once the run leaves the queue. */
+  queueHeld?: boolean;
+  queuePosition?: number | null;
+  /** The run's own durable thumbnail, relative to its run dir (/output/<runId>/<thumb>). */
+  thumb?: string | null;
+  /** Fallback thumbnail: first input screenshot, relative to input/. Gone once input/ is cleared. */
+  preview?: string | null;
 }
 
 export interface RunDeleteSkipped {
@@ -297,10 +306,18 @@ export interface RunRequest {
   // Per-model copy count, keyed by model id; only models generating > 1 copy are
   // included. Omitted entirely when every model runs a single copy.
   modelQuantities?: Record<string, number>;
-  maxImages: number;
+  /**
+   * OPTIONAL cap on images sent per input. The control panel never sends it (2026-07-21 — the
+   * "Max ref images" stepper was removed; every ticked image goes out), so it exists only for
+   * the CLI's `--max-images` and the MCP tool's `max_images`.
+   */
+  maxImages?: number;
   mock: boolean;
   reference?: { images: string[]; note: string | null };
   brandStyleGuide?: string | null;
+  // Ground vision models with a full written inventory of the screenshot before they
+  // redesign, so they capture every element and miss less. Omitted when off.
+  groundWithDescription?: boolean;
   // The control panel always sends false: "Add to queue" parks the run, and only a
   // "Run queue" press starts it. Omitting the flag keeps the server's original
   // submit-and-run behavior, which the MCP tools and CLI still rely on.
@@ -371,6 +388,8 @@ export interface AuthMe {
 // above (SyncStatus / /api/settings/sync).
 export interface AppSettings {
   ok: true;
+  /** The running build's package.json version; '' when it couldn't be read. */
+  version: string;
   autoUpdate: boolean;
   autoUpdateIntervalSecs: number;
   portableMode: boolean;

@@ -29,11 +29,8 @@ import ImportKeysDialog from './key-health-sheet/ImportKeysDialog.vue';
 import { providerOptions, providerLabel as providerLabelFor, OPENAI_FAMILY } from '@/lib/providers';
 import CloudSyncSection from './CloudSyncSection.vue';
 import AutoUpdateSection from './AutoUpdateSection.vue';
-import PortableModeSection from './PortableModeSection.vue';
-import HideTrayIconSection from './HideTrayIconSection.vue';
-import TooltipPreferenceSection from './TooltipPreferenceSection.vue';
+import AppearanceSection from './AppearanceSection.vue';
 import AppActionsBar from '@/components/app/AppActionsBar.vue';
-import SettingsGroup from '@/shell/SettingsGroup.vue';
 import SettingsTabs from '@/shell/SettingsTabs.vue';
 import { useRoute } from 'vue-router';
 import type { KeyEntry, KeyPool, Model, ModelSaveRequest, ProviderDefault } from '@/types';
@@ -107,26 +104,23 @@ const isViewer = computed(() => route.name === 'Viewer');
 const isDesktop = useMediaQuery('(min-width: 768px)');
 const side = ref<'right' | 'bottom'>(isDesktop.value ? 'right' : 'bottom');
 
-// The sheet groups its sections under tabs. On the dashboard the first ("main") tab is
-// models and keys; on the viewer, view options now live in a header flyout (see App.vue),
-// so the sheet drops "main" entirely and opens straight to Preferences.
+// Two tabs, General first (2026-07-21). "Preferences" and "App" were split across two tabs for
+// six switches between them, so finding any one setting meant guessing which half it lived in;
+// they're now one "General" tab and models/keys is the specialist second tab. On the viewer
+// there are no models to configure, so General is the only tab.
 // Panes stay mounted behind v-show (SettingsTabs rule) so store-driven sections keep
 // their live state across tab switches.
-type TabId = 'main' | 'prefs' | 'app';
-const tab = ref<TabId>('main');
+type TabId = 'general' | 'main';
+const tab = ref<TabId>('general');
 const tabs = computed<{ id: TabId; label: string }[]>(() => {
-  const rest: { id: TabId; label: string }[] = [
-    { id: 'prefs', label: t('keyHealth.tabPreferences') },
-    { id: 'app', label: t('keyHealth.tabApp') },
-  ];
-  return isViewer.value ? rest : [{ id: 'main', label: t('keyHealth.tabModels') }, ...rest];
+  const general = { id: 'general' as const, label: t('keyHealth.tabGeneral') };
+  return isViewer.value ? [general] : [general, { id: 'main' as const, label: t('keyHealth.tabModels') }];
 });
 
 watch(open, (o) => {
   if (o) {
     side.value = isDesktop.value ? 'right' : 'bottom';
-    // Every open lands on the first tab: "main" on the dashboard, "prefs" on the viewer.
-    tab.value = isViewer.value ? 'prefs' : 'main';
+    tab.value = 'general'; // every open lands on General
   }
 });
 const keyDialogOpen = ref(false);
@@ -386,23 +380,46 @@ async function confirmDeleteKey() {
   >
     <template #header>
       <span class="text-sm font-semibold text-foreground">{{ t('keyHealth.settings') }}</span>
-      <Tooltip>
-        <TooltipTrigger as-child>
-          <Button
-            class="ml-auto"
-            variant="ghost"
-            size="icon-sm"
-            :aria-label="t('keyHealth.themeToggle', { theme: themeLabel })"
-            @click="cycleTheme"
-          >
-            <component :is="themeIcon" class="size-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>{{ t('keyHealth.themeToggle', { theme: themeLabel }) }}</TooltipContent>
-      </Tooltip>
+      <!-- Theme, refresh and shutdown are ACTIONS, not settings: they belong on the header rail
+           next to the theme toggle, not as a "Server" card buried at the bottom of a tab. -->
+      <div class="ml-auto flex items-center">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              :aria-label="t('keyHealth.themeToggle', { theme: themeLabel })"
+              @click="cycleTheme"
+            >
+              <component :is="themeIcon" class="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyHealth.themeToggle', { theme: themeLabel }) }}</TooltipContent>
+        </Tooltip>
+        <AppActionsBar
+          layout="icons"
+          hide-keys
+          hide-theme
+          :show-recent-runs="false"
+          @refresh="emit('refresh')"
+        />
+      </div>
     </template>
 
         <SettingsTabs v-model="tab" :tabs="tabs" class="mb-5" />
+
+        <!-- General: appearance, cloud sync, updates ──────────────────────────── -->
+        <div v-show="tab === 'general'">
+          <div class="mb-5">
+            <AppearanceSection />
+          </div>
+
+          <div class="mb-5">
+            <CloudSyncSection />
+          </div>
+
+          <AutoUpdateSection />
+        </div>
 
         <!-- Main: models + keys (dashboard only; the viewer has no main tab) ───── -->
         <div v-show="tab === 'main'">
@@ -442,44 +459,6 @@ async function confirmDeleteKey() {
             {{ pricingLastUpdatedLabel }}
           </p>
         </section>
-        </div>
-
-        <!-- Preferences: per-machine UI behavior ──────────────────────────────── -->
-        <div v-show="tab === 'prefs'">
-        <div class="mb-5">
-          <TooltipPreferenceSection />
-        </div>
-
-        <div class="mb-5">
-          <PortableModeSection />
-        </div>
-
-        <div class="mb-5">
-          <HideTrayIconSection />
-        </div>
-        </div>
-
-        <!-- App: cloud sync, updates, server actions ──────────────────────────── -->
-        <div v-show="tab === 'app'">
-        <div class="mb-5">
-          <CloudSyncSection />
-        </div>
-
-        <div class="mb-5">
-          <AutoUpdateSection />
-        </div>
-
-        <SettingsGroup :label="t('keyHealth.server')">
-          <AppActionsBar
-            layout="menu"
-            full-width
-            hide-keys
-            hide-theme
-            :show-recent-runs="false"
-            @refresh="emit('refresh')"
-            @close="open = false"
-          />
-        </SettingsGroup>
         </div>
   </Sidebar>
 

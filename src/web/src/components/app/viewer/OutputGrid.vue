@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { Badge } from '@/components/ui/badge';
 import { useViewerStore } from '@/stores/viewer';
+import { armFrameFocusGuard, useFrameFocusGuard } from '@/composables/useFrameFocusGuard';
 import type { Model, Prompt } from '@/types';
 import ReferenceCard from './ReferenceCard.vue';
 import OutputCard from './OutputCard.vue';
@@ -9,6 +10,11 @@ import ErrorCard from './ErrorCard.vue';
 import { t } from '@/i18n';
 
 const store = useViewerStore();
+
+// Previews that autofocus themselves on load would otherwise scroll the page to whichever one
+// won the race. Re-arm on every run change, since that's when a fresh batch of frames loads.
+useFrameFocusGuard();
+watch(() => store.runId, () => armFrameFocusGuard(), { immediate: true });
 
 const modelMap = computed(() => new Map<string, Model>((store.manifest?.models || []).map((m) => [m.id, m])));
 const promptMap = computed(() => new Map<string, Prompt>((store.manifest?.prompts || []).map((p) => [p.id, p])));

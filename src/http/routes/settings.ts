@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin, PORT, HOST } from "../origin-guard";
+import { ROOT, readJSON } from "../../util";
 import { loadAppSettings, saveAppSettings } from "../../app-settings";
 import { readInstanceInfo, updateInstanceInfo, instanceFilePath } from "../../instance";
 import { openPortableWindow } from "../../portable-window.mjs";
@@ -45,8 +46,24 @@ import {
  */
 export const PORTABLE_WINDOW_SIZE = { width: 840, height: 760 };
 
+/**
+ * The running build's version, straight out of package.json — what Settings ▸ General shows so
+ * "what am I on?" is answerable without opening a terminal. Read once and memoised: the file
+ * can't change under a running daemon, and a self-update relaunches the process anyway. Empty
+ * string when the file isn't there (a compiled binary whose ROOT is the exe dir), which the UI
+ * renders as "unknown" rather than a blank row.
+ */
+let cachedVersion: string | null = null;
+function appVersion(): string {
+  if (cachedVersion === null) {
+    cachedVersion = String(readJSON<{ version?: string }>(join(ROOT, "package.json"), {}).version || "");
+  }
+  return cachedVersion;
+}
+
 function snapshot() {
   return {
+    version: appVersion(),
     autoUpdate: autoUpdateEnabled(),
     autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
     portableMode: loadAppSettings().portableMode === true,

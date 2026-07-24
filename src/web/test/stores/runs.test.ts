@@ -14,6 +14,7 @@ const apiMock = {
   run: vi.fn(async (_id: string): Promise<Manifest> => manifest("unknown", "done")),
   startRun: vi.fn(async () => ({ runId: "new-run" })),
   startQueue: vi.fn(async () => ({ started: 1, held: 0 })),
+  reorderQueue: vi.fn(async (order: string[]) => ({ order })),
   cancelRun: vi.fn(async () => ({ ok: true })),
   deleteRuns: vi.fn(async () => ({ deleted: [] as string[], skipped: [], runs: [] as RunSummary[] })),
   estimateRunCost: vi.fn(async () => null),
@@ -75,8 +76,8 @@ function manifest(runId: string, status: string, over: Partial<Manifest> = {}): 
   } as Manifest;
 }
 
-const summary = (runId: string, status: string): RunSummary =>
-  ({ runId, status, counts: { total: 4 } }) as RunSummary;
+const summary = (runId: string, status: string, over: Partial<RunSummary> = {}): RunSummary =>
+  ({ runId, status, counts: { total: 4 }, ...over }) as RunSummary;
 
 // Imported after the mocks are registered.
 const { createControlState } = await import("@/stores/control/state");
@@ -177,6 +178,95 @@ describe("runQueue", () => {
     await actions.runQueue();
     expect(apiMock.startQueue).not.toHaveBeenCalled();
   });
+});
+
+describe("reorderQueue (drag-to-reorder)", () => {
+  it("optimistically renumbers positions and tells the server the new order", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "q1" });
+    await actions.addToQueue();
+    apiMock.startRun.mockResolvedValueOnce({ runId: "q2" });
+    await actions.addToQueue();
+    apiMock.startRun.mockResolvedValueOnce({ runId: "q3" });
+    await actions.addToQueue();
+
+    await actions.reorderQueue(["q3", "q1", "q2"]);
+
+    expect(apiMock.reorderQueue).toHaveBeenCalledWith(["q3", "q1", "q2"]);
+    // Positions applied immediately so activeRuns (sorted by position) reflects the drag.
+    expect(state.trackedRuns.get("q3")?.queuePosition).toBe(1);
+    expect(state.trackedRuns.get("q1")?.queuePosition).toBe(2);
+    expect(state.trackedRuns.get("q2")?.queuePosition).toBe(3);
+    expect(state.heldRuns.value.map((r) => r.runId)).toEqual(["q3", "q1", "q2"]);
+  });
+
+  it("re-reads from the server if the reorder request fails", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "q1" });
+    await actions.addToQueue();
+    apiMock.reorderQueue.mockRejectedValueOnce(new Error("nope"));
+    apiMock.runs.mockResolvedValueOnce([]);
+
+    await actions.reorderQueue(["q1"]);
+
+    expect(apiMock.runs).toHaveBeenCalled();
+  });
+});
+
+describe("runNow (the split Run button)", () => {
+  // The primary "Run" press must be one obvious action: park the current batch AND release it,
+  // so the user never has to discover a separate "Run queue" step.
+  it("submits the current batch and immediately releases the queue", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    await actions.runNow();
+
+    expect(apiMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(apiMock.startQueue).toHaveBeenCalledTimes(1);
+  });
+
+  // An incomplete selection must not release a previously-parked queue on this press —
+  // addToQueue's toast has already explained what's missing.
+  it("does not start anything when the selection is incomplete and nothing was parked", async () => {
+    const { actions } = harness();
+    await actions.runNow();
+    expect(apiMock.startRun).not.toHaveBeenCalled();
+    expect(apiMock.startQueue).not.toHaveBeenCalled();
+  });
+
+  // Defect fix: "Run" with parked batches but an EMPTY current selection (the common case —
+  // inputs aren't remembered across sessions) must run the parked queue WITHOUT re-submitting
+  // the empty selection or nagging "pick an input".
+  it("runs the parked queue without re-submitting when the current selection is empty", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "parked1" });
+    await actions.addToQueue(); // park one
+    // Now clear the working selection, as a fresh session would have it.
+    state.selInputs.value = [];
+    apiMock.startRun.mockClear();
+
+    await actions.runNow();
+
+    expect(apiMock.startRun).not.toHaveBeenCalled(); // no extra batch submitted
+    expect(apiMock.startQueue).toHaveBeenCalledTimes(1); // the parked one runs
+  });
+});
+
+describe("addToQueue(autoStart)", () => {
+  // "Add to queue" while a queue is already running tacks the batch onto the LIVE queue, so it
+  // must not be parked (held) — a held run would never start without a further press.
+  it("submits an auto-starting run that is not held", async () => {
+    const { state, actions } = harness();
+    ready(state);
+    apiMock.startRun.mockResolvedValueOnce({ runId: "live1" });
+    await actions.addToQueue(true);
+
+    expect(apiMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: true }));
+    expect(state.heldRuns.value).toHaveLength(0);
+  });
 
   // A queued run stops being "held" the moment the server says it is running, so the
   // button greys out instead of offering to start something already generating.
@@ -269,6 +359,29 @@ describe("resumeRuns", () => {
     expect(streaming("run2")).toBe(true);
     expect(state.focusedRunId.value).toBe("run1"); // the one actually generating
     expect(state.backlogRuns.value.map((r) => r.runId)).toEqual(["run2"]);
+  });
+
+  // Regression: a reload with a PARKED (held) queue and nothing running must resume as held —
+  // otherwise queueRunning briefly reads true and the run button mis-draws its "queue is live"
+  // shape (no "Run queue (N)") until the first SSE snapshot lands.
+  it("resumes a parked run as held, so the queue reads as parked not live", async () => {
+    const { state, actions } = harness();
+    state.runs.value = [summary("parked", "queued", { queueHeld: true, queuePosition: 1 })];
+
+    await actions.resumeRuns();
+
+    expect(state.heldRuns.value.map((r) => r.runId)).toEqual(["parked"]);
+    expect(state.queueRunning.value).toBe(false);
+  });
+
+  it("resumes a released-but-not-started run as live (not held)", async () => {
+    const { state, actions } = harness();
+    state.runs.value = [summary("released", "queued", { queueHeld: false, queuePosition: 1 })];
+
+    await actions.resumeRuns();
+
+    expect(state.heldRuns.value).toHaveLength(0);
+    expect(state.queueRunning.value).toBe(true);
   });
 
   it("restores the run the tab was watching when it finished while away", async () => {

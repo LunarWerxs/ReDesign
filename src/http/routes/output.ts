@@ -2,17 +2,15 @@
  * POST /api/output/open; GET /api/output/screenshot; GET /output/*, /output-raw/* file serving.
  * Ported from server.js + server/fileServing.js.
  */
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import { serveFile, serveOutputWrapper, resolveOutputHtmlFile, launchPath } from "../fileServing";
 import * as store from "../../store";
-import { resolveChromiumBrowser } from "../../portable-window.mjs";
+import { renderHtmlToPng } from "../../thumbnail";
 
 export function register(app: Hono, _deps: Deps): void {
   app.get("/output-raw/*", (c) => {
@@ -36,53 +34,16 @@ export function register(app: Hono, _deps: Deps): void {
     });
   });
 
-  // Rasterize an output HTML to PNG. The preview iframe is sandboxed WITHOUT
-  // allow-same-origin (its document is unreadable from the SPA), so screenshots are taken
-  // server-side: a system Chromium (Edge/Chrome, same discovery the portable window uses;
-  // no bundled-browser dependency) renders the file headlessly and hands back the pixels.
-  // A throwaway --user-data-dir keeps the capture isolated from any running Edge/Chrome
-  // singleton (without it the spawn hands off to the live browser and writes nothing).
+  // Rasterize an output HTML to PNG for download. The preview iframe is sandboxed WITHOUT
+  // allow-same-origin (its document is unreadable from the SPA), so the capture is taken
+  // server-side by headless Chromium (shared renderer, see src/thumbnail.ts renderHtmlToPng —
+  // same engine that backfills gallery thumbnails).
   app.get("/api/output/screenshot", async (c) => {
     const full = resolveOutputHtmlFile(c.req.query("file"));
-    const browser = resolveChromiumBrowser();
-    if (!browser) return c.json({ error: "No Edge or Chrome install found to render the screenshot" }, 501);
-
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-shot-"));
     const png = path.join(tmpDir, "shot.png");
     try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(
-          browser.path,
-          [
-            "--headless=new",
-            "--disable-gpu",
-            "--hide-scrollbars",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-extensions",
-            `--user-data-dir=${path.join(tmpDir, "profile")}`,
-            "--window-size=1440,900",
-            // let scripts/animations settle instantly instead of wall-clock waiting
-            "--virtual-time-budget=4000",
-            `--screenshot=${png}`,
-            pathToFileURL(full).href,
-          ],
-          { stdio: "ignore", windowsHide: true },
-        );
-        const timer = setTimeout(() => {
-          child.kill();
-          reject(new Error("Screenshot render timed out"));
-        }, 30_000);
-        child.on("exit", (code) => {
-          clearTimeout(timer);
-          if (code === 0 && fs.existsSync(png)) resolve();
-          else reject(new Error(`Screenshot render failed (${browser.name} exited ${code})`));
-        });
-        child.on("error", (err) => {
-          clearTimeout(timer);
-          reject(err);
-        });
-      });
+      await renderHtmlToPng(full, png, { width: 1440, height: 900 });
       const buf = await fs.promises.readFile(png);
       const base = path.basename(full).replace(/\.html?$/i, "").replace(/[^\w.-]+/g, "_") || "preview";
       return c.body(new Uint8Array(buf), 200, {
@@ -90,6 +51,11 @@ export function register(app: Hono, _deps: Deps): void {
         "content-disposition": `attachment; filename="${base}.png"`,
         "cache-control": "no-store",
       });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "screenshot failed";
+      // No browser found is a capability gap (501); anything else is a render failure (500).
+      const status = /Edge or Chrome/.test(message) ? 501 : 500;
+      return c.json({ error: message }, status);
     } finally {
       fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }

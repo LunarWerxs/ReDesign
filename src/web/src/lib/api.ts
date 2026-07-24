@@ -49,6 +49,9 @@ export const outputRawUrl = (rel: string, opts?: { measure?: boolean }) =>
   `/output-raw/${encPath(rel)}${opts?.measure ? '?measure=1' : ''}`;
 export const downloadUrl = (rel: string) => `/output/${encPath(rel)}?download=1`;
 export const screenshotUrl = (rel: string) => `/api/output/screenshot?file=${encodeURIComponent(rel)}`;
+// The run's gallery thumbnail, backfilled on demand server-side (existing thumb → surviving input
+// → rendered output preview → 404). See src/thumbnail.ts. Immutable-cached, so it's fetched once.
+export const runThumbnailUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/thumbnail`;
 export const eventsUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`;
 
 export const api = {
@@ -113,6 +116,7 @@ export const api = {
   run: (id: string) => request<Manifest>(`/api/runs/${encodeURIComponent(id)}`),
   startRun: (body: RunRequest) => request<{ runId: string }>('/api/run', postJson(body)),
   startQueue: () => request<{ started: number; held: number }>('/api/queue/start', { method: 'POST' }),
+  reorderQueue: (order: string[]) => request<{ order: string[] }>('/api/queue/reorder', postJson({ order })),
   cancelRun: (id: string) =>
     request<{ ok: boolean }>(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   healthCheck: (opts?: { signal?: AbortSignal }) =>

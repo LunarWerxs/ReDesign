@@ -118,6 +118,7 @@ async function runJobsByPool<J>(jobs: J[], { totalConcurrency, poolLimits, keyFo
   if (!jobs.length) return [];
 
   const poolOrder = [...queues.keys()];
+  const queueHeads = new Map(poolOrder.map((pool) => [pool, 0]));
   const activeByPool = new Map(poolOrder.map((pool) => [pool, 0]));
   const limits = new Map(poolOrder.map((pool) => [pool, Math.max(1, parseInt(String(poolLimits.get(pool)), 10) || 1)]));
   const results: JobResult<J>[] = [];
@@ -136,10 +137,14 @@ async function runJobsByPool<J>(jobs: J[], { totalConcurrency, poolLimits, keyFo
           const pool = poolOrder[cursor % poolOrder.length] as string;
           cursor = (cursor + 1) % poolOrder.length;
           const q = queues.get(pool);
-          if (!q?.length) continue;
+          const head = queueHeads.get(pool) || 0;
+          if (!q || head >= q.length) continue;
           if ((activeByPool.get(pool) || 0) >= (limits.get(pool) as number)) continue;
 
-          const job = q.shift() as J;
+          // Advancing an index preserves FIFO ordering without shifting the remaining
+          // pool array for every scheduled job.
+          const job = q[head] as J;
+          queueHeads.set(pool, head + 1);
           activeTotal++;
           activeByPool.set(pool, (activeByPool.get(pool) || 0) + 1);
           startedAny = true;

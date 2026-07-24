@@ -24,6 +24,12 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload();
 });
 
+// Start every page load at the top. The browser's own scroll restoration re-applies the offset
+// this URL had last time BEFORE the app has rendered anything, and the viewer's iframe cards
+// grow long after that, so the restored offset ends up pointing mid-page at content that wasn't
+// there when it was recorded. Route-level scrolling is handled in router/index.ts.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
 const app = createApp(App);
 app.use(createPinia());
 app.use(router);

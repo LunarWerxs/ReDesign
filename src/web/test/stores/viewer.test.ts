@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { useViewerStore } from "@/stores/viewer";
-import type { Job, JobStatus, Manifest, Model, RunStatus } from "@/types";
+import type { Job, JobStatus, Manifest, Model, RunEvent, RunStatus } from "@/types";
 
 const { runMock, runsMock, recordFirstStarMock } = vi.hoisted(() => ({
   runMock: vi.fn(),
@@ -9,7 +9,10 @@ const { runMock, runsMock, recordFirstStarMock } = vi.hoisted(() => ({
   recordFirstStarMock: vi.fn(),
 }));
 
-vi.mock("@/lib/api", () => ({ api: { run: runMock, runs: runsMock } }));
+vi.mock("@/lib/api", () => ({
+  api: { run: runMock, runs: runsMock },
+  eventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
+}));
 vi.mock("@/lib/starTally", () => ({ recordFirstStar: recordFirstStarMock }));
 
 const model = (id: string, label: string): Model => ({
@@ -43,12 +46,17 @@ const manifest = (over: Partial<Manifest> = {}): Manifest => ({
 });
 
 beforeEach(() => {
+  // starredItems / hiddenItems are now localStorage-backed (they persist across reloads by
+  // design), and the test localStorage is a module singleton, so clear it between cases or one
+  // test's stars bleed into the next.
+  localStorage.clear();
   setActivePinia(createPinia());
   vi.clearAllMocks();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("isLive", () => {
@@ -453,5 +461,47 @@ describe("polling", () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(runMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("live SSE", () => {
+  it("uses the run event stream when available and closes it on completion", async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      closed = false;
+      constructor(readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+      emit(event: RunEvent) {
+        this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent<string>);
+      }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    runMock.mockResolvedValue(
+      manifest({ status: "running", jobs: [job("existing", { status: "running" })] }),
+    );
+    const store = useViewerStore();
+
+    await store.load("run1");
+
+    const source = FakeEventSource.instances[0]!;
+    expect(source.url).toBe("/api/runs/run1/events");
+    const initialJobs = store.manifest!.jobs;
+    source.emit({ type: "job", runId: "run1", job: job("existing") });
+    expect(store.manifest?.jobs).toBe(initialJobs);
+    expect(store.manifest?.jobs).toHaveLength(1);
+    expect(store.manifest?.jobs[0]?.status).toBe("ok");
+
+    source.emit({ type: "job", runId: "run1", job: job("fresh") });
+    expect(store.manifest?.jobs.map((j) => j.id)).toEqual(["existing", "fresh"]);
+
+    const done = manifest({ status: "done", jobs: [job("existing"), job("fresh")] });
+    source.emit({ type: "done", runId: "run1", manifest: done });
+    expect(store.manifest).toEqual(done);
+    expect(source.closed).toBe(true);
   });
 });

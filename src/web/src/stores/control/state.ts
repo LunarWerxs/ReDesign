@@ -83,10 +83,14 @@ export function createControlState() {
   // map only ever holds entries > 1 (see setModelQty). Replaces the old single
   // global "variants" number: each selected model can be generated N times.
   const modelQty = useStorage<Record<string, number>>('redesign.model-qty', {});
-  const maxImages = useStorage('redesign.max-images', 8);
+  // NOTE: there is deliberately no `maxImages` here any more (removed 2026-07-21). Every image
+  // the user ticks is sent; a silent cap was dropping selections without saying so.
   const customOn = useStorage('redesign.custom-on', false);
   const custom = useStorage('redesign.custom-prompt', '');
   const advancedOpen = useStorage('redesign.advanced-open', false);
+  // Ground vision models with a full written inventory of the screenshot before they
+  // redesign, so they capture every element. Persists per-browser like the other toggles.
+  const groundOn = useStorage('redesign.ground-on', false);
   const refNote = ref('');
   // Brand style guide: a durable brand brief appended to every generation prompt.
   // Persisted per-browser (unlike the one-off refNote); a brand outlives a single run.
@@ -179,6 +183,15 @@ export function createControlState() {
    * button's enabled state and its count, so it can't be pressed on an empty queue.
    */
   const heldRuns = computed(() => activeRuns.value.filter((r) => r.status === 'queued' && r.queueHeld));
+  /**
+   * True when the queue is LIVE — something is generating, or a run has been released
+   * and is waiting its turn (queued but not held). Distinct from `anyRunActive`, which is
+   * also true for a queue that's only parked. Drives the run button: a live queue offers
+   * only "Add to queue" (tack on behind), while an idle app offers the split "Run" button.
+   */
+  const queueRunning = computed(() =>
+    activeRuns.value.some((r) => r.status === 'running' || (r.status === 'queued' && !r.queueHeld)),
+  );
 
   // ---- live check (two-step confirm) ----
   const liveCheckArmed = ref(false);
@@ -244,10 +257,10 @@ export function createControlState() {
     selectionSeeded,
     mock,
     modelQty,
-    maxImages,
     customOn,
     custom,
     advancedOpen,
+    groundOn,
     refNote,
     brandOn,
     brandStyleGuide,
@@ -263,6 +276,7 @@ export function createControlState() {
     backlogRuns,
     anyRunActive,
     heldRuns,
+    queueRunning,
     runId,
     runTitle,
     runStatus,

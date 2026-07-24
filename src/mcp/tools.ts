@@ -91,6 +91,7 @@ export const TOOLS: McpEngineTool[] = [
       reference_note: { type: "string", description: "how the model should use the reference image(s)" },
       variants: { type: "number", description: "outputs per model/prompt (default 1)" },
       mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+      ground: { type: "boolean", description: "ground vision models with a full written inventory of the screenshot first, so they capture every element and drop less (default false)" },
       concurrency: { type: "number", description: "max parallel calls across the whole run" },
       max_images: { type: "number", description: "cap reference images per input group" },
       label: { type: "string", description: "tag added to the run id" },
@@ -106,6 +107,7 @@ export const TOOLS: McpEngineTool[] = [
         reference: a.reference ? { images: a.reference, note: a.reference_note || null } : null,
         variants: a.variants || 1,
         mock: !!a.mock,
+        groundWithDescription: !!a.ground,
         concurrency: a.concurrency,
         maxImages: a.max_images,
         label: a.label,
@@ -128,6 +130,7 @@ export const TOOLS: McpEngineTool[] = [
       models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
       variants: { type: "number", description: "outputs per model/prompt (default 1)" },
       mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+      ground: { type: "boolean", description: "ground vision models with a full written inventory of the screenshot first, so they capture every element and drop less (default false)" },
       wait: { type: "boolean", description: "poll until the run finishes (or timeout_secs elapses) and return a digest instead of just { runId } (default false)" },
       timeout_secs: { type: "number", description: "max seconds to poll when wait:true (default 120, capped at 300)" },
       label: { type: "string", description: "tag added to the run id" },
@@ -139,6 +142,7 @@ export const TOOLS: McpEngineTool[] = [
         prompts: { presets: a.prompts || (a.custom ? [] : "all"), custom: a.custom || null },
         variants: a.variants || 1,
         mock: !!a.mock,
+        groundWithDescription: !!a.ground,
         label: a.label,
       })) as { runId: string };
 

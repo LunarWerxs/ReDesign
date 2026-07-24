@@ -48,17 +48,19 @@ export function createSelectionContentActions(state: ControlState) {
     state.selReference.value = toggleIn(state.selReference.value, id);
   }
 
-  function selectAll(kind: 'inputs' | 'models' | 'prompts') {
+  function selectAll(kind: 'inputs' | 'models' | 'prompts' | 'reference') {
     if (kind === 'inputs') state.selInputs.value = state.inputs.value.map((i) => i.id);
     else if (kind === 'models') state.selModels.value = [...state.runnableModelIds.value];
+    else if (kind === 'reference') state.selReference.value = state.references.value.map((r) => r.id);
     else state.selPrompts.value = state.prompts.value.map((p) => p.id);
   }
-  function selectNone(kind: 'inputs' | 'models' | 'prompts') {
+  function selectNone(kind: 'inputs' | 'models' | 'prompts' | 'reference') {
     if (kind === 'inputs') state.selInputs.value = [];
     else if (kind === 'models') {
       state.selModels.value = [];
       state.modelQty.value = {};
-    } else state.selPrompts.value = [];
+    } else if (kind === 'reference') state.selReference.value = [];
+    else state.selPrompts.value = [];
   }
 
   function reconcilePromptSelection(nextPrompts: Prompt[]) {

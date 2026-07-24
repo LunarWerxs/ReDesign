@@ -40,11 +40,12 @@ export interface AppHooks {
 }
 
 export function createApp(hooks: AppHooks = {}): Hono {
-  // Auto-update: opt-in (it restarts the daemon) → absent/false = off. The timer only STARTS after
+  // Auto-update: ON by default (2026-07-21) → only an explicit `false` turns it off, so an
+  // install that never touched the toggle stays current on its own. The timer only STARTS after
   // boot (startAutoUpdate in cli/lifecycle.ts); this just primes the runtime flags from the
   // persisted settings file (see src/app-settings.ts), createApp() in tests never spins a real timer.
   const settings = loadAppSettings();
-  setAutoUpdateEnabled(settings.autoUpdate === true);
+  setAutoUpdateEnabled(settings.autoUpdate !== false);
   setAutoUpdateIntervalSecs(settings.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
 
   const app = new Hono();

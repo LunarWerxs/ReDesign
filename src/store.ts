@@ -17,6 +17,27 @@ interface RunSummary {
   models: string[];
   inputs: string[];
   total: number;
+  /**
+   * Queue state for a still-queued run, mirrored from the manifest's `queue` block so a client
+   * that RESUMES from this summary (after a reload) can tell a PARKED batch (held: true, waiting
+   * for a "Run queue" press) from a RELEASED one that's about to start. Without it the client
+   * defaulted every resumed queued run to not-held and briefly mis-drew the run button as "queue
+   * is live". Null/absent once the run leaves the queue (running/done/etc).
+   */
+  queueHeld: boolean;
+  queuePosition: number | null;
+  /**
+   * The run's own durable thumbnail, relative to its run directory (served as
+   * /output/<runId>/<thumb>). Written at run start by runner/reimagine.ts's
+   * persistRunThumbnail. Null for runs that predate it, or when the copy failed.
+   */
+  thumb: string | null;
+  /**
+   * Fallback thumbnail: the run's first input screenshot, relative to input/. Only useful
+   * while that file still exists — input/ is routinely emptied, which is exactly why `thumb`
+   * above was added. Null for a run whose manifest has no inputs yet (still queued).
+   */
+  preview: string | null;
 }
 
 interface RunSummaryCacheEntry {
@@ -189,7 +210,21 @@ function summaryTitle(summary: unknown): string | null {
   return null;
 }
 
+// The run's thumbnail: the first input screenshot recorded in the manifest. Read off the
+// manifest rather than the live input/ listing so a run keeps its thumbnail after the
+// original screenshot is re-picked or renamed (a missing file just 404s the <img>).
+function firstInputPreview(m: Manifest): string | null {
+  const inputs = m.inputs as { preview?: unknown }[] | undefined;
+  if (!Array.isArray(inputs)) return null;
+  for (const input of inputs) {
+    const preview = input?.preview;
+    if (typeof preview === "string" && preview) return preview;
+  }
+  return null;
+}
+
 function summarizeManifest(m: Manifest, fallbackRunId: string): RunSummary {
+  const queue = m.queue as { position?: unknown; held?: unknown } | null | undefined;
   return {
     runId: m.runId || fallbackRunId,
     createdAt: m.createdAt,
@@ -203,6 +238,10 @@ function summarizeManifest(m: Manifest, fallbackRunId: string): RunSummary {
     models: m.config ? (m.config.modelIds as string[]) : [],
     inputs: m.config ? (m.config.inputIds as string[]) : [],
     total: Array.isArray(m.jobs) ? m.jobs.length : 0,
+    queueHeld: !!queue?.held,
+    queuePosition: queue && typeof queue.position === "number" ? queue.position : null,
+    thumb: typeof m.thumb === "string" && m.thumb ? m.thumb : null,
+    preview: firstInputPreview(m),
   };
 }
 

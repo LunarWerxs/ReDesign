@@ -11,6 +11,8 @@ const props = defineProps<{ rawUrl: string; rw: number; ar: number; height: View
 const wrap = useTemplateRef<HTMLElement>('wrap');
 const frame = useTemplateRef<HTMLIFrameElement>('frame');
 const measuredHeight = ref<number | null>(null);
+const frameActive = ref(false);
+let visibilityObserver: IntersectionObserver | null = null;
 
 const maxAutoHeight = 20000;
 
@@ -36,10 +38,26 @@ function onFrameMessage(event: MessageEvent) {
 
 onMounted(() => {
   window.addEventListener('message', onFrameMessage);
+  // `loading="lazy"` still creates hundreds of iframe browsing contexts for a large run.
+  // Keep only previews near the viewport alive; far-away cards retain their exact layout and
+  // cached measured height, but release the iframe's document/script/memory until needed.
+  if (typeof IntersectionObserver === 'undefined' || !wrap.value) {
+    frameActive.value = true;
+  } else {
+    visibilityObserver = new IntersectionObserver(
+      ([entry]) => {
+        frameActive.value = entry?.isIntersecting === true;
+      },
+      { rootMargin: '1000px 0px' },
+    );
+    visibilityObserver.observe(wrap.value);
+  }
 });
 
 onUnmounted(() => {
   window.removeEventListener('message', onFrameMessage);
+  visibilityObserver?.disconnect();
+  visibilityObserver = null;
 });
 
 watch(
@@ -59,8 +77,12 @@ useIframeScale(wrap, frame, () => ({
 
 <template>
   <div ref="wrap" class="relative overflow-hidden bg-white" :style="{ aspectRatio: String(frameAspect) }">
+    <!-- data-output-frame: claimed by composables/useFrameFocusGuard.ts, which undoes the
+         scroll jump a preview causes when its content autofocuses itself on load. -->
     <iframe
+      v-if="frameActive"
       ref="frame"
+      data-output-frame
       loading="lazy"
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
       :src="rawUrl"

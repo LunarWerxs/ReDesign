@@ -91,6 +91,23 @@ function brandStyleGuideBlock(guide: string): string {
   );
 }
 
+// Grounding block: a full written inventory of the screenshot, appended to a VISION
+// model's prompt when the "ground with description" toggle is on. The model can already
+// see the image; this is a completeness checklist so it stops quietly dropping or
+// inventing content in a single perceive-and-redesign pass. Deliberately does NOT ask it
+// to preserve layout — it is still reimagining, just from a complete understanding.
+function groundingBlock(caption: string): string {
+  return (
+    "\n\n--- INVENTORY OF THE ORIGINAL (for completeness, not layout) ---\n" +
+    "Below is a thorough written inventory of the original screenshot you are reimagining. " +
+    "Treat it as a checklist so your redesign keeps every real section, control, and piece of " +
+    "content, and never invents or drops any. The screenshot stays the source of truth for how " +
+    "things LOOK; this inventory is the source of truth for WHAT must be present. You are still " +
+    "reimagining the design, not copying the original layout:\n" +
+    caption
+  );
+}
+
 export {
   getKeyManager,
   cfgInt,
@@ -102,4 +119,5 @@ export {
   visionReferenceBlock,
   textReferenceBlock,
   brandStyleGuideBlock,
+  groundingBlock,
 };

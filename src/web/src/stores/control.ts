@@ -62,10 +62,10 @@ export const useControlStore = defineStore('control', () => {
     referenceOn: state.referenceOn,
     mock: state.mock,
     modelQty: state.modelQty,
-    maxImages: state.maxImages,
     customOn: state.customOn,
     custom: state.custom,
     advancedOpen: state.advancedOpen,
+    groundOn: state.groundOn,
     refNote: state.refNote,
     brandOn: state.brandOn,
     brandStyleGuide: state.brandStyleGuide,
@@ -85,6 +85,7 @@ export const useControlStore = defineStore('control', () => {
     backlogRuns: state.backlogRuns,
     anyRunActive: state.anyRunActive,
     heldRuns: state.heldRuns,
+    queueRunning: state.queueRunning,
     // live check
     liveCheckArmed: state.liveCheckArmed,
     liveCheckBusy: state.liveCheckBusy,
@@ -95,6 +96,7 @@ export const useControlStore = defineStore('control', () => {
     // auto-update opt-in
     autoUpdateEnabled: autoUpdateSettingsActions.autoUpdateEnabled,
     autoUpdateLoading: autoUpdateSettingsActions.autoUpdateLoading,
+    appVersion: autoUpdateSettingsActions.appVersion,
     // portable window opt-in
     portableModeEnabled: portableModeSettingsActions.portableModeEnabled,
     portableModeLoading: portableModeSettingsActions.portableModeLoading,
@@ -146,7 +148,9 @@ export const useControlStore = defineStore('control', () => {
     cancelLiveCheck: keysModelsActions.cancelLiveCheck,
     resetLiveCheck: keysModelsActions.resetLiveCheck,
     addToQueue: runsActions.addToQueue,
+    runNow: runsActions.runNow,
     runQueue: runsActions.runQueue,
+    reorderQueue: runsActions.reorderQueue,
     cancelRun: runsActions.cancelRun,
     focusRun: runsActions.focusRun,
     refreshCostEstimate: runsActions.refreshCostEstimate,

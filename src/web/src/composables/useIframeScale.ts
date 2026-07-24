@@ -36,6 +36,10 @@ export function useIframeScale(
   });
 
   watch(opts, () => apply());
+  // A viewport-gated iframe can be created after this composable's mount hook. Re-apply
+  // sizing when the template ref appears so the newly activated preview never flashes at
+  // the browser's default 300×150 dimensions.
+  watch(frame, () => apply(), { flush: 'post' });
 
   onUnmounted(() => {
     ro?.disconnect();

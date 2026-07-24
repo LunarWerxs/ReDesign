@@ -187,11 +187,28 @@ async function restoreModel(model: Model) {
             {{ providerLabel(model.provider) }} · {{ model.apiModel }} · {{ poolLabel(model.keyEnv) }}
           </span>
         </span>
+        <!-- "Disabled" is the one badge that states a problem, so it's also the fix: clicking it
+             opens the same edit dialog as the pencil, where the enable switch lives. The
+             key-count badge stays inert (its affordance is the expander below it). -->
+        <Tooltip v-if="!model.enabled">
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="shrink-0 cursor-pointer rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+              :aria-label="t('keyModel.enableModel', { label: model.label })"
+              @click="emit('edit-model', model)"
+            >
+              {{ t('keyModel.disabled') }}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('keyModel.enableModel', { label: model.label }) }}</TooltipContent>
+        </Tooltip>
         <span
+          v-else
           class="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium"
           :class="isRunnable(model) ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'"
         >
-          {{ model.enabled ? modelKeys(model) : t('keyModel.disabled') }}
+          {{ modelKeys(model) }}
         </span>
         <Tooltip>
           <TooltipTrigger as-child>

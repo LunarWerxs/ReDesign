@@ -39,6 +39,8 @@ interface RunBody {
   poolConcurrency?: number | string;
   reference?: unknown;
   brandStyleGuide?: string | null;
+  /** Ground vision models with a full written description of the screenshot (see runner). */
+  groundWithDescription?: boolean;
   /**
    * Whether this submission may start on its own once the runner is free.
    *
@@ -122,7 +124,8 @@ function queuedManifest(runId: string, body: RunBody, position: number, held = f
       modelIds: selectedIds(body.models || "all"),
       promptIds,
       variants: Math.max(1, Number.parseInt(String(body.variants), 10) || 1),
-      maxImagesPerInput: Math.max(1, Number.parseInt(String(body.maxImages), 10) || 8),
+      // Absent = uncapped (see runner/reimagine.ts), so don't invent a default here either.
+      maxImagesPerInput: Number.parseInt(String(body.maxImages), 10) > 0 ? Number.parseInt(String(body.maxImages), 10) : null,
       concurrency: body.concurrency || null,
       poolConcurrency: body.poolConcurrency || null,
       reference: body.reference || null,
@@ -200,6 +203,36 @@ function releaseQueue(): number {
   return released;
 }
 
+/**
+ * Reorder the waiting queue to follow `orderedIds`.
+ *
+ * Only runs that are queued RIGHT NOW can move — the currently-running run isn't in `runQueue`
+ * (pumpRunQueue splices it out when it starts), so it can't be dragged and never appears here.
+ * Any queued run omitted from `orderedIds` keeps its relative order after the named ones (so a
+ * partial/stale list from the client can't drop runs). Rebroadcasts the new positions to every
+ * subscriber and pumps once — a no-op unless a released run is now at the front. Held runs stay
+ * held; this only changes the order they'll run in once released, which is the whole point of
+ * dragging a parked queue. Returns the resulting order.
+ */
+function reorderQueue(orderedIds: unknown): { order: string[] } {
+  const ids = (Array.isArray(orderedIds) ? orderedIds : []).map((id) => String(id || "").trim()).filter(Boolean);
+  const queued = new Set(runQueue);
+  const named: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (queued.has(id) && !seen.has(id)) {
+      named.push(id);
+      seen.add(id);
+    }
+  }
+  const rest = runQueue.filter((id) => !seen.has(id));
+  runQueue.length = 0;
+  runQueue.push(...named, ...rest);
+  updateQueuedManifests();
+  pumpRunQueue();
+  return { order: [...runQueue] };
+}
+
 /** How many runs are parked waiting for a release (for the control panel's button state). */
 function heldRunCount(): number {
   let held = 0;
@@ -249,6 +282,7 @@ function runQueuedEntry(runId: string, entry: RunEntry): void {
     prompts: body.prompts || {},
     reference: (body.reference as ReferenceOptions | null | undefined) || null,
     brandStyleGuide: typeof body.brandStyleGuide === "string" ? body.brandStyleGuide : null,
+    groundWithDescription: !!body.groundWithDescription,
     variants: body.variants || 1,
     modelQuantities: body.modelQuantities || undefined,
     mock: !!body.mock,
@@ -377,6 +411,7 @@ export {
   ORPHANED_RUN_MESSAGE,
   enqueueRun,
   releaseQueue,
+  reorderQueue,
   heldRunCount,
   cancelRun,
   normalizeRunDeleteIds,

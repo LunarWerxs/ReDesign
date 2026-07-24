@@ -24,7 +24,8 @@
       "id": "conversion",
       "label": "Conversion-Optimized",
       "description": "Optimize the screen around its single most important action.",
-      "user": "Identify the primary action a user is here to take, then redesign the screen to drive that action. Improve the funnel: clearer value, stronger primary CTA, less friction, smart defaults, and reassurance. Keep secondary actions available but visually subordinate."
+      "user": "Identify the primary action a user is here to take, then redesign the screen to drive that action. Improve the funnel: clearer value, stronger primary CTA, less friction, smart defaults, and reassurance. Keep secondary actions available but visually subordinate.",
+      "starred": true
     },
     {
       "id": "minimalist",
@@ -54,7 +55,8 @@
       "id": "playful",
       "label": "Playful & Branded",
       "description": "Inject personality, motion, and a memorable brand feel.",
-      "user": "Give this screen a distinctive, memorable personality: a confident brand palette, expressive typography, delightful motion and hover states, and small moments of joy, without sacrificing usability. Make it feel like a product people screenshot and share."
+      "user": "Give this screen a distinctive, memorable personality: a confident brand palette, expressive typography, delightful motion and hover states, and small moments of joy, without sacrificing usability. Make it feel like a product people screenshot and share.",
+      "starred": true
     }
   ]
 }

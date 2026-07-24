@@ -24,7 +24,10 @@ interface RunManifest {
   status: string;
   counts: store.Counts;
   jobs: ManifestJob[];
-  config: { reference?: { images: string[]; count: number; note: string | null } | null };
+  config: {
+    reference?: { images: string[]; count: number; note: string | null } | null;
+    grounded?: boolean;
+  };
 }
 
 const TINY_PNG = Buffer.from(
@@ -164,6 +167,38 @@ describe("runner: end-to-end mock run with key rotation", () => {
     } finally {
       try { fs.rmSync(store.runDir(mref.runId), { recursive: true, force: true }); } catch (_) {}
       try { fs.unlinkSync(refFile); } catch (_) {}
+    }
+  });
+
+  maybeIt("grounding on: a VISION job is fed a full description of the screenshot, and the run records it", async () => {
+    const grKm = new KeyManager({ stateFile: `${tmpState}.gr` });
+    const mg = (await runReimagine({
+      keyManager: grKm,
+      mock: true,
+      inputs: { ids: [realInputs[0]!.id] },
+      // A vision model only: grounding's whole point is to feed the caption to a model
+      // that CAN see the image, so it stops dropping content. Text-only models are
+      // grounded already; this proves the vision path specifically fires.
+      models: { ids: ["gemini-3.5-flash"] },
+      prompts: { presets: ["faithful-refresh"] },
+      groundWithDescription: true,
+      variants: 1,
+      label: "groundtest",
+    })) as RunManifest;
+    try {
+      // The run advertises that it was grounded (so a bake-off can tell runs apart).
+      expect(mg.config.grounded).toBe(true);
+      const visJob = mg.jobs.find((j) => j.modelId === "gemini-3.5-flash" && j.status === "ok");
+      expect(visJob).toBeTruthy();
+      // The vision job's note reflects grounding, and its sidecar meta carries the caption.
+      expect(/grounded/i.test(visJob?.note || "")).toBe(true);
+      const metaPath = path.join(store.OUTPUT_DIR, (visJob?.file || "").replace(/\.html$/, ".meta.json").split("/").join(path.sep));
+      const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+      expect(!!meta.caption).toBe(true);
+      expect(!!meta.captionBy).toBe(true);
+    } finally {
+      try { fs.rmSync(store.runDir(mg.runId), { recursive: true, force: true }); } catch (_) {}
+      try { fs.unlinkSync(`${tmpState}.gr`); } catch (_) {}
     }
   });
 });

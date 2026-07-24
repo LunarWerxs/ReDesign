@@ -40,7 +40,8 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 - **Every model at once.** Claude, GPT, Gemini, DeepSeek, and Qwen out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
 - **Many takes per model, one run.** Ask a single model for three variants and another for one, all in the same fan-out. A bake-off is more useful when you can see a model's range, not just one roll of the dice.
 - **A stack of prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
-- **A viewer worth using.** Filter by model or preset, set the column count, preview at phone through desktop widths. The original always sits first so you have something to compare against.
+- **A viewer worth using.** Start from an all-runs thumbnail gallery, filter by model or preset, set the column count, and preview at phone through desktop widths. Stars and hidden-output choices survive a refresh, and the original always sits first so you have something to compare against.
+- **A queue you control.** Park several batches before spending keys, start them together, add more work behind a live run, and drag waiting batches into the order you want.
 - **Paste your keys, skip the setup.** Drop in one key or a whole pile at once. It works out which service each belongs to, checking live when a key could belong to more than one, and files them in the right pool. Give each provider a stack of keys and it cycles through them, quietly benching the ones that start failing, then bringing them back later.
 - **Safe by design.** The HTML each model writes runs in a locked-down iframe. You can click around in it, but it cannot touch your data.
 - **It knows what it costs.** A per-run cost meter, plus an estimate before you hit Run, so a big fan-out never surprises you.
@@ -49,8 +50,8 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 ## A little deeper
 
 - **All config, no code.** Models live in `src/config/models.json`, prompts in `src/config/prompts.json`. Add one, disable one, or point it at a newer model version without touching the app.
-- **Reference images.** Drop in a look you like and every model borrows its mood and colors, not its layout.
-- **Text-only models still see the screen.** A model that cannot take images gets an auto-written description of your screenshot first, so it redesigns the real thing instead of guessing.
+- **Reference images.** Drop or paste in a look you like, choose exactly which references to send, and every model borrows their mood and colors rather than their layout.
+- **Grounding when fidelity matters.** Turn on **Ground with description** to inventory the screenshot once with a vision model and give every image model the same detailed source description. Text-only models receive an automatic description as before.
 - **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front. Your keys never hit disk in the clear.
 
 ## From the command line

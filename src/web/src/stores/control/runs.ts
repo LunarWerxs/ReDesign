@@ -343,6 +343,11 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
           title: summary.title || summary.summary?.title || summary.runId,
           status: summary.status,
           total: summary.counts?.total ?? summary.total ?? 0,
+          // Seed the parked-vs-released state from the summary so the run button doesn't flash
+          // its "queue is live" shape for a resumed queue that's actually just parked, in the
+          // window before this run's first SSE snapshot lands. Only meaningful while queued.
+          queueHeld: summary.status === 'queued' ? summary.queueHeld ?? false : false,
+          queuePosition: summary.queuePosition ?? null,
         });
       }
       subscribe(summary.runId);
@@ -367,17 +372,31 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
   }
 
   /**
-   * Build the run body from the current selection and park it in the server's queue.
+   * Build the run body from the current selection and submit it.
    *
-   * Named for what it does: this no longer starts anything. The server holds every
-   * submission carrying `autoStart: false` until `runQueue()` below releases it, so
-   * the user can stack several batches up and then commit to spending keys once.
+   * `autoStart` decides what "submit" means:
+   *   • false (default) — PARK it: the server holds it (`autoStart: false`) until a
+   *     `runQueue()` release, so several batches can be stacked before spending keys.
+   *   • true — queue it to RUN: it starts now if idle, or falls in behind whatever is
+   *     already generating. Used by the run button when a queue is already live (you're
+   *     adding to a queue that's running) and by `runNow()`.
+   *
+   * Returns true if a batch was actually submitted, false if the selection was incomplete
+   * (a toast already told the user what's missing) — `runNow()` uses this.
    */
-  async function addToQueue() {
-    if (!state.selInputs.value.length) return toast(t('runs.pickInput'));
-    if (!state.selModels.value.length) return toast(t('runs.pickModel'));
-    if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim()))
-      return toast(t('runs.pickPrompt'));
+  async function addToQueue(autoStart = false): Promise<boolean> {
+    if (!state.selInputs.value.length) {
+      toast(t('runs.pickInput'));
+      return false;
+    }
+    if (!state.selModels.value.length) {
+      toast(t('runs.pickModel'));
+      return false;
+    }
+    if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim())) {
+      toast(t('runs.pickPrompt'));
+      return false;
+    }
 
     // Only send quantities that differ from the default of 1; the backend defaults
     // every other selected model to a single copy.
@@ -394,9 +413,10 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
         presets: [...state.selPrompts.value],
         custom: state.customOn.value ? state.custom.value.trim() || null : null,
       },
-      maxImages: Math.max(1, state.maxImages.value || 8),
       mock: state.mock.value,
-      autoStart: false,
+      // autoStart:false parks the run (held) until runQueue(); true lets the server run it
+      // now or fall in behind whatever's already generating.
+      autoStart,
     };
     if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
     if (state.referenceOn.value && state.selReference.value.length) {
@@ -410,6 +430,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       const combined = [guideText, ...attachmentBlocks].join('').trim();
       if (combined) body.brandStyleGuide = combined;
     }
+    if (state.groundOn.value) body.groundWithDescription = true;
 
     // Runs already in flight stay tracked: the server queues this one behind them
     // and streams its position, so the queue builds up instead of being refused.
@@ -417,21 +438,48 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     state.submitting.value = true;
     try {
       const { runId: id } = await api.startRun(body);
-      // `queueHeld` is seeded rather than waited for: the server confirms it on the
-      // first snapshot, but the "Run queue" button has to light up on this click,
-      // not a round trip later.
-      state.trackRun(id, { title: id, status: 'queued', queueHeld: true, total: 0 });
+      // `queueHeld` mirrors what we just told the server: a parked (autoStart:false) run is
+      // held; an autoStart run is not. Seeded now rather than waited for so the run button's
+      // state flips on this click, not a snapshot round-trip later.
+      state.trackRun(id, { title: id, status: 'queued', queueHeld: !autoStart, total: 0 });
       subscribe(id);
       // Watch the newest submission unless something is already generating — then
       // stay on the live run and let the backlog strip show what's behind it.
       if (!queuedBehind) focusRun(id);
       refreshRuns();
       toast(queuedBehind ? t('runs.queuedBehind', { count: queuedBehind }, queuedBehind) : t('runs.queued'));
+      return true;
     } catch (e) {
       toast.error(t('runs.startFailed'), { description: errMessage(e) });
+      return false;
     } finally {
       state.submitting.value = false;
     }
+  }
+
+  /**
+   * "Run": submit the current batch and start the queue in one press — the primary action when
+   * the app is idle. If the current selection is a complete batch it's parked first so it runs
+   * alongside anything already queued; either way the whole held queue is then released, so one
+   * click does what used to take "Add to queue" then "Run queue".
+   *
+   * The selection-complete check mirrors addToQueue's guards but is read-only: it lets "Run"
+   * start an already-parked queue WITHOUT nagging "pick an input" when the current selection is
+   * empty (inputs aren't remembered between sessions, so that's the common case). Only when there
+   * is nothing to run at all does it fall through to addToQueue to explain what's missing.
+   */
+  async function runNow(): Promise<void> {
+    const ready =
+      state.selInputs.value.length > 0 &&
+      state.selModels.value.length > 0 &&
+      (state.selPrompts.value.length > 0 || (state.customOn.value && !!state.custom.value.trim()));
+    if (ready) {
+      await addToQueue(false);
+    } else if (!state.heldRuns.value.length) {
+      await addToQueue(false); // nothing valid selected and nothing parked → surface what's missing
+      return;
+    }
+    if (state.heldRuns.value.length) await runQueue();
   }
 
   /**
@@ -466,6 +514,25 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     }
   }
 
+  /**
+   * Drag-to-reorder the waiting queue. `orderedIds` is the new order of the QUEUED runs (the
+   * running one isn't reorderable). Optimistically renumbers their local queue positions so the
+   * card reflects the drag immediately — activeRuns sorts by position — then tells the server,
+   * which confirms with fresh SSE snapshots. On failure it re-reads to undo the optimistic order.
+   */
+  async function reorderQueue(orderedIds: string[]) {
+    orderedIds.forEach((id, i) => {
+      const run = state.trackedRuns.get(id);
+      if (run) run.queuePosition = i + 1;
+    });
+    try {
+      await api.reorderQueue(orderedIds);
+    } catch (e) {
+      toast.error(t('runs.reorderFailed'), { description: errMessage(e) });
+      refreshRuns();
+    }
+  }
+
   async function cancelRun(runId?: string) {
     const id = runId || state.focusedRunId.value;
     if (!id) return;
@@ -480,7 +547,9 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     refreshRuns,
     deleteRuns,
     addToQueue,
+    runNow,
     runQueue,
+    reorderQueue,
     cancelRun,
     focusRun,
     resumeRuns,

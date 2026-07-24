@@ -10,9 +10,10 @@
  * relaunch (spawn a detached copy of our launch command, then gracefully shut down) is injected
  * from src/cli/lifecycle.ts, which owns the shutdown handle.
  *
- * OPT-IN (cfg.autoUpdate; absent/false = off), it restarts the daemon unattended, so it's never on
- * by default. A dirty working tree is NEVER updated (`canApply` gates it), so uncommitted local
- * work is safe. Timer shape is a self-rescheduling setTimeout (never setInterval) so a slow apply
+ * ON by default since 2026-07-21 (cfg.autoUpdate; only an explicit `false` disables it) so a fresh
+ * install stays current without anyone opting in. A dirty working tree is NEVER updated (`canApply`
+ * gates it), so uncommitted local work is safe, and a restart never interrupts an active run (see
+ * `restartPending`). Timer shape is a self-rescheduling setTimeout (never setInterval) so a slow apply
  * can't stack. Primed + toggled live from src/http/app.ts + the settings route; started/stopped in
  * src/cli/lifecycle.ts.
  */
@@ -52,7 +53,7 @@ export function setAutoUpdateHooks(h: Partial<AutoUpdateHooks>): void {
 }
 
 // ── runtime state (mirrors persisted autoUpdate settings; primed at boot, toggled via the settings route) ──
-let enabled = false; // OFF by default, it restarts the daemon → opt-in
+let enabled = true; // ON by default (2026-07-21); only an explicit `autoUpdate: false` turns it off
 let intervalSecs = AUTO_UPDATE_INTERVAL_DEFAULT_S;
 let started = false; // true only after the daemon finishes booting (startAutoUpdate)
 let timer: ReturnType<typeof setTimeout> | null = null;

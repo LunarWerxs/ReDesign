@@ -15,8 +15,9 @@ export interface AppSettings {
   /**
    * Auto-update the app on a schedule: check the update remote, and when a newer commit is
    * available AND the working tree is clean (canApply), pull + reinstall + rebuild, then
-   * self-relaunch so the new code takes over, see src/auto-update.ts. Absent/false = OFF
-   * (opt-in): it restarts the daemon unattended. A dirty tree is never updated.
+   * self-relaunch so the new code takes over, see src/auto-update.ts. ON by default since
+   * 2026-07-21: absent = ON, only an explicit `false` (the settings toggle) turns it off.
+   * A dirty tree is never updated, and a pending restart waits for any active run to finish.
    */
   autoUpdate?: boolean;
   /** Auto-update check cadence in seconds. Clamped to [900, 604800]; absent = 21600 (6 h). */

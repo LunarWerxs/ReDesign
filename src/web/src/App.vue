@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { RouterView, useRoute } from 'vue-router';
+import { RouterLink, RouterView, useRoute } from 'vue-router';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppTopbar from '@/components/app/AppTopbar.vue';
 import StatusPill from '@/components/app/StatusPill.vue';
-import { Settings as SettingsIcon, SlidersHorizontal as ViewOptionsIcon } from '@lucide/vue';
+import { LayoutGrid as AllRunsIcon, Settings as SettingsIcon, SlidersHorizontal as ViewOptionsIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import ViewSettings from '@/components/app/control/ViewSettings.vue';
@@ -38,8 +38,11 @@ const isViewerRoute = computed(() => route.name === 'Viewer');
 const { containerStyle } = usePushPanel(settingsOpen, {
   shellMaxWidth: () => (isViewerRoute.value ? null : 800),
 });
+// Only deep-link to a run this session is actually on: the one being viewed, or the one just
+// generated. Falling back to "whatever run is newest on disk" is what made the Viewer tab
+// reopen a stale run instead of showing the run gallery (pages/Viewer.vue).
 const viewerTo = computed(() => {
-  const id = viewerStore.runId || controlStore.runId || controlStore.runs[0]?.runId || viewerStore.runs[0]?.runId;
+  const id = viewerStore.runId || controlStore.runId;
   return id ? { path: '/viewer', query: { run: id } } : { path: '/viewer' };
 });
 
@@ -101,6 +104,20 @@ onMounted(async () => {
         </template>
 
         <template #actions>
+          <!-- Back to the run gallery. The "Viewer" nav link deep-links to the CURRENT run, so
+               without this there's no way to close a run and return to the overview but editing the
+               URL. Shown only while a run is open. -->
+          <Tooltip v-if="isViewerRoute && viewerStore.runId">
+            <TooltipTrigger as-child>
+              <Button as-child variant="ghost" size="icon" :aria-label="t('viewer.allRuns')">
+                <RouterLink :to="{ path: '/viewer' }">
+                  <AllRunsIcon class="size-4" />
+                </RouterLink>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('viewer.allRuns') }}</TooltipContent>
+          </Tooltip>
+
           <!-- View options: pulled out of the settings sheet into its own header flyout so
                filtering/adjusting the gallery no longer means opening Settings. Viewer route only. -->
           <Popover v-if="isViewerRoute">

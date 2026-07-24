@@ -8,12 +8,14 @@
  * (the heartbeat itself lives in runQueue.ts so it fires even between/without an active
  * subscriber lookup here).
  */
+import fs from "node:fs";
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import * as store from "../../store";
-import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, releaseQueue, heldRunCount, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
+import { ensureRunThumbnail } from "../../thumbnail";
+import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, releaseQueue, reorderQueue, heldRunCount, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
 
 export function register(app: Hono, _deps: Deps): void {
   // Static segments ("delete") are registered before the "/:id" param routes below, Hono's
@@ -60,6 +62,32 @@ export function register(app: Hono, _deps: Deps): void {
     });
   });
 
+  // The run's gallery thumbnail, with on-demand backfill for older runs that never saved one
+  // (see src/thumbnail.ts): existing thumb → surviving input screenshot → a rendered output
+  // preview → 404 (the gallery then shows its placeholder). Registered before "/:id" so the
+  // literal "thumbnail" segment can't be swallowed by the param route.
+  app.get("/api/runs/:id/thumbnail", async (c) => {
+    let result: Awaited<ReturnType<typeof ensureRunThumbnail>>;
+    try {
+      result = await ensureRunThumbnail(c.req.param("id"));
+    } catch {
+      result = null;
+    }
+    if (!result) return c.json({ error: "no thumbnail" }, 404);
+    let buf: Buffer;
+    try {
+      buf = await fs.promises.readFile(result.abs);
+    } catch {
+      return c.json({ error: "no thumbnail" }, 404);
+    }
+    return c.body(new Uint8Array(buf), 200, {
+      "content-type": result.mime,
+      // A run id is unique and never reused, and its thumbnail is stable once made, so let the
+      // browser keep it — the render only ever needs to happen once.
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+  });
+
   app.get("/api/runs/:id", (c) => {
     const id = c.req.param("id");
     let m: store.Manifest | null;
@@ -84,6 +112,14 @@ export function register(app: Hono, _deps: Deps): void {
   app.post("/api/queue/start", requireSameOrigin(), (c) => {
     const started = releaseQueue();
     return c.json({ started, held: heldRunCount() });
+  });
+
+  // Drag-to-reorder the waiting queue. `order` is the desired runId order; only currently-queued
+  // runs move (the running one isn't reorderable), and omitted ones keep their place. See
+  // runQueue.reorderQueue. Returns the resulting order.
+  app.post("/api/queue/reorder", requireSameOrigin(), async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) || {};
+    return c.json(reorderQueue((body as { order?: unknown }).order));
   });
 
   app.post("/api/runs/:id/cancel", requireSameOrigin(), (c) => {

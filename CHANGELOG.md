@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Add an **All runs** gallery to the viewer. Each run gets a durable thumbnail from its input;
+  older runs can backfill one from a surviving input or a headless render of their first
+  successful output.
+- Make the run queue explicit and controllable: park several batches, run the whole queue in one
+  action, add work behind a live queue, and drag waiting runs into a new order.
+- Add optional **Ground with description** preprocessing. A vision model inventories the source
+  screenshot once and supplies that shared description to every image model for more faithful
+  results.
+- Add image clipboard support to the screenshot and reference drop zones, including a
+  right-click **Paste** action and routing tests that keep the two targets separate.
+- Open the viewer without a run at the new run gallery instead of silently choosing the newest
+  run. Output stars and hidden-item choices now survive refreshes, while live jobs update over SSE
+  instead of repeatedly polling and replacing the full manifest.
+- Improve large-run rendering: output jobs are indexed in one pass, off-screen previews stay
+  unmounted until they approach the viewport, and generated-page autofocus can no longer drag the
+  host viewer down the page.
+- Consolidate the three presentation toggles under **Appearance**, simplify model/prompt selected
+  states, clarify Connections sign-in/disconnect actions, and surface the installed app version
+  beside update controls.
+- Fix the shared updater integration tests on Windows installations where `bun` resolves through
+  an npm command shim.
+
 ## v1.2.0 - 2026-07-13
 
 - Add Muse Spark 1.1 (`muse-spark-1.1`) as a first-class model on a new Meta AI provider (`metaai`, `https://api.meta.ai/v1`, OpenAI-compatible chat-completions with `Bearer` auth). It ships enabled and starred. Muse Spark is a reasoning model that spends "reasoning" tokens (billed inside completion/output tokens) before the visible answer, so its `maxTokens` is set generously (32000) to leave room for a full self-contained HTML page on top of the thinking budget. Verified live against the endpoint: vision (image_url) input, temperature, and `max_tokens` are all accepted. Meta AI keys (`LLM_<app_id>_<secret>`) are recognized by prefix in the "Paste keys" flow and route straight to the `METAAI_API_KEYS` pool with no live probe (covered in `tests/keyDetect.test.ts`).

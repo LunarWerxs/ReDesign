@@ -45,11 +45,20 @@ export function createSyncActions() {
     if (s.ok) applyAppearance(s.appearance);
   }
 
-  /** Load the current sync status (mount + once after returning from sign-in). Best-effort. */
+  /**
+   * Load the current sync status (mount + once after returning from sign-in). Best-effort.
+   *
+   * Being CONNECTED is what enables sync — there is no separate on/off toggle in the UI any
+   * more (2026-07-21): signing in starts syncing, Disconnect stops it. So a status that comes
+   * back connected-but-not-enabled (the state right after the OAuth redirect, or an install
+   * that predates this change) is upgraded here rather than left inert with no way to turn on.
+   */
   async function loadSyncStatus(): Promise<void> {
     syncLoading.value = true;
     try {
-      absorbSyncStatus(await api.getSyncStatus());
+      const status = await api.getSyncStatus();
+      absorbSyncStatus(status);
+      if (status.ok && status.connected && !status.enabled) await enableSync();
     } catch {
       /* sync is optional, leave whatever we have */
     } finally {
@@ -57,7 +66,8 @@ export function createSyncActions() {
     }
   }
 
-  /** Turn sync on, seeding it with the current local appearance. */
+  /** Turn sync on, seeding it with the current local appearance. Driven by loadSyncStatus()
+   *  the moment an account is connected — there is no user-facing on/off toggle. */
   async function enableSync(): Promise<void> {
     syncLoading.value = true;
     try {
