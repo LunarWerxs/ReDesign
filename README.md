@@ -24,7 +24,12 @@ Here are six of the redesigns a single run produced from one sample dashboard, c
 
 ## Try it
 
-You need [Bun](https://bun.sh) 1.2 or newer.
+On Windows, download `redesign-windows-x64.exe` from
+[Releases](https://github.com/LunarWerxs/ReDesign/releases) and run it directly. It is an
+icon-bearing GUI executable with the web app embedded and no console window. The ZIP beside it is
+the smaller automatic-update transport.
+
+To run from source on any supported OS, you need [Bun](https://bun.sh) 1.2 or newer.
 
 ```sh
 bun install
