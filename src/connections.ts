@@ -314,7 +314,7 @@ async function updateAppearance(appearance?: Record<string, unknown>): Promise<v
 /** Flush a pending debounce before daemon shutdown. */
 async function flushPending(): Promise<void> {
   if (state.enabled && hasConnection()) {
-    requireSuccess(await syncEngine().flushAndStop());
+    requireSuccess(await syncEngine().flushAndStop({ timeoutMs: 5_000 }));
     await backfillIdentity();
   }
 }

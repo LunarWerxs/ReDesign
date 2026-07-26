@@ -15,9 +15,9 @@
 - Ship the Windows app as an icon-bearing, single-file GUI executable with no console window.
   GitHub releases also retain a compact ZIP for the automatic updater, with no loose `web` or
   `node_modules` directories.
-- Upgrade Connections settings sync to the multi-device-safe 1.1 engine. Empty accounts seed in
+- Upgrade Connections settings sync to the multi-device-safe 1.2 engine. Empty accounts seed in
   one operation, nested concurrent edits no longer overwrite unrelated preferences, and shutdown
-  flushes pending changes before stopping sync.
+  gets five seconds to flush before a stuck token or network request is cancelled.
 
 ## [1.4.0] - 2026-07-24
 
