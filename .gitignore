@@ -15,6 +15,7 @@ npm-debug.log*
 *.zip
 *.7z
 dist/
+/out/
 
 # OS / editor
 .DS_Store
