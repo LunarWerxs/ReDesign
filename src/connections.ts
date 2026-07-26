@@ -7,12 +7,11 @@
 // settings-sync store (studio.connections.icu/v1/app-data/{clientId}). The browser
 // never holds a token.
 //
-// Since 2026-07-08 the OAuth/refresh/identity machinery is the OFFICIAL SDK —
-// @cnct/connect (+ @cnct/locker for the settings store) — instead of a hand-rolled
-// copy: single-flight rotation-safe refresh, per-attempt redirect_uri, server-side
-// revoke on forget, and id_token identity all come from the shared package. This
-// module keeps only the Reimagine-specific parts: the state file, the appearance
-// blob, and the sync orchestration.
+// Since 2026-07-08 the OAuth/refresh/identity machinery is the OFFICIAL SDK — @cnct/connect
+// (the settings-sync store ships from the same package) — instead of a hand-rolled copy:
+// single-flight rotation-safe refresh, per-attempt redirect_uri, server-side revoke on forget,
+// and id_token identity all come from the shared package. This module keeps only the
+// Reimagine-specific parts: the state file, the appearance blob, and the sync orchestration.
 //
 // What syncs: Reimagine's only portable per-user preference is its APPEARANCE (theme),
 // its other "settings" are model/prompt CONTENT and secret API keys, which must never
@@ -22,8 +21,7 @@
 // ---------------------------------------------------------------------------
 import fs from "node:fs";
 import path from "node:path";
-import { createConnect, type ConnectClient, type ConnectStore, type TokenSet } from "@cnct/connect";
-import { createLocker, type LockerClient } from "@cnct/locker";
+import { createConnect, createLocker, type ConnectClient, type ConnectStore, type LockerClient, type TokenSet } from "@cnct/connect";
 import { seal, unseal, wrapTokenStore } from "./dpapi-seal.mjs";
 import { ROOT } from "./util";
 
@@ -148,7 +146,7 @@ function hasConnection(): boolean {
   }
 }
 
-// ── the shared locker (now the published @cnct/locker package) ────────────────────
+// ── the shared locker (part of the published @cnct/connect package) ───────────────
 function locker(): LockerClient {
   return createLocker({ appId: OAUTH.clientId, getToken: () => connect().getAccessToken() });
 }
