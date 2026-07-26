@@ -195,9 +195,8 @@ const errorsValue = computed(() => {
 });
 
 async function deleteRuns(ids: string[]): Promise<RunDeleteResponse | null> {
-  const result = await controlStore.deleteRuns(ids);
+  const result = await store.deleteRuns(ids);
   if (!result) return null;
-  store.runs = result.runs;
   if (store.runId && result.deleted.includes(store.runId)) {
     const nextRunId = result.runs[0]?.runId || null;
     if (props.surface === 'viewer') {
@@ -386,7 +385,7 @@ function selectCustomInput(event: FocusEvent) {
     :description="flyoutDescription"
     :runs="flyoutRuns"
     :current-run-id="flyoutCurrentRunId"
-    :deleting-run-ids="controlStore.deletingRunIds"
+    :deleting-run-ids="store.deletingRunIds"
     :action-label="flyoutActionLabel"
     :delete-runs="deleteRuns"
     @select-run="selectRun"

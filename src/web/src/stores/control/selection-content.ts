@@ -4,7 +4,12 @@ import { t } from '@/i18n';
 import { filesToUploadImages, uploadableImageFiles } from '@/composables/useImageUpload';
 import { readTextAttachment, textAttachableFiles } from '@/composables/useTextAttachments';
 import { toggleIn } from '@/lib/array';
-import type { BrandAttachment, Prompt } from '@/types';
+import type {
+  BrandAttachment,
+  Prompt,
+  PromptBuilderOptionSaveRequest,
+  PromptSaveRequest,
+} from '@/types';
 import { errMessage } from './state';
 import type { ControlState } from './state';
 
@@ -52,7 +57,7 @@ export function createSelectionContentActions(state: ControlState) {
     if (kind === 'inputs') state.selInputs.value = state.inputs.value.map((i) => i.id);
     else if (kind === 'models') state.selModels.value = [...state.runnableModelIds.value];
     else if (kind === 'reference') state.selReference.value = state.references.value.map((r) => r.id);
-    else state.selPrompts.value = state.prompts.value.map((p) => p.id);
+    else state.selPrompts.value = state.prompts.value.filter((p) => !p.pickerHidden).map((p) => p.id);
   }
   function selectNone(kind: 'inputs' | 'models' | 'prompts' | 'reference') {
     if (kind === 'inputs') state.selInputs.value = [];
@@ -64,7 +69,7 @@ export function createSelectionContentActions(state: ControlState) {
   }
 
   function reconcilePromptSelection(nextPrompts: Prompt[]) {
-    const ids = new Set(nextPrompts.map((p) => p.id));
+    const ids = new Set(nextPrompts.filter((p) => !p.pickerHidden).map((p) => p.id));
     state.selPrompts.value = state.selPrompts.value.filter((id) => ids.has(id));
   }
 
@@ -159,7 +164,7 @@ export function createSelectionContentActions(state: ControlState) {
     }
   }
 
-  async function savePrompt(prompt: { id?: string; label: string; description?: string; user: string }) {
+  async function savePrompt(prompt: PromptSaveRequest) {
     const wasNew = !prompt.id;
     try {
       const r = await api.savePrompt(prompt);
@@ -186,6 +191,33 @@ export function createSelectionContentActions(state: ControlState) {
       return true;
     } catch (e) {
       toast.error(t('prompts.removeFailed'), { description: errMessage(e) });
+      return false;
+    }
+  }
+
+  async function savePromptBuilderOption(option: PromptBuilderOptionSaveRequest) {
+    const wasNew = !option.id;
+    try {
+      const r = await api.savePromptBuilderOption(option);
+      state.builderOptions.value = r.builderOptions || [];
+      toast.success(
+        wasNew ? t('promptBuilder.optionCreated') : t('promptBuilder.optionUpdated'),
+      );
+      return r.builderOption;
+    } catch (e) {
+      toast.error(t('promptBuilder.optionSaveFailed'), { description: errMessage(e) });
+      return null;
+    }
+  }
+
+  async function deletePromptBuilderOption(id: string) {
+    try {
+      const r = await api.deletePromptBuilderOption(id);
+      state.builderOptions.value = r.builderOptions || [];
+      toast.success(t('promptBuilder.optionDeleted'));
+      return true;
+    } catch (e) {
+      toast.error(t('promptBuilder.optionDeleteFailed'), { description: errMessage(e) });
       return false;
     }
   }
@@ -234,6 +266,8 @@ export function createSelectionContentActions(state: ControlState) {
     deleteInput,
     savePrompt,
     deletePrompt,
+    savePromptBuilderOption,
+    deletePromptBuilderOption,
     restoreDefaultPrompts,
     togglePromptStarred,
   };

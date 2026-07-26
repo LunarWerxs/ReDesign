@@ -13,6 +13,8 @@ import {
 import {
   loadPrompts,
   resolvePrompts,
+  savePromptBuilderOption,
+  deletePromptBuilderOption,
   savePromptPreset,
   setPromptStarred,
   deletePromptPreset,
@@ -32,6 +34,8 @@ export {
   restoreModel,
   loadPrompts,
   resolvePrompts,
+  savePromptBuilderOption,
+  deletePromptBuilderOption,
   savePromptPreset,
   setPromptStarred,
   deletePromptPreset,
@@ -45,5 +49,14 @@ export {
   PRICING_FILE,
 };
 export type { Model, ModelInput, ModelsFileData } from "./config/models";
-export type { PromptPreset, PromptInput, PromptsFileData, ResolvedPrompt } from "./config/prompts";
+export type {
+  PromptBuilderOption,
+  PromptBuilderOptionCategory,
+  PromptBuilderOptionInput,
+  PromptBuilderRecipe,
+  PromptPreset,
+  PromptInput,
+  PromptsFileData,
+  ResolvedPrompt,
+} from "./config/prompts";
 export type { ModelPrice, PricingFileData } from "./config/pricing";

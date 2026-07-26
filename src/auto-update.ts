@@ -1,25 +1,24 @@
 /**
  * Auto-update timer, "keep the app current for me, silently".
  *
- * A single daemon-wide timer that, each time it fires, asks the shared updater engine
- * (src/updater.ts → src/updater-engine.mjs) whether a newer commit is on the update remote AND
- * the working tree is clean (`canApply`). If so it applies the update (git pull --ff-only +
- * npm install + npm run build, see src/updater.ts) and then SELF-RELAUNCHES so the freshly-pulled
+ * A single daemon-wide timer asks src/updater.ts whether a newer version is available and
+ * applicable. Source checkouts fast-forward/rebuild; compiled releases download and verify the
+ * compressed platform archive. It then SELF-RELAUNCHES so the updated
  * code takes over. RēDesign has no separate tray supervisor process, but a plain `redesign serve`
  * foreground process still needs someone to spawn its successor before it exits, the concrete
  * relaunch (spawn a detached copy of our launch command, then gracefully shut down) is injected
  * from src/cli/lifecycle.ts, which owns the shutdown handle.
  *
  * ON by default since 2026-07-21 (cfg.autoUpdate; only an explicit `false` disables it) so a fresh
- * install stays current without anyone opting in. A dirty working tree is NEVER updated (`canApply`
+ * install stays current without anyone opting in. A dirty source tree is NEVER updated (`canApply`
  * gates it), so uncommitted local work is safe, and a restart never interrupts an active run (see
  * `restartPending`). Timer shape is a self-rescheduling setTimeout (never setInterval) so a slow apply
  * can't stack. Primed + toggled live from src/http/app.ts + the settings route; started/stopped in
  * src/cli/lifecycle.ts.
  */
 import { recordPulse } from "./http/routes/bootstrap";
-import { checkForUpdate, applyUpdate } from "./updater";
 import { hasActiveRun } from "./http/runQueue";
+import { applyUpdate, checkForUpdate } from "./updater";
 
 /** Check cadence bounds (seconds): 15 min floor, 7 day ceiling, default 6 h. */
 export const AUTO_UPDATE_INTERVAL_MIN_S = 900;

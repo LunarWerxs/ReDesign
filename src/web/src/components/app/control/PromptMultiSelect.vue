@@ -9,6 +9,7 @@ import {
   PlusIcon,
   RotateCcwIcon,
   SearchIcon,
+  SparklesIcon,
   Trash2Icon,
   WandIcon,
 } from '@lucide/vue';
@@ -38,6 +39,7 @@ import PromptRow from './PromptRow.vue';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Prompt } from '@/types';
+import PromptBuilderDialog from './PromptBuilderDialog.vue';
 
 const store = useControlStore();
 const popoverOpen = ref(false);
@@ -45,6 +47,8 @@ const dialogOpen = ref(false);
 const actionsOpen = ref(false);
 const actionsMenuRef = useTemplateRef<HTMLElement>('actionsMenuRef');
 const saving = ref(false);
+const builderOpen = ref(false);
+const builderPrompt = ref<Prompt | null>(null);
 
 const search = ref('');
 // Prompts are few and ungrouped, so the "All prompts" drawer starts open (unlike
@@ -52,6 +56,7 @@ const search = ref('');
 const showAll = ref(true);
 
 const q = computed(() => search.value.trim().toLowerCase());
+const availablePrompts = computed(() => store.prompts.filter((prompt) => !prompt.pickerHidden));
 
 function matches(p: Prompt) {
   if (!q.value) return true;
@@ -62,7 +67,7 @@ function matches(p: Prompt) {
   );
 }
 
-const filtered = computed(() => store.prompts.filter(matches));
+const filtered = computed(() => availablePrompts.value.filter(matches));
 // Same "Selected" top tier as the models picker (ModelMultiSelect.vue): ticked + starred,
 // starred first, so what you've chosen stays in view instead of scrolling away into the list.
 const pinned = computed(() => [
@@ -71,9 +76,20 @@ const pinned = computed(() => [
 ]);
 const pinnedIds = computed(() => new Set(pinned.value.map((p) => p.id)));
 const rest = computed(() => filtered.value.filter((p) => !pinnedIds.value.has(p.id)));
-const anyPinned = computed(() => store.prompts.some((p) => p.starred || store.selPrompts.includes(p.id)));
+const anyPinned = computed(() =>
+  availablePrompts.value.some((p) => p.starred || store.selPrompts.includes(p.id)),
+);
 // A search forces the drawer open so matches aren't hidden behind it.
 const restOpen = computed(() => showAll.value || !!q.value);
+const customPromptActive = computed(() => store.customOn && !!store.custom.trim());
+const activePromptCount = computed(
+  () => store.selPrompts.length + (customPromptActive.value ? 1 : 0),
+);
+const promptCountLabel = computed(() =>
+  customPromptActive.value
+    ? t('promptSelect.activeCount', { count: activePromptCount.value }, activePromptCount.value)
+    : `${store.selPrompts.length}/${availablePrompts.value.length}`,
+);
 
 onClickOutside(actionsMenuRef, () => {
   actionsOpen.value = false;
@@ -93,6 +109,10 @@ function openAdd() {
 }
 
 function openEdit(prompt: Prompt) {
+  if (prompt.builder) {
+    openBuilder(prompt);
+    return;
+  }
   form.value = {
     id: prompt.id,
     label: prompt.label || '',
@@ -100,6 +120,13 @@ function openEdit(prompt: Prompt) {
     user: prompt.user || '',
   };
   dialogOpen.value = true;
+}
+
+function openBuilder(prompt: Prompt | null = null) {
+  actionsOpen.value = false;
+  popoverOpen.value = false;
+  builderPrompt.value = prompt;
+  builderOpen.value = true;
 }
 
 async function save() {
@@ -170,9 +197,7 @@ function useCustom() {
     <PopoverTrigger as-child>
       <Button variant="outline" class="min-w-[150px] justify-between" :title="t('promptSelect.choosePromptsTitle')">
         <span>{{ t('promptSelect.prompts') }}</span>
-        <span class="ml-auto text-muted-foreground"
-          >{{ store.selPrompts.length }}/{{ store.prompts.length }}</span
-        >
+        <span class="ml-auto text-muted-foreground">{{ promptCountLabel }}</span>
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
@@ -180,6 +205,10 @@ function useCustom() {
       <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('promptSelect.prompts') }}</strong>
         <div class="ml-auto flex items-center gap-1.5">
+          <Button variant="secondary" size="xs" @click="openBuilder()">
+            <SparklesIcon class="size-3.5" />
+            {{ t('promptSelect.buildPrompt') }}
+          </Button>
           <Button variant="ghost" size="xs" @click="store.selectAll('prompts')">{{ t('promptSelect.all') }}</Button>
           <Button variant="ghost" size="xs" @click="store.selectNone('prompts')">{{ t('promptSelect.none') }}</Button>
           <Tooltip>
@@ -341,4 +370,10 @@ function useCustom() {
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
+
+  <PromptBuilderDialog
+    v-model:open="builderOpen"
+    :prompt="builderPrompt"
+    @applied="builderPrompt = null"
+  />
 </template>

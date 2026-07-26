@@ -15,8 +15,13 @@
  * load) and the exported checkForUpdate/applyUpdate keep their previous names + async
  * signatures for the /api/updates routes.
  */
-import { ROOT } from "./util";
+import {
+  applyUpdate as applyReleaseUpdate,
+  checkForUpdate as checkReleaseUpdate,
+  cleanupStaleUpdateArtifacts as cleanupReleaseArtifacts,
+} from "./github-updater";
 import { createUpdater, type Updater } from "./updater-engine.mjs";
+import { IS_PACKAGED, ROOT } from "./util";
 
 // Lazy singleton: first call builds the engine; later calls reuse it.
 let engineInstance: Updater | null = null;
@@ -35,11 +40,15 @@ function engine(): Updater {
 }
 
 async function checkForUpdate() {
-  return engine().checkForUpdate();
+  return IS_PACKAGED ? checkReleaseUpdate() : engine().checkForUpdate();
 }
 
 async function applyUpdate() {
-  return engine().applyUpdate();
+  return IS_PACKAGED ? applyReleaseUpdate() : engine().applyUpdate();
 }
 
-export { checkForUpdate, applyUpdate };
+function cleanupStaleUpdateArtifacts(): void {
+  if (IS_PACKAGED) cleanupReleaseArtifacts();
+}
+
+export { applyUpdate, checkForUpdate, cleanupStaleUpdateArtifacts };

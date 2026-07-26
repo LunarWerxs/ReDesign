@@ -20,15 +20,13 @@
  * setting process.env.PORT before this module's PORT/HOST consts are read. Also still runnable
  * directly (`bun src/http/serve.ts`) via the entry-module guard.
  */
-import fs from "node:fs";
-import path from "node:path";
 import { C } from "../util";
 import { loadModels } from "../config";
 import { getKeyManager } from "../runner";
 import * as store from "../store";
 import { ORPHANED_RUN_MESSAGE } from "./runQueue";
 import { createApp } from "./app";
-import { WEB_ROOT } from "./web";
+import { webUiAvailable } from "./web";
 import * as connections from "../connections";
 import { stopAutoUpdate } from "../auto-update";
 import { findFreePort } from "../find-free-port.mjs";
@@ -45,18 +43,28 @@ const LISTEN_MAX_RETRIES = 25; // ~10s of grace for the old socket to release
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 let cleanedUp = false;
+let shuttingDown = false;
 
 /** Graceful stop: close the listener, clear the instance pointer, then exit. Exported so
  *  cli/lifecycle.ts's auto-update relaunch (src/auto-update.ts) can reuse the exact same
  *  teardown after spawning its successor. */
 function shutdown(): void {
-  try {
-    stopAutoUpdate();
-    cleanupInstance();
-    server?.stop(true);
-  } finally {
-    process.exit(0);
-  }
+  if (shuttingDown) return;
+  shuttingDown = true;
+  stopAutoUpdate();
+  void Promise.race([
+    connections.flushPending().catch((error) => {
+      console.error(C.dim(`  ⚠ Final settings sync failed: ${error instanceof Error ? error.message : String(error)}`));
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, 6_000)),
+  ]).finally(() => {
+    try {
+      cleanupInstance();
+      server?.stop(true);
+    } finally {
+      process.exit(0);
+    }
+  });
 }
 
 /** Clear the runtime.json pointer exactly once, from whichever exit path fires first
@@ -151,7 +159,7 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
   if (settled.length) {
     console.log(C.dim(`  ▸ finalized ${settled.length} interrupted run${settled.length === 1 ? "" : "s"}\n`));
   }
-  if (!fs.existsSync(path.join(WEB_ROOT, "index.html"))) {
+  if (!webUiAvailable()) {
     console.log(C.dim("  ⚠ Web UI not built, run ") + C.cyan("npm run build") + C.dim(" (dev: npm run dev:web)\n"));
   }
 

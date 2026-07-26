@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## [1.4.1] - 2026-07-25
+
+### Added
+
+- Add a composable Prompt Builder with independent redesign scope, structure, and visual-system
+  options. Users can create, edit, and reuse their own options; combinations compile into one
+  prompt and bookmarks retain stable snapshots of every selected custom instruction.
+- Add hover deletion and keyboard-accessible multi-select deletion to the Viewer run gallery,
+  including confirmation, active-run protection, and partial-failure recovery.
+
+### Changed
+
+- Ship the Windows app as an icon-bearing, single-file GUI executable with no console window.
+  GitHub releases also retain a compact ZIP for the automatic updater, with no loose `web` or
+  `node_modules` directories.
+- Upgrade Connections settings sync to the multi-device-safe 1.1 engine. Empty accounts seed in
+  one operation, nested concurrent edits no longer overwrite unrelated preferences, and shutdown
+  flushes pending changes before stopping sync.
 
 ## [1.4.0] - 2026-07-24
 

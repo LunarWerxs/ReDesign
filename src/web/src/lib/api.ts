@@ -11,6 +11,9 @@ import type {
   ModelSaveRequest,
   ModelSettingsResponse,
   Prompt,
+  PromptBuilderOption,
+  PromptBuilderOptionSaveRequest,
+  PromptSaveRequest,
   ReferenceUploadResponse,
   RunDeleteResponse,
   RunRequest,
@@ -123,7 +126,7 @@ export const api = {
     request<HealthCheckResponse>('/api/health-check', { ...postJson({ models: 'all' }), signal: opts?.signal }),
   openOutput: (file: string, target: 'file' | 'folder') =>
     request<{ ok: boolean }>('/api/output/open', postJson({ file, target })),
-  savePrompt: (prompt: { id?: string; label: string; description?: string; user: string }) =>
+  savePrompt: (prompt: PromptSaveRequest) =>
     request<{ prompt: Prompt; prompts: Prompt[] }>('/api/prompts/save', postJson(prompt)),
   starPrompt: (id: string, starred: boolean) =>
     request<{ prompt: Prompt; prompts: Prompt[] }>('/api/prompts/star', postJson({ id, starred })),
@@ -131,6 +134,16 @@ export const api = {
     request<{ id: string; prompts: Prompt[] }>('/api/prompts/delete', postJson({ id })),
   restoreDefaultPrompts: () =>
     request<{ prompts: Prompt[] }>('/api/prompts/restore-defaults', postJson({})),
+  savePromptBuilderOption: (option: PromptBuilderOptionSaveRequest) =>
+    request<{ builderOption: PromptBuilderOption; builderOptions: PromptBuilderOption[] }>(
+      '/api/prompts/builder-options/save',
+      postJson(option),
+    ),
+  deletePromptBuilderOption: (id: string) =>
+    request<{ id: string; builderOptions: PromptBuilderOption[] }>(
+      '/api/prompts/builder-options/delete',
+      postJson({ id }),
+    ),
   shutdownServer: () => request<{ ok: boolean }>('/api/shutdown', postJson({})),
   costs: () => request<SpendToDate>('/api/costs'),
   estimateRunCost: (body: { modelIds: string[]; jobCount: number; jobCountByModel?: Record<string, number> }) =>

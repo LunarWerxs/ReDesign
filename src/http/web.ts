@@ -25,6 +25,16 @@ const WEB_ROOT = resolveWebRoot();
 // as server.js's `/assets/*` route did with `{ immutable: true }`.
 const IMMUTABLE_CACHE = "public, max-age=31536000, immutable";
 
+/** Compile-time injected by scripts/build.ts. Undefined in a source checkout. */
+function embeddedWeb(): Readonly<Record<string, string>> | undefined {
+  return (globalThis as { __REDESIGN_EMBEDDED_WEB__?: Readonly<Record<string, string>> })
+    .__REDESIGN_EMBEDDED_WEB__;
+}
+
+export function webUiAvailable(): boolean {
+  return Boolean(embeddedWeb()?.["/index.html"]) || existsSync(join(WEB_ROOT, "index.html"));
+}
+
 /**
  * Serve the SPA + assets with traversal protection.
  *
@@ -40,7 +50,7 @@ export function mountWeb(app: Hono): void {
     const rel = pathname.slice("/assets/".length);
     const filePath = normalize(join(WEB_ROOT, "assets", rel));
     if (!filePath.startsWith(normalize(join(WEB_ROOT, "assets")))) return c.text("Forbidden", 403);
-    const file = Bun.file(filePath);
+    const file = Bun.file(embeddedWeb()?.[pathname] ?? filePath);
     if (!(await file.exists())) return c.text("Not found", 404);
     return new Response(file, { headers: { "Cache-Control": IMMUTABLE_CACHE } });
   });
@@ -54,11 +64,17 @@ export function mountWeb(app: Hono): void {
     // 404 for a genuine miss, in which case we still serve the SPA shell.
     const rel = new URL(c.req.url).pathname.replace(/^\/+/, "");
     if (rel && /\.[a-z0-9]+$/i.test(rel)) {
+      const embeddedPath = embeddedWeb()?.[`/${rel}`];
+      if (embeddedPath) {
+        return new Response(Bun.file(embeddedPath), {
+          headers: { "Cache-Control": rel.startsWith("assets/") ? IMMUTABLE_CACHE : "no-cache" },
+        });
+      }
       const res = await serveFile(c, WEB_ROOT, rel);
       if (res.status !== 404) return res;
     }
 
-    const index = Bun.file(join(WEB_ROOT, "index.html"));
+    const index = Bun.file(embeddedWeb()?.["/index.html"] ?? join(WEB_ROOT, "index.html"));
     if (!(await index.exists())) {
       return c.text("Web UI not built, run: npm run build (dev: npm run dev:web)", 503);
     }

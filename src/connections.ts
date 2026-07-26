@@ -21,7 +21,15 @@
 // ---------------------------------------------------------------------------
 import fs from "node:fs";
 import path from "node:path";
-import { createConnect, createLocker, type ConnectClient, type ConnectStore, type LockerClient, type TokenSet } from "@cnct/connect";
+import {
+  createConnect,
+  createSettingsSync,
+  type ConnectClient,
+  type ConnectStore,
+  type SettingsSync,
+  type SettingsSyncStatus,
+  type TokenSet,
+} from "@cnct/connect";
 import { seal, unseal, wrapTokenStore } from "./dpapi-seal.mjs";
 import { ROOT } from "./util";
 
@@ -146,11 +154,6 @@ function hasConnection(): boolean {
   }
 }
 
-// ── the shared locker (part of the published @cnct/connect package) ───────────────
-function locker(): LockerClient {
-  return createLocker({ appId: OAUTH.clientId, getToken: () => connect().getAccessToken() });
-}
-
 /** Build the authorize URL for a sign-in that redirects back to `${origin}/oauth/callback`.
  *  The live origin rides the SDK's per-attempt redirectUri override. */
 async function buildAuthorizeUrl(origin: string): Promise<string> {
@@ -218,29 +221,51 @@ function syncStatus(): SyncStatus {
   };
 }
 
-/** Push the appearance blob to the store (deep-merge, race-free per key). */
+let settingsSync: SettingsSync | null = null;
+
+function recordEngineStatus(status: SettingsSyncStatus): void {
+  if (status.version !== null) state.version = status.version;
+  if (status.lastSyncedAt !== null) state.lastSyncedAt = new Date(status.lastSyncedAt).toISOString();
+  if (status.version !== null || status.lastSyncedAt !== null) persist();
+}
+
+function syncEngine(): SettingsSync {
+  settingsSync ??= createSettingsSync(connect().locker(), {
+    // Preserve the established top-level wire shape: { appearance: { theme } }.
+    keys: ["appearance"],
+    read: () => ({ appearance: state.appearance || {} }),
+    write: (patch) => {
+      if (patch.appearance && typeof patch.appearance === "object") {
+        state.appearance = patch.appearance as Record<string, unknown>;
+        persist();
+      }
+    },
+    onStatus: recordEngineStatus,
+  });
+  return settingsSync;
+}
+
+function requireSuccess(status: SettingsSyncStatus): SettingsSyncStatus {
+  if (status.state === "synced") return status;
+  if (status.state === "signed-out") {
+    const error = new Error("not_signed_in") as Error & { code?: string };
+    error.code = "not_signed_in";
+    throw error;
+  }
+  throw status.error ?? new Error(`settings sync ended in ${status.state}`);
+}
+
+/** Flush the engine's current appearance snapshot immediately. */
 async function pushNow(): Promise<void> {
-  const res = await locker().merge({ appearance: state.appearance || {} });
-  state.version = res.version;
-  state.lastSyncedAt = new Date().toISOString();
-  persist();
+  requireSuccess(await syncEngine().flush());
   await backfillIdentity();
 }
 
 /** Pull the remote doc and adopt its appearance. Returns the remote version. */
 async function pullNow(): Promise<{ version: number }> {
-  const remote = await locker().get();
-  state.version = remote.version;
-  if (remote.version > 0) {
-    const data = remote.settings || {};
-    if (data.appearance && typeof data.appearance === "object") {
-      state.appearance = data.appearance as Record<string, unknown>;
-    }
-    state.lastSyncedAt = new Date().toISOString();
-  }
-  persist();
+  const status = requireSuccess(await syncEngine().pull());
   await backfillIdentity();
-  return { version: remote.version };
+  return { version: status.version ?? 0 };
 }
 
 /** Turn sync on: pull the remote doc (adopting its appearance) or seed the store from local. */
@@ -249,8 +274,8 @@ async function enable(appearance?: Record<string, unknown>): Promise<{ status: S
   if (appearance && typeof appearance === "object") state.appearance = appearance;
   persist();
   if (hasConnection()) {
-    const pulled = await pullNow();
-    if (pulled.version === 0) await pushNow(); // remote empty → seed with our current appearance
+    requireSuccess(await syncEngine().hydrate({ seedIfEmpty: true }));
+    await backfillIdentity();
   }
   return { status: syncStatus() };
 }
@@ -259,10 +284,11 @@ async function enable(appearance?: Record<string, unknown>): Promise<{ status: S
  *  server-side (RFC 7009, the refresh-token family dies everywhere), and clears the session. */
 async function disable(forget?: boolean): Promise<SyncStatus> {
   state.enabled = false;
+  settingsSync?.stop();
   if (forget) {
     if (hasConnection()) {
       try {
-        await locker().delete();
+        await (settingsSync ?? syncEngine()).locker.delete();
       } catch (_) {
         /* best-effort remote wipe */
       }
@@ -273,15 +299,24 @@ async function disable(forget?: boolean): Promise<SyncStatus> {
     state.version = 0;
     state.lastSyncedAt = undefined;
   }
+  settingsSync = null;
   persist();
   return syncStatus();
 }
 
-/** The web changed its theme while synced, record it and push (if enabled). */
+/** The web changed its theme while synced. The engine coalesces changes for 800 ms. */
 async function updateAppearance(appearance?: Record<string, unknown>): Promise<void> {
   if (appearance && typeof appearance === "object") state.appearance = appearance;
   persist();
-  if (state.enabled && hasConnection()) await pushNow();
+  if (state.enabled && hasConnection()) syncEngine().push();
+}
+
+/** Flush a pending debounce before daemon shutdown. */
+async function flushPending(): Promise<void> {
+  if (state.enabled && hasConnection()) {
+    requireSuccess(await syncEngine().flushAndStop());
+    await backfillIdentity();
+  }
 }
 
 /** Sign out / disconnect fully. */
@@ -300,5 +335,6 @@ export {
   enable,
   disable,
   updateAppearance,
+  flushPending,
   logout,
 };

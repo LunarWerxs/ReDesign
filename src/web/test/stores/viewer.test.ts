@@ -1,16 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { nextTick } from "vue";
 import { setActivePinia, createPinia } from "pinia";
+import { useControlStore } from "@/stores/control";
 import { useViewerStore } from "@/stores/viewer";
 import type { Job, JobStatus, Manifest, Model, RunEvent, RunStatus } from "@/types";
 
-const { runMock, runsMock, recordFirstStarMock } = vi.hoisted(() => ({
+const { deleteRunsMock, runMock, runsMock, recordFirstStarMock } = vi.hoisted(() => ({
+  deleteRunsMock: vi.fn(),
   runMock: vi.fn(),
   runsMock: vi.fn(),
   recordFirstStarMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: { run: runMock, runs: runsMock },
+  api: { deleteRuns: deleteRunsMock, run: runMock, runs: runsMock },
   eventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
 }));
 vi.mock("@/lib/starTally", () => ({ recordFirstStar: recordFirstStarMock }));
@@ -357,6 +360,116 @@ describe("loadRuns", () => {
     await store.loadRuns();
 
     expect(store.runs).toEqual([]);
+  });
+
+  it("keeps the last good list when a refresh fails", async () => {
+    runsMock.mockRejectedValue(new Error("offline"));
+    const store = useViewerStore();
+    store.runs = [{ runId: "run1", status: "done" as RunStatus }];
+
+    await store.loadRuns();
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1"]);
+  });
+});
+
+describe("deleteRuns", () => {
+  const summary = (runId: string): import("@/types").RunSummary => ({
+    runId,
+    status: "done",
+    counts: { total: 1, ok: 1 },
+  });
+
+  it("optimistically removes and batch-deletes unique run ids", async () => {
+    const store = useViewerStore();
+    const control = useControlStore();
+    store.runs = [summary("run1"), summary("run2")];
+    control.runs = [summary("run1"), summary("run2")];
+    control.focusRun("run1");
+    store.hiddenItems = ["run1:job-a", "run2:job-b"];
+    store.starredItems = ["run1:job-a", "run2:job-b"];
+    deleteRunsMock.mockResolvedValue({
+      deleted: ["run1"],
+      skipped: [],
+      runs: [summary("run2")],
+    });
+
+    const deleting = store.deleteRuns(["run1", "run1"]);
+    expect(store.runs.map((run) => run.runId)).toEqual(["run2"]);
+    expect(store.deletingRunIds.has("run1")).toBe(true);
+
+    const result = await deleting;
+    expect(deleteRunsMock).toHaveBeenCalledExactlyOnceWith(["run1"]);
+    expect(result?.deleted).toEqual(["run1"]);
+    expect(store.hiddenItems).toEqual(["run2:job-b"]);
+    expect(store.starredItems).toEqual(["run2:job-b"]);
+    expect(store.deletingRunIds.size).toBe(0);
+    expect(control.runs.map((run) => run.runId)).toEqual(["run2"]);
+    await nextTick();
+    expect(localStorage.getItem("redesign.focused-run")).not.toBe("run1");
+  });
+
+  it("uses the authoritative response to restore a run the server skipped", async () => {
+    const store = useViewerStore();
+    const active = { ...summary("run1"), status: "running" as const };
+    store.runs = [active, summary("run2")];
+    deleteRunsMock.mockResolvedValue({
+      deleted: [],
+      skipped: [{ runId: "run1", reason: "run is active" }],
+      runs: [active, summary("run2")],
+    });
+
+    await store.deleteRuns(["run1"]);
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1", "run2"]);
+  });
+
+  it("restores the previous list when deletion fails", async () => {
+    const store = useViewerStore();
+    store.runs = [summary("run1"), summary("run2")];
+    deleteRunsMock.mockRejectedValue(new Error("offline"));
+
+    expect(await store.deleteRuns(["run1"])).toBeNull();
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1", "run2"]);
+    expect(store.deletingRunIds.size).toBe(0);
+  });
+
+  it("does not let an older concurrent response resurrect a newer deletion", async () => {
+    const store = useViewerStore();
+    store.runs = [summary("run1"), summary("run2"), summary("run3")];
+    let resolveFirst!: (value: import("@/types").RunDeleteResponse) => void;
+    let resolveSecond!: (value: import("@/types").RunDeleteResponse) => void;
+    deleteRunsMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const first = store.deleteRuns(["run1"]);
+    const second = store.deleteRuns(["run2"]);
+    resolveSecond({
+      deleted: ["run2"],
+      skipped: [],
+      runs: [summary("run3")],
+    });
+    await second;
+    resolveFirst({
+      deleted: ["run1"],
+      skipped: [],
+      // This response was produced before run2's deletion completed.
+      runs: [summary("run2"), summary("run3")],
+    });
+    await first;
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run3"]);
   });
 });
 

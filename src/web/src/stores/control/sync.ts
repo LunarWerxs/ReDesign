@@ -112,18 +112,14 @@ export function createSyncActions() {
     absorbSyncStatus(await api.setSync({ appearance: currentAppearance() }));
   }
 
-  // When the owner changes theme locally AND sync is enabled+connected, debounce and push the
-  // new appearance so other devices pick it up. Skipped while a remote appearance is being
-  // applied (avoids echoing a just-pulled value straight back out) or while sync is off/disconnected.
-  let pushAppearanceTimer: ReturnType<typeof setTimeout> | undefined;
+  // When the owner changes theme locally AND sync is enabled+connected, notify the daemon-side
+  // engine. It owns the 800 ms debounce/coalescing window, so the browser does not add a second
+  // timer. Skipped while applying a remote appearance to avoid an echo.
   watch(themeMode, () => {
     if (applyingRemote) return;
     const s = syncStatus.value;
     if (!s || !s.ok || !s.enabled || !s.connected) return;
-    clearTimeout(pushAppearanceTimer);
-    pushAppearanceTimer = setTimeout(() => {
-      void pushAppearance();
-    }, 800);
+    void pushAppearance();
   });
 
   return {

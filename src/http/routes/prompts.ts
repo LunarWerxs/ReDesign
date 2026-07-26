@@ -4,8 +4,17 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
-import { savePromptPreset, setPromptStarred, deletePromptPreset, restoreDefaultPrompts, type PromptInput } from "../../config";
-import { publicPrompts } from "../../server/settings";
+import {
+  deletePromptBuilderOption,
+  deletePromptPreset,
+  restoreDefaultPrompts,
+  savePromptBuilderOption,
+  savePromptPreset,
+  setPromptStarred,
+  type PromptBuilderOptionInput,
+  type PromptInput,
+} from "../../config";
+import { publicPromptBuilderOptions, publicPrompts } from "../../server/settings";
 
 export function register(app: Hono, _deps: Deps): void {
   app.post("/api/prompts/save", requireSameOrigin(), async (c) => {
@@ -29,6 +38,21 @@ export function register(app: Hono, _deps: Deps): void {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as { id?: string };
     const id = deletePromptPreset(body.id as string);
     return c.json({ id, prompts: publicPrompts() });
+  });
+
+  app.post("/api/prompts/builder-options/save", requireSameOrigin(), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as PromptBuilderOptionInput;
+    const builderOption = savePromptBuilderOption(body);
+    return c.json({
+      builderOption,
+      builderOptions: publicPromptBuilderOptions(),
+    });
+  });
+
+  app.post("/api/prompts/builder-options/delete", requireSameOrigin(), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { id?: unknown };
+    const id = deletePromptBuilderOption(body.id);
+    return c.json({ id, builderOptions: publicPromptBuilderOptions() });
   });
 
   app.post("/api/prompts/restore-defaults", requireSameOrigin(), (c) => {

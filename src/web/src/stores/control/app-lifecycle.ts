@@ -23,6 +23,8 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
       state.models.value = data.models;
       state.archivedModels.value = data.archivedModels || [];
       state.prompts.value = data.prompts;
+      state.builderOptions.value = data.builderOptions || [];
+      state.builderOptionsLoaded.value = true;
       state.references.value = data.references || [];
       const inputIds = new Set(state.inputs.value.map((i) => i.id));
       state.sessionInputIds.value = state.sessionInputIds.value.filter((id) => inputIds.has(id));
@@ -51,7 +53,9 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
         }
       }
       if (state.prompts.value.length) {
-        const promptIds = new Set(state.prompts.value.map((p) => p.id));
+        const promptIds = new Set(
+          state.prompts.value.filter((prompt) => !prompt.pickerHidden).map((prompt) => prompt.id),
+        );
         state.selPrompts.value = state.selPrompts.value.filter((id) => promptIds.has(id));
       }
       // keep a still-valid reference selection across refreshes; drop missing ones

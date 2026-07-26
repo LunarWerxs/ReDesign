@@ -1,10 +1,13 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { useStorage } from '@vueuse/core';
+import { toast } from 'vue-sonner';
 import { api, eventsUrl } from '@/lib/api';
 import { toggleIn } from '@/lib/array';
 import { recordFirstStar } from '@/lib/starTally';
-import type { InputItem, Job, Manifest, RunEvent, RunSummary } from '@/types';
+import { t } from '@/i18n';
+import { useControlStore } from '@/stores/control';
+import type { InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunSummary } from '@/types';
 
 export interface InputGroup {
   input: InputItem;
@@ -18,6 +21,7 @@ export const useViewerStore = defineStore('viewer', () => {
   const runId = ref<string | null>(null);
   const manifest = ref<Manifest | null>(null);
   const runs = ref<RunSummary[]>([]);
+  const deletingRunIds = ref<Set<string>>(new Set());
   const hiddenModels = ref<string[]>([]);
   const hiddenPrompts = ref<string[]>([]);
   // Per-item decisions ("I starred this output", "I hid this one") are keyed by `runId:jobId`
@@ -41,6 +45,8 @@ export const useViewerStore = defineStore('viewer', () => {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let liveSource: EventSource | null = null;
   let liveJobIndexes = new Map<string, number>();
+  let runsRequestSeq = 0;
+  const confirmedDeletedRunIds = new Set<string>();
 
   const isLive = computed(
     () => !!manifest.value && (manifest.value.status === 'queued' || manifest.value.status === 'running'),
@@ -169,11 +175,111 @@ export const useViewerStore = defineStore('viewer', () => {
   }
 
   async function loadRuns() {
+    const seq = ++runsRequestSeq;
     try {
-      runs.value = await api.runs();
+      const loaded = await api.runs();
+      if (seq !== runsRequestSeq) return;
+      const pending = deletingRunIds.value;
+      runs.value = loaded.filter(
+        (run) => !pending.has(run.runId) && !confirmedDeletedRunIds.has(run.runId),
+      );
     } catch {
-      runs.value = [];
+      // Keep the last good gallery snapshot through a transient refresh failure.
+      // The initial value is already empty, so first-load failure still degrades cleanly.
     }
+  }
+
+  function pruneDeletedRunState(ids: string[]) {
+    const prefixes = ids.map((id) => `${id}:`);
+    const belongsToDeletedRun = (key: string) => prefixes.some((prefix) => key.startsWith(prefix));
+    hiddenItems.value = hiddenItems.value.filter((key) => !belongsToDeletedRun(key));
+    starredItems.value = starredItems.value.filter((key) => !belongsToDeletedRun(key));
+  }
+
+  async function deleteRuns(ids: string[]): Promise<RunDeleteResponse | null> {
+    const uniqueIds = Array.from(
+      new Set(ids.map((id) => String(id || '').trim()).filter(Boolean)),
+    ).filter((id) => !deletingRunIds.value.has(id));
+    if (!uniqueIds.length) return null;
+
+    ++runsRequestSeq;
+    const snapshot = runs.value;
+    const deleting = new Set(uniqueIds);
+    const removed = snapshot.filter((run) => deleting.has(run.runId));
+    deletingRunIds.value = new Set([...deletingRunIds.value, ...uniqueIds]);
+    // Remove immediately after the user confirms. The authoritative response below
+    // restores anything the server refused (notably a queued/running run).
+    runs.value = snapshot.filter((run) => !deleting.has(run.runId));
+
+    try {
+      const result = await api.deleteRuns(uniqueIds);
+      for (const id of result.deleted) confirmedDeletedRunIds.add(id);
+      const otherPending = new Set(
+        [...deletingRunIds.value].filter((id) => !deleting.has(id)),
+      );
+      const baselineIds = new Set(snapshot.map((run) => run.runId));
+      const concurrentNewRuns = runs.value.filter((run) => !baselineIds.has(run.runId));
+      const authoritative = (
+        result.runs || snapshot.filter((run) => !result.deleted.includes(run.runId))
+      ).filter(
+        (run) =>
+          !otherPending.has(run.runId) && !confirmedDeletedRunIds.has(run.runId),
+      );
+      runs.value = mergeRuns(authoritative, concurrentNewRuns);
+      pruneDeletedRunState(result.deleted);
+      useControlStore().forgetDeletedRuns(result.deleted);
+      if (result.deleted.length) {
+        toast.success(t('runs.pendingDelete', { count: result.deleted.length }, result.deleted.length));
+      }
+      if (result.skipped.length) {
+        const first = result.skipped[0];
+        const reason = first?.reason || t('runs.deleteFallbackReason');
+        const message =
+          result.skipped.length === 1
+            ? t('runs.deleteOneFailed', {
+                run: first?.runId || t('runs.runFallback'),
+                reason,
+              })
+            : t(
+                'runs.skippedMany',
+                { count: result.skipped.length, reason },
+                result.skipped.length,
+              );
+        if (result.deleted.length) toast(message);
+        else toast.error(message);
+      }
+      return result;
+    } catch (error) {
+      runs.value = mergeRuns(runs.value, removed, snapshot);
+      toast.error(t('runs.deleteFailed'), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    } finally {
+      ++runsRequestSeq;
+      const finished = new Set(uniqueIds);
+      deletingRunIds.value = new Set(
+        [...deletingRunIds.value].filter((id) => !finished.has(id)),
+      );
+    }
+  }
+
+  function mergeRuns(
+    current: RunSummary[],
+    restored: RunSummary[],
+    preferredOrder?: RunSummary[],
+  ): RunSummary[] {
+    const byId = new Map(current.map((run) => [run.runId, run]));
+    for (const run of restored) if (!byId.has(run.runId)) byId.set(run.runId, run);
+    if (!preferredOrder) return [...byId.values()];
+    const ordered: RunSummary[] = [];
+    for (const run of preferredOrder) {
+      const value = byId.get(run.runId);
+      if (!value) continue;
+      ordered.push(value);
+      byId.delete(run.runId);
+    }
+    return [...ordered, ...byId.values()];
   }
 
   async function load(id: string | null) {
@@ -235,6 +341,7 @@ export const useViewerStore = defineStore('viewer', () => {
     runId,
     manifest,
     runs,
+    deletingRunIds,
     hiddenModels,
     hiddenPrompts,
     hiddenItems,
@@ -249,6 +356,7 @@ export const useViewerStore = defineStore('viewer', () => {
     isLive,
     grouped,
     loadRuns,
+    deleteRuns,
     load,
     refreshManifest,
     stopPoll,

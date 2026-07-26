@@ -23,7 +23,7 @@ describe("config: model & prompt resolution", () => {
 
   it("material-3 + approachable + minimalist-two presets are present", () => {
     const allPrompts = config.loadPrompts().prompts;
-    expect(allPrompts.some((p) => p.id === "material-3")).toBe(true);
+    expect(allPrompts.find((p) => p.id === "material-3")?.pickerHidden).toBe(true);
     expect(allPrompts.some((p) => p.id === "approachable")).toBe(true);
     expect(allPrompts.some((p) => p.id === "minimalist-two")).toBe(true);
   });

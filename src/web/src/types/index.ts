@@ -1,6 +1,12 @@
 // Shapes mirror the Node backend (server.js / runner.js / store.js / keyManager.js).
 // Kept intentionally permissive where the backend is loose.
 
+import type {
+  PromptBuilderCustomOptionCategory,
+  PromptBuilderModifierId as RegistryPromptBuilderModifierId,
+  PromptBuilderScopeId as RegistryPromptBuilderScopeId,
+} from '@/lib/prompt-builder-registry';
+
 export interface Model {
   id: string;
   label: string;
@@ -31,12 +37,58 @@ export interface AvailableModelsResponse {
   source: 'provider' | 'catalog';
 }
 
+export type PromptBuilderScopeId = RegistryPromptBuilderScopeId;
+export type PromptBuilderModifierId = RegistryPromptBuilderModifierId;
+export type PromptBuilderOptionCategory = PromptBuilderCustomOptionCategory;
+
+/**
+ * A saved combination owns a snapshot of each selected custom option. This
+ * keeps an existing bookmark stable when its reusable source option is later
+ * edited or removed.
+ */
+export interface PromptBuilderCustomOptionSnapshot {
+  id: string;
+  label: string;
+  description?: string;
+  instruction: string;
+  category: PromptBuilderCustomOptionCategory;
+}
+
+/** A reusable custom choice in the user's Prompt Builder library. */
+export type PromptBuilderOption = PromptBuilderCustomOptionSnapshot;
+
+export interface PromptBuilderOptionSaveRequest {
+  id?: string;
+  label: string;
+  description?: string;
+  instruction: string;
+  category: PromptBuilderOptionCategory;
+}
+
+export interface PromptBuilderRecipe {
+  version: 1;
+  scope: PromptBuilderScopeId;
+  modifiers: PromptBuilderModifierId[];
+  customOptions?: PromptBuilderCustomOptionSnapshot[];
+}
+
 export interface Prompt {
   id: string;
   label: string;
   description?: string;
   user?: string;
   starred?: boolean;
+  pickerHidden?: boolean;
+  builder?: PromptBuilderRecipe;
+}
+
+export interface PromptSaveRequest {
+  id?: string;
+  label: string;
+  description?: string;
+  user: string;
+  starred?: boolean;
+  builder?: PromptBuilderRecipe;
 }
 
 export type InputType = 'image' | 'group';
@@ -232,6 +284,7 @@ export interface BootstrapResponse {
   models: Model[];
   archivedModels?: Model[];
   prompts: Prompt[];
+  builderOptions?: PromptBuilderOption[];
   inputs: InputItem[];
   references?: ReferenceItem[];
   keys: KeySnapshot;

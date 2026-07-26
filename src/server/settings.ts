@@ -3,15 +3,13 @@
 // file's requires.
 
 import fs from "node:fs";
-import path from "node:path";
-import { ROOT, getKeyPool, keyId, maskKey, mapLimit } from "../util";
-import { loadModels, loadArchivedModels, loadPrompts } from "../config";
-import { getKeyManager } from "../runner";
-import { brandLabel, parseKeyBlob, poolsForBrand, resolveKeyBrand, servicesFromModels } from "../keyDetect";
+import { loadArchivedModels, loadModels, loadPrompts } from "../config";
 import type { Model } from "../config/models";
+import type { PromptBuilderOption } from "../config/prompts";
+import { brandLabel, parseKeyBlob, poolsForBrand, resolveKeyBrand, servicesFromModels } from "../keyDetect";
 import type { KeyManager, Snapshot } from "../keyManager";
-
-const ENV_FILE = path.join(ROOT, ".env");
+import { getKeyManager } from "../runner";
+import { ENV_FILE, getKeyPool, keyId, mapLimit, maskKey } from "../util";
 
 interface PublicPrompt {
   id: string;
@@ -19,6 +17,13 @@ interface PublicPrompt {
   description?: string;
   user: string;
   starred: boolean;
+  pickerHidden?: boolean;
+  builder?: {
+    version: 1;
+    scope: string;
+    modifiers: string[];
+    customOptions?: PromptBuilderOption[];
+  };
 }
 
 function publicPrompts(): PublicPrompt[] {
@@ -28,7 +33,13 @@ function publicPrompts(): PublicPrompt[] {
     description: p2.description,
     user: p2.user,
     starred: p2.starred === true,
+    ...(p2.pickerHidden ? { pickerHidden: true } : {}),
+    ...(p2.builder ? { builder: p2.builder } : {}),
   }));
+}
+
+function publicPromptBuilderOptions(): PromptBuilderOption[] {
+  return loadPrompts().builderOptions || [];
 }
 
 interface PublicModel {
@@ -308,15 +319,25 @@ async function importKeys({ text }: ImportKeysInput): Promise<ImportKeysResult> 
   return { results, added: results.filter((r) => r.status === "added").length, keys: filteredKeySnapshot(km) };
 }
 
+export type {
+  DeleteApiKeyInput,
+  ImportKeyResult,
+  ImportKeysInput,
+  ImportKeysResult,
+  ModelSettings,
+  PublicModel,
+  PublicPrompt,
+  SaveApiKeyInput,
+};
 export {
-  publicPrompts,
-  publicModel,
+  deleteApiKey,
+  filteredKeySnapshot,
+  importKeys,
+  keySnapshot,
   modelSettings,
   modelSettingsResponse,
-  keySnapshot,
-  filteredKeySnapshot,
+  publicModel,
+  publicPromptBuilderOptions,
+  publicPrompts,
   saveApiKey,
-  deleteApiKey,
-  importKeys,
 };
-export type { PublicPrompt, PublicModel, ModelSettings, SaveApiKeyInput, DeleteApiKeyInput, ImportKeysInput, ImportKeyResult, ImportKeysResult };

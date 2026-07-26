@@ -443,6 +443,8 @@ test("updateAppearance pushes only when sync is enabled + connected", async () =
   await conn.enable(); // flips enabled=true; remote is empty version 0 -> seeds with current appearance
   const postsAfterEnable = server.docPostCalls;
   await conn.updateAppearance({ theme: "system" });
+  expect(server.docPostCalls).toBe(postsAfterEnable); // engine owns the debounce; no eager write
+  await conn.pushNow(); // flush the engine's daemon-side debounce
   expect(conn.syncStatus().appearance).toEqual({ theme: "system" });
   expect(server.docPostCalls).toBe(postsAfterEnable + 1);
   expect(server.settings.appearance).toEqual({ theme: "system" });

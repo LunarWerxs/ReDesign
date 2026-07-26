@@ -2,8 +2,14 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import RunGallery from "@/components/app/viewer/RunGallery.vue";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useViewerStore } from "@/stores/viewer";
 import type { RunSummary } from "@/types";
+
+const { pushMock } = vi.hoisted(() => ({ pushMock: vi.fn() }));
+vi.mock("vue-router", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
 
 /**
  * The gallery serves every thumbnail from ONE endpoint (/api/runs/:id/thumbnail) that owns the
@@ -19,11 +25,17 @@ function run(over: Partial<RunSummary>): RunSummary {
 function mountWith(runs: RunSummary[]) {
   const store = useViewerStore();
   store.runs = runs;
-  return mount(RunGallery);
+  return mount({
+    components: { RunGallery, TooltipProvider },
+    template: "<TooltipProvider><RunGallery /></TooltipProvider>",
+  });
 }
 
 describe("RunGallery thumbnails", () => {
-  beforeEach(() => setActivePinia(createPinia()));
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    pushMock.mockClear();
+  });
 
   it("points every thumbnail at the backfilling endpoint", () => {
     const wrapper = mountWith([run({ runId: "abc" })]);
@@ -63,5 +75,39 @@ describe("RunGallery thumbnails", () => {
   it("keeps an active (queued) run even at 0/0, since it just hasn't produced yet", () => {
     const wrapper = mountWith([run({ runId: "q", status: "queued", total: 0, counts: { total: 0, ok: 0 } })]);
     expect(wrapper.get("img").attributes("src")).toBe("/api/runs/q/thumbnail");
+  });
+
+  it("shows an accessible hover trash action for finished run cards", async () => {
+    const wrapper = mountWith([run({ runId: "abc", title: "Checkout study" })]);
+    const trash = wrapper.get("[data-run-delete]");
+
+    expect(trash.attributes("aria-label")).toBe("Delete Checkout study");
+    await trash.trigger("click");
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("does not offer deletion for a queued or running run", () => {
+    const wrapper = mountWith([
+      run({ runId: "queued", status: "queued" }),
+      run({ runId: "running", status: "running" }),
+    ]);
+
+    expect(wrapper.findAll("[data-run-delete]")).toHaveLength(0);
+  });
+
+  it("supports multi-selection without opening selected cards", async () => {
+    const wrapper = mountWith([
+      run({ runId: "one", title: "One" }),
+      run({ runId: "two", title: "Two" }),
+    ]);
+    await wrapper.get("button").trigger("click");
+    const cards = wrapper.findAll("[data-run-card-action]");
+
+    await cards[0]!.trigger("click");
+
+    expect(cards[0]!.attributes("aria-pressed")).toBe("true");
+    expect(cards[1]!.attributes("aria-pressed")).toBe("false");
+    expect(wrapper.text()).toContain("1 selected");
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });

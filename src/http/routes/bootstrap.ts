@@ -11,7 +11,12 @@ import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import { ROOT, readJSON, writeJSON } from "../../util";
 import { listInputs, listReferences } from "../../inputResolver";
-import { modelSettings, publicPrompts, keySnapshot } from "../../server/settings";
+import {
+  keySnapshot,
+  modelSettings,
+  publicPromptBuilderOptions,
+  publicPrompts,
+} from "../../server/settings";
 import * as store from "../../store";
 import { runStoreOptions } from "../runQueue";
 import { spendToDate } from "../../runner";
@@ -57,6 +62,7 @@ export function register(app: Hono, _deps: Deps): void {
       models: settings.models,
       archivedModels: settings.archivedModels,
       prompts: publicPrompts(),
+      builderOptions: publicPromptBuilderOptions(),
       inputs: listInputs(),
       references: listReferences(),
       keys: keySnapshot(),

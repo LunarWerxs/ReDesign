@@ -1,6 +1,6 @@
 {
   "name": "redesign",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "license": "MIT",
   "private": true,
   "description": "Run UI/UX screenshots through many AI models and collect reimagined HTML prototypes.",
@@ -47,7 +47,7 @@
     "check:kit": "node ../lunarwerx-ui/sync.mjs --check --app redesign"
   },
   "dependencies": {
-    "@cnct/connect": "^1.0.0",
+    "@cnct/connect": "^1.1.0",
     "hono": "^4.12.28"
   },
   "devDependencies": {

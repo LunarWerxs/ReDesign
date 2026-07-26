@@ -3,27 +3,37 @@
  * keeping the same `parseArgs` shape and the same verb set, only the plumbing changed (each verb's
  * body now lives in ./lifecycle.ts or ./run.ts; MCP lives in ../mcp/stdio.ts).
  */
+import pkg from "../../package.json";
+import { runStdioMcp } from "../mcp/stdio";
 import { C } from "../util";
 import { parseArgs } from "./args";
 import {
+  healthCheckCmd,
   inputsCmd,
+  keysCmd,
   modelsCmd,
   promptsCmd,
   referencesCmd,
-  keysCmd,
-  healthCheckCmd,
   serveCmd,
   statusCmd,
   stopCmd,
 } from "./lifecycle";
 import { runCmd } from "./run";
-import { runStdioMcp } from "../mcp/stdio";
 
 export async function main(argv: string[]): Promise<void> {
-  const cmd = argv[0] || "help";
+  const releaseDoubleClick =
+    argv.length === 0 &&
+    (globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ === true;
+  const cmd = argv[0] || (releaseDoubleClick ? "serve" : "help");
   const args = parseArgs(argv.slice(1));
+  if (releaseDoubleClick) args.openUi = process.env.REDESIGN_NO_OPEN !== "1";
 
   switch (cmd) {
+    case "--version":
+    case "version":
+      console.log(pkg.version);
+      break;
+
     case "inputs":
       inputsCmd();
       break;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { PencilIcon, StarIcon } from '@lucide/vue';
+import { PencilIcon, SparklesIcon, StarIcon } from '@lucide/vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -35,6 +35,11 @@ function onRowKeydown(e: KeyboardEvent) {
       class="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"
       :title="prompt.label + (prompt.description ? ` · ${prompt.description}` : '')"
     >
+      <SparklesIcon
+        v-if="prompt.builder"
+        class="size-3.5 shrink-0 text-primary"
+        aria-hidden="true"
+      />
       <span class="shrink-0 truncate font-medium">{{ prompt.label }}</span>
       <span v-if="prompt.description" class="min-w-0 flex-1 truncate text-xs text-muted-foreground">· {{ prompt.description }}</span>
     </span>

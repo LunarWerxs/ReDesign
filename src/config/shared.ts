@@ -1,11 +1,30 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ROOT, readJSON } from "../util";
+import modelsSeed from "./models.json";
+import pricingSeed from "./pricing.json";
+import promptsSeed from "./prompts.json";
+import promptDefaultsSeed from "./prompts.defaults.json";
+import { APP_CONFIG_DIR, IS_PACKAGED, ROOT, readJSON } from "../util";
 
-const MODELS_FILE = path.join(ROOT, "src", "config", "models.json");
-const PROMPTS_FILE = path.join(ROOT, "src", "config", "prompts.json");
-const PROMPTS_DEFAULTS_FILE = path.join(ROOT, "src", "config", "prompts.defaults.json");
-const PRICING_FILE = path.join(ROOT, "src", "config", "pricing.json");
+const CONFIG_ROOT = IS_PACKAGED
+  ? path.join(APP_CONFIG_DIR, "config")
+  : path.join(ROOT, "src", "config");
+const MODELS_FILE = path.join(CONFIG_ROOT, "models.json");
+const PROMPTS_FILE = path.join(CONFIG_ROOT, "prompts.json");
+const PROMPTS_DEFAULTS_FILE = path.join(CONFIG_ROOT, "prompts.defaults.json");
+const PRICING_FILE = path.join(CONFIG_ROOT, "pricing.json");
+
+if (IS_PACKAGED) {
+  fs.mkdirSync(CONFIG_ROOT, { recursive: true });
+  for (const [file, seed] of [
+    [MODELS_FILE, modelsSeed],
+    [PROMPTS_FILE, promptsSeed],
+    [PROMPTS_DEFAULTS_FILE, promptDefaultsSeed],
+    [PRICING_FILE, pricingSeed],
+  ] as const) {
+    if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
+  }
+}
 
 interface JsonCacheEntry<T> {
   mtimeMs: number;

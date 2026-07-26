@@ -9,7 +9,14 @@ REM
 REM The tray's Get-BuildCommand auto-prefers this file over `npm run build`, so dropping it in is the
 REM whole change. It runs headless (output -> misc\ReDesign-Rebuild.log); the exit code is
 REM propagated so a failed build is still reported. Kept pure-ASCII (no macron) so cmd.exe never
-REM mangles it. Double-clicking it just runs the fast build and exits (no pause).
+REM mangles it. Successful builds exit immediately; failed builds pause so the error stays visible.
 cd /d "%~dp0.."
 call npm run build:web
-exit /b %errorlevel%
+if errorlevel 1 (
+  echo.
+  echo Build FAILED - see the output above.
+  pause
+  exit /b 1
+)
+
+exit /b 0

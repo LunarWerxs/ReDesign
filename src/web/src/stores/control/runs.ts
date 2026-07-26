@@ -291,6 +291,21 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     return { deleted: uniqueIds, skipped: [], runs: state.runs.value };
   }
 
+  /**
+   * Reconcile a deletion completed by another surface (currently the Viewer gallery).
+   * The server result is already final, so there is no undo timer here: remove stale
+   * rows, progress tracking, subscriptions, and the persisted focused-run pointer.
+   */
+  function forgetDeletedRuns(ids: string[]) {
+    const deleted = new Set(ids.map((id) => String(id || '').trim()).filter(Boolean));
+    if (!deleted.size) return;
+    state.runs.value = state.runs.value.filter((run) => !deleted.has(run.runId));
+    for (const id of deleted) {
+      unsubscribe(id);
+      state.untrackRun(id);
+    }
+  }
+
   function ingestManifest(m: Manifest | null | undefined) {
     if (!m || !m.runId) return;
     const entry = state.trackRun(m.runId);
@@ -546,6 +561,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
   return {
     refreshRuns,
     deleteRuns,
+    forgetDeletedRuns,
     addToQueue,
     runNow,
     runQueue,

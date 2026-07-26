@@ -6,13 +6,15 @@
  * entry (src/cli/main.ts) stays a thin dispatcher.
  */
 import { spawn } from "node:child_process";
-import { C } from "../util";
-import { listInputs, listReferences } from "../inputResolver";
+import { setAutoUpdateHooks, startAutoUpdate } from "../auto-update";
 import { loadModels, loadPrompts, resolveModels } from "../config";
-import { getKeyManager } from "../runner";
 import { healthCheckModel } from "../healthCheck";
-import { startAutoUpdate, setAutoUpdateHooks } from "../auto-update";
+import { listInputs, listReferences } from "../inputResolver";
 import { findLiveInstance } from "../instance";
+import { openUi } from "../open-ui";
+import { getKeyManager } from "../runner";
+import { cleanupStaleUpdateArtifacts } from "../updater";
+import { C } from "../util";
 import type { Args } from "./args";
 
 // The PREFERRED base (mirrors http/serve.ts: HOST default 127.0.0.1, PORT default 5178; 0.0.0.0
@@ -154,6 +156,7 @@ export async function healthCheckCmd(args: Args): Promise<void> {
 }
 
 export async function serveCmd(args: Args): Promise<void> {
+  cleanupStaleUpdateArtifacts();
   // Boot the web UI + API in-process, the same server as `npm start`, but reachable from the one
   // `redesign` command an agent already knows. --port/--host override (read by http/serve.ts at
   // load, so set them BEFORE importing it).
@@ -169,11 +172,16 @@ export async function serveCmd(args: Args): Promise<void> {
     const live = await findLiveInstance();
     if (live) {
       console.log(C.yellow(`RēDesign is already running → ${live.url}`));
+      if (args.openUi) openUi(live.url);
       return;
     }
   }
   const { startServer, shutdown } = await import("../http/serve");
-  await startServer();
+  const server = await startServer();
+  if (args.openUi) {
+    const url = `http://127.0.0.1:${server.port}/`;
+    if (!openUi(url)) console.error(C.yellow(`Could not open a browser automatically. Open ${url} manually.`));
+  }
 
   // Auto-update loop (opt-in; see src/auto-update.ts). When it applies an update it must restart
   // the daemon ITSELF, RēDesign has no separate tray supervisor that relaunches us. So hand it a
@@ -237,4 +245,4 @@ export async function stopCmd(): Promise<void> {
   }
 }
 
-export { serverBase, probeServer };
+export { probeServer, serverBase };

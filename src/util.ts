@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 
 // ROOT = the app's base dir. In dev (`bun run src/index.ts`) this file is src/util.ts, so ROOT is the
@@ -8,7 +9,10 @@ import path from "node:path";
 // compiled case by the absence of package.json at the dev-resolved root, and fall back to the
 // executable's directory. Dev behaviour is unchanged (the dev root always has package.json).
 const DEV_ROOT = path.resolve(import.meta.dir, "..");
-const ROOT = fs.existsSync(path.join(DEV_ROOT, "package.json")) ? DEV_ROOT : path.dirname(process.execPath);
+const IS_PACKAGED = !fs.existsSync(path.join(DEV_ROOT, "package.json"));
+const ROOT = IS_PACKAGED ? path.dirname(process.execPath) : DEV_ROOT;
+const APP_CONFIG_DIR = process.env.REDESIGN_HOME?.trim() || path.join(homedir(), ".redesign");
+const ENV_FILE = IS_PACKAGED ? path.join(APP_CONFIG_DIR, ".env") : path.join(ROOT, ".env");
 
 // ---------------------------------------------------------------------------
 // .env loading (zero-dependency)
@@ -17,7 +21,7 @@ const ROOT = fs.existsSync(path.join(DEV_ROOT, "package.json")) ? DEV_ROOT : pat
 // shell-style expansion. Values are taken verbatim (trimmed, optional quotes
 // stripped). Already-set process.env wins so callers can override.
 function loadEnv(envPath?: string): Record<string, string> {
-  const file = envPath || path.join(ROOT, ".env");
+  const file = envPath || ENV_FILE;
   if (!fs.existsSync(file)) return {};
   const text = fs.readFileSync(file, "utf8");
   const parsed: Record<string, string> = {};
@@ -299,6 +303,9 @@ const C = {
 };
 
 export {
+  APP_CONFIG_DIR,
+  ENV_FILE,
+  IS_PACKAGED,
   ROOT,
   loadEnv,
   getKeyPool,

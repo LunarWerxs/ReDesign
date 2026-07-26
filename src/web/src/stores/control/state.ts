@@ -9,6 +9,7 @@ import type {
   KeySnapshot,
   Model,
   Prompt,
+  PromptBuilderOption,
   ProviderDefault,
   ReferenceItem,
   RunSummary,
@@ -52,6 +53,8 @@ export function createControlState() {
   const models = ref<Model[]>([]);
   const archivedModels = ref<Model[]>([]);
   const prompts = ref<Prompt[]>([]);
+  const builderOptions = ref<PromptBuilderOption[]>([]);
+  const builderOptionsLoaded = ref(false);
   const references = ref<ReferenceItem[]>([]);
   const keys = ref<KeySnapshot | null>(null);
   const runs = ref<RunSummary[]>([]);
@@ -239,6 +242,8 @@ export function createControlState() {
     models,
     archivedModels,
     prompts,
+    builderOptions,
+    builderOptionsLoaded,
     references,
     keys,
     runs,
