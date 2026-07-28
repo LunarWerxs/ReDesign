@@ -54,7 +54,7 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 
 ## A little deeper
 
-- **All config, no code.** Models live in `src/config/models.json`, prompts in `src/config/prompts.json`. Add one, disable one, or point it at a newer model version without touching the app.
+- **All config, no code.** Models and prompts live in `~/.redesign/config/` (set `REDESIGN_HOME` to move it), seeded on first run and shared by the packaged app and a from-source checkout alike. Add a model, disable one, or point it at a newer version without touching the app. The copies under `src/config/` are the shipped seeds, not your live settings.
 - **Reference images.** Drop or paste in a look you like, choose exactly which references to send, and every model borrows their mood and colors rather than their layout.
 - **Grounded by default.** Every run inventories the screenshot once with a vision model and hands that description to every model alongside the image, so redesigns keep the real content instead of quietly dropping a tab or inventing a metric. It measurably beat the ungrounded path on content fidelity, so it is simply how runs work now, with no switch to remember.
 - **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front. Your keys never hit disk in the clear.

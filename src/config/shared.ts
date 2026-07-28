@@ -4,26 +4,30 @@ import modelsSeed from "./models.json";
 import pricingSeed from "./pricing.json";
 import promptsSeed from "./prompts.json";
 import promptDefaultsSeed from "./prompts.defaults.json";
-import { APP_CONFIG_DIR, IS_PACKAGED, ROOT, readJSON } from "../util";
+import { APP_CONFIG_DIR, readJSON } from "../util";
 
-const CONFIG_ROOT = IS_PACKAGED
-  ? path.join(APP_CONFIG_DIR, "config")
-  : path.join(ROOT, "src", "config");
+// ONE live config location, packaged or from source: <REDESIGN_HOME|~/.redesign>/config.
+//
+// Running from source used to point this at src/config/ itself, which meant the app wrote
+// user data (saved prompts, Prompt Builder combos, models added in the UI) straight into
+// tracked files that are ALSO compiled into the shipped binary as seeds. Every dev-mode
+// session dirtied the repo, and a stray commit would have published someone's private
+// presets. Now the .json files beside this one are seeds only: read at build time, copied
+// out on first run, never written back.
+const CONFIG_ROOT = path.join(APP_CONFIG_DIR, "config");
 const MODELS_FILE = path.join(CONFIG_ROOT, "models.json");
 const PROMPTS_FILE = path.join(CONFIG_ROOT, "prompts.json");
 const PROMPTS_DEFAULTS_FILE = path.join(CONFIG_ROOT, "prompts.defaults.json");
 const PRICING_FILE = path.join(CONFIG_ROOT, "pricing.json");
 
-if (IS_PACKAGED) {
-  fs.mkdirSync(CONFIG_ROOT, { recursive: true });
-  for (const [file, seed] of [
-    [MODELS_FILE, modelsSeed],
-    [PROMPTS_FILE, promptsSeed],
-    [PROMPTS_DEFAULTS_FILE, promptDefaultsSeed],
-    [PRICING_FILE, pricingSeed],
-  ] as const) {
-    if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
-  }
+fs.mkdirSync(CONFIG_ROOT, { recursive: true });
+for (const [file, seed] of [
+  [MODELS_FILE, modelsSeed],
+  [PROMPTS_FILE, promptsSeed],
+  [PROMPTS_DEFAULTS_FILE, promptDefaultsSeed],
+  [PRICING_FILE, pricingSeed],
+] as const) {
+  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
 }
 
 interface JsonCacheEntry<T> {

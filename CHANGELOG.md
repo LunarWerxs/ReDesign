@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.1] - 2026-07-28
+
+### Fixed
+
+- Keep live settings in one place, `~/.redesign/config/`, whether the app is packaged or run
+  from source. Running from source pointed at `src/config/` itself, so saving a prompt, adding a
+  model, or building a Prompt Builder combination wrote user data into files that are tracked in
+  git and compiled into the shipped binary as seeds: a working copy went dirty on ordinary use,
+  and a stray commit would have published private presets. Those files are now seeds only, and
+  the test suite runs against them in an isolated home so a developer's own settings cannot
+  change the result of a test run.
+
 ## [1.5.0] - 2026-07-28
 
 ### Changed
