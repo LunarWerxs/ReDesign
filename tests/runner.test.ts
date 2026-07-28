@@ -170,7 +170,9 @@ describe("runner: end-to-end mock run with key rotation", () => {
     }
   });
 
-  maybeIt("grounding on: a VISION job is fed a full description of the screenshot, and the run records it", async () => {
+  // Grounding is unconditional (there is no toggle any more, see runner/reimagine.ts),
+  // so a plain run with no grounding option set must still ground its vision jobs.
+  maybeIt("every VISION job is fed a full description of the screenshot, and the run records it", async () => {
     const grKm = new KeyManager({ stateFile: `${tmpState}.gr` });
     const mg = (await runReimagine({
       keyManager: grKm,
@@ -181,7 +183,6 @@ describe("runner: end-to-end mock run with key rotation", () => {
       // grounded already; this proves the vision path specifically fires.
       models: { ids: ["gemini-3.5-flash"] },
       prompts: { presets: ["faithful-refresh"] },
-      groundWithDescription: true,
       variants: 1,
       label: "groundtest",
     })) as RunManifest;

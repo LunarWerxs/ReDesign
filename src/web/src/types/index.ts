@@ -181,6 +181,9 @@ export interface RunSummaryMeta {
 export interface Manifest {
   runId: string;
   status: RunStatus;
+  createdAt?: string;
+  /** When the runner finished this run. Null while it is still queued/running. */
+  finishedAt?: string | null;
   mock?: boolean;
   summary?: RunSummaryMeta | null;
   counts?: Counts;
@@ -199,6 +202,8 @@ export interface Manifest {
 export interface RunSummary {
   runId: string;
   createdAt?: string;
+  /** When the runner finished this run. Null while it is still queued/running. */
+  finishedAt?: string | null;
   title?: string;
   summary?: RunSummaryMeta | null;
   status: RunStatus;
@@ -368,9 +373,6 @@ export interface RunRequest {
   mock: boolean;
   reference?: { images: string[]; note: string | null };
   brandStyleGuide?: string | null;
-  // Ground vision models with a full written inventory of the screenshot before they
-  // redesign, so they capture every element and miss less. Omitted when off.
-  groundWithDescription?: boolean;
   // The control panel always sends false: "Add to queue" parks the run, and only a
   // "Run queue" press starts it. Omitting the flag keeps the server's original
   // submit-and-run behavior, which the MCP tools and CLI still rely on.

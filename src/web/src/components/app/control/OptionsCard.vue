@@ -56,10 +56,6 @@ const browseOpen = ref(false);
                 <Switch id="brand-style-guide" v-model="store.brandOn" />
                 <Label for="brand-style-guide" class="cursor-pointer">{{ t('options.brandStyleGuide') }}</Label>
               </div>
-              <div class="flex items-center gap-2" :title="t('options.groundDescription')">
-                <Switch id="ground-with-description" v-model="store.groundOn" />
-                <Label for="ground-with-description" class="cursor-pointer">{{ t('options.ground') }}</Label>
-              </div>
             </div>
 
             <div

@@ -181,6 +181,30 @@ class KeyManager {
     return p.entries.length;
   }
 
+  /**
+   * How many keys in the pool are usable RIGHT NOW: not dead, not out of balance,
+   * not cooling down. poolSize() counts every key ever configured, so a pool whose
+   * keys are all revoked still reports a healthy size — callers that need to know
+   * "can this pool actually serve a request" must ask this instead.
+   */
+  availableCount(poolName: string): number {
+    const p = this.pools.get(poolName) || this.registerPool(poolName);
+    const now = Date.now();
+    return p.entries.filter((e) => (e.cooldownUntil || 0) <= now).length;
+  }
+
+  /**
+   * How many key-rotation attempts one request should get. A dead/exhausted key must
+   * not fail the request while other keys are sitting there unused, so the budget is
+   * the whole pool (bounded by MAX_KEY_ATTEMPTS) rather than a small fixed number.
+   * acquire() already skips keys in cooldown, so on a healthy pool this costs nothing:
+   * the loop exits on the first success, and only a genuinely broken pool spends the
+   * full budget.
+   */
+  attemptBudget(poolName: string, cap = cfgInt("MAX_KEY_ATTEMPTS", 10)): number {
+    return Math.max(1, Math.min(this.poolSize(poolName) || 1, Math.max(1, cap)));
+  }
+
   // Internal accessor: returns live entries INCLUDING the secret key. Only used
   // by the health-check, which must ping each specific key. Never serialize.
   getEntries(poolName: string): KeyEntry[] {

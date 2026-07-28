@@ -39,8 +39,6 @@ interface RunBody {
   poolConcurrency?: number | string;
   reference?: unknown;
   brandStyleGuide?: string | null;
-  /** Ground vision models with a full written description of the screenshot (see runner). */
-  groundWithDescription?: boolean;
   /**
    * Whether this submission may start on its own once the runner is free.
    *
@@ -282,7 +280,6 @@ function runQueuedEntry(runId: string, entry: RunEntry): void {
     prompts: body.prompts || {},
     reference: (body.reference as ReferenceOptions | null | undefined) || null,
     brandStyleGuide: typeof body.brandStyleGuide === "string" ? body.brandStyleGuide : null,
-    groundWithDescription: !!body.groundWithDescription,
     variants: body.variants || 1,
     modelQuantities: body.modelQuantities || undefined,
     mock: !!body.mock,

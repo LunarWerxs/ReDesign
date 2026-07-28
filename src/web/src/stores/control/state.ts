@@ -91,9 +91,6 @@ export function createControlState() {
   const customOn = useStorage('redesign.custom-on', false);
   const custom = useStorage('redesign.custom-prompt', '');
   const advancedOpen = useStorage('redesign.advanced-open', false);
-  // Ground vision models with a full written inventory of the screenshot before they
-  // redesign, so they capture every element. Persists per-browser like the other toggles.
-  const groundOn = useStorage('redesign.ground-on', false);
   const refNote = ref('');
   // Brand style guide: a durable brand brief appended to every generation prompt.
   // Persisted per-browser (unlike the one-off refNote); a brand outlives a single run.
@@ -265,7 +262,6 @@ export function createControlState() {
     customOn,
     custom,
     advancedOpen,
-    groundOn,
     refNote,
     brandOn,
     brandStyleGuide,

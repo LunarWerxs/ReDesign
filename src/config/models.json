@@ -119,6 +119,7 @@
       "color": "#4d6bfe"
     },
     {
+      "_maxtokens_note": "Raised 8000 -> 16000 on 2026-07-28: at 8000 Qwen truncated 7 of 12 outputs mid-document (finish_reason=length, no closing </html>), which cost it real content in every measured run while every other model in this file sat at 16000-32000. A full self-contained HTML page does not fit in 8000.",
       "id": "qwen-3.5-plus",
       "label": "Qwen 3.5 Plus",
       "provider": "qwen",
@@ -126,7 +127,7 @@
       "keyEnv": "QWEN_API_KEYS",
       "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
       "vision": true,
-      "maxTokens": 8000,
+      "maxTokens": 16000,
       "tokenParam": "max_tokens",
       "supportsTemperature": true,
       "enabled": true,

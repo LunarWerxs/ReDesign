@@ -67,7 +67,6 @@ export const useControlStore = defineStore('control', () => {
     customOn: state.customOn,
     custom: state.custom,
     advancedOpen: state.advancedOpen,
-    groundOn: state.groundOn,
     refNote: state.refNote,
     brandOn: state.brandOn,
     brandStyleGuide: state.brandStyleGuide,

@@ -13,6 +13,7 @@ import { extractHtml } from "../extractHtml";
 import * as store from "../store";
 import {
   getKeyManager,
+  withKeyRotation,
   cfgInt,
   DESCRIBE_PROMPT,
   DESCRIBE_REF_PROMPT,
@@ -52,13 +53,6 @@ interface RunReimagineOptions {
   prompts?: { presets?: unknown; custom?: string };
   reference?: ReferenceOptions | null;
   brandStyleGuide?: string | null;
-  /**
-   * Feed VISION models a full written inventory of the screenshot alongside the image,
-   * so they reimagine from a complete understanding instead of dropping/misreading
-   * content in one pass. Reuses the caption already generated for text-only models
-   * (one shared vision call per input); text-only models are grounded by definition.
-   */
-  groundWithDescription?: boolean;
   runId?: string;
   label?: string;
 }
@@ -144,10 +138,6 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
   // Optional brand style guide: appended to every job's prompt (vision and text-only alike).
   const brandStyleGuide = String(opts.brandStyleGuide || "").trim();
 
-  // Optional grounding: give vision models a full written inventory of the screenshot
-  // (the same caption text-only models already get) so they don't drop/misread content.
-  const grounding = !!opts.groundWithDescription;
-
   if (!inputItems.length) throw new Error("No inputs matched the selection (input/ folder empty?).");
   if (!models.length) throw new Error("No models matched the selection.");
   if (!prompts.length) throw new Error("No prompts resolved.");
@@ -164,14 +154,25 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
 
   // Pick a vision helper for short run labels and, when needed, captions for
   // text-only models. Prefer one already selected for the run.
+  //
+  // Preference order is by LIVE keys, not configured ones: a pool whose keys are all
+  // revoked or out of balance still has a non-zero poolSize, and picking that helper
+  // meant every caption came back null. Fall back to configured-but-cooling only if
+  // nothing has a usable key right now, since a cooldown can lapse mid-run.
+  function pickVisionHelper(usable: (m: Model) => boolean): Model | null {
+    const eligible = (m: Model) => m.vision !== false && usable(m);
+    return (
+      models.find(eligible) ||
+      loadModels().find((m) => {
+        if (m.enabled === false) return false;
+        km.registerPool(m.keyEnv);
+        return eligible(m);
+      }) ||
+      null
+    );
+  }
   const visionHelper: Model | null =
-    models.find((m) => m.vision !== false && km.poolSize(m.keyEnv) > 0) ||
-    loadModels().find((m) => {
-      if (m.vision === false || m.enabled === false) return false;
-      km.registerPool(m.keyEnv);
-      return km.poolSize(m.keyEnv) > 0;
-    }) ||
-    null;
+    pickVisionHelper((m) => km.availableCount(m.keyEnv) > 0) || pickVisionHelper((m) => km.poolSize(m.keyEnv) > 0);
 
   function fallbackRunSummary(): RunSummaryInfo {
     const input = inputItems[0] as InputItem;
@@ -185,41 +186,48 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     if (opts.label) return { ...base, source: "label" };
     if (mock) return base;
     if (!visionHelper) return { ...base, source: "input" };
-    let acq: Awaited<ReturnType<KeyManager["acquireOrWait"]>> | null = null;
-    try {
-      acq = await km.acquireOrWait(visionHelper.keyEnv, 5000, signal);
-      if (!acq.available) return { ...base, source: "input" };
-      const r = await getAdapter(visionHelper, { mock: false }).call({
-        model: { ...visionHelper, maxTokens: 48 },
-        apiKey: acq.key as string,
-        systemContract: "You write concise UI inventory labels. Output only the label.",
-        userPrompt: SHORT_LABEL_PROMPT,
-        images: imagesFor(input),
-        timeoutMs,
-        signal,
-        promptLabel: "run-label",
-        inputName: input.name,
-      });
-      km.report(visionHelper.keyEnv, acq.keyId as string, { errorClass: CLASS.OK });
-      const title = cleanRunTitle(r.text);
-      return title ? { title, source: "ai", inputId: input.id, by: visionHelper.id } : { ...base, source: "input" };
-    } catch (err) {
-      const provErr = err as ProviderError;
-      if (acq?.available && provErr && provErr.name === "ProviderError") {
-        km.report(visionHelper.keyEnv, acq.keyId as string, {
-          errorClass: provErr.errorClass || CLASS.UNKNOWN,
-          retryAfterMs: provErr.retryAfterMs || null,
-          message: provErr.message,
-        });
-      }
-      return { ...base, source: "input" };
-    }
+    const helper = visionHelper;
+    const r = await withKeyRotation(
+      km,
+      helper.keyEnv,
+      ({ apiKey }) =>
+        getAdapter(helper, { mock: false }).call({
+          model: { ...helper, maxTokens: 48 },
+          apiKey,
+          systemContract: "You write concise UI inventory labels. Output only the label.",
+          userPrompt: SHORT_LABEL_PROMPT,
+          images: imagesFor(input),
+          timeoutMs,
+          signal,
+          promptLabel: "run-label",
+          inputName: input.name,
+        }),
+      { signal },
+    );
+    const title = r ? cleanRunTitle(r.text) : "";
+    return title ? { title, source: "ai", inputId: input.id, by: helper.id } : { ...base, source: "input" };
   }
 
-  // A vision helper captions the screenshot when a text-only model needs it OR when
-  // grounding is on (vision models then get the caption as a completeness checklist).
+  // GROUNDING. A vision helper captions the screenshot once per input, and every job gets
+  // that caption: a text-only model as its only view of the UI, a vision model as a
+  // completeness checklist alongside the image it can already see. So every run is
+  // grounded and there is no ungrounded path left.
+  //
+  // This used to be a per-run toggle defaulted OFF. It was measured head to head on
+  // 2026-07-28 (2 screenshots x 5 vision models x 2 prompts x 2 variants = 39 paired
+  // outputs, scored on the post-JS DOM — NOT the source, since several models build their
+  // UI from a JS array — against the content actually visible in the original). Grounding
+  // took 9 of the 20 model-and-prompt cells to 1, the rest tied: 100% content coverage vs
+  // 86.8% on a dense picker panel, 95.2% vs 91.0% on a settings panel. Its one loss was a
+  // model truncating at its token limit under BOTH conditions. Blind judging over the same
+  // pairs put grounded ahead 24-15 overall and 21-5 on fidelity, with 17 dropped elements
+  // against 51 and 44 fabrications against 87; ungrounded won on design flourish (23-13),
+  // largely by inventing plausible-looking content. For a tool that reimagines YOUR screen,
+  // a prototype that silently deletes a nav tab or invents metrics is the worse failure.
+  // The entire cost is one shared caption call per input (~25s on a 20-job run; nothing
+  // measurable against output-token spend), so there was nothing left for a setting to decide.
   const anyTextOnly = models.some((m) => m.vision === false);
-  const describer = anyTextOnly || grounding ? visionHelper : null;
+  const describer = visionHelper;
 
   const runId = opts.runId || store.newRunId(opts.label);
   const jobs = buildJobs({ inputItems, models, prompts, variants, variantsByModel });
@@ -245,7 +253,10 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       poolLimits: Object.fromEntries(poolLimits),
       maxImagesPerInput,
       reference: referenceImages.length ? { images: referenceRels, count: referenceImages.length, note: referenceNote || null } : null,
-      grounded: grounding,
+      // Always true now. Kept on the manifest so a run stays self-describing and so runs
+      // recorded before 2026-07-28 (which carry `false`, or nothing at all) are still
+      // distinguishable from current ones when comparing old output against new.
+      grounded: true,
     },
     ...(thumb ? { thumb } : {}),
     inputs: inputItems.map((i) => ({ id: i.id, name: i.name, type: i.type, imageCount: i.imageCount, preview: i.preview, images: i.images })),
@@ -272,25 +283,27 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     const p = (async () => {
       if (mock) return `[mock caption of ${input.name}]`;
       if (!describer) return null;
-      try {
-        const acq = await km.acquireOrWait(describer.keyEnv, 5000, signal);
-        if (!acq.available) return null;
-        const r = await getAdapter(describer, { mock: false }).call({
-          model: { ...describer, maxTokens: 1500 },
-          apiKey: acq.key as string,
-          systemContract: "You are a meticulous UI analyst. Output a thorough plain-text description only.",
-          userPrompt: DESCRIBE_PROMPT,
-          images: imagesFor(input),
-          timeoutMs,
-          signal,
-          promptLabel: "caption",
-          inputName: input.name,
-        });
-        km.report(describer.keyEnv, acq.keyId as string, { errorClass: CLASS.OK });
-        return r.text;
-      } catch (_) {
-        return null; // text-only model will note it ran without a caption
-      }
+      const helper = describer;
+      // Rotates through the helper's keys: a dead key here used to silently cost the
+      // job its caption (text-only models then ran blind, grounded jobs ungrounded).
+      const r = await withKeyRotation(
+        km,
+        helper.keyEnv,
+        ({ apiKey }) =>
+          getAdapter(helper, { mock: false }).call({
+            model: { ...helper, maxTokens: 1500 },
+            apiKey,
+            systemContract: "You are a meticulous UI analyst. Output a thorough plain-text description only.",
+            userPrompt: DESCRIBE_PROMPT,
+            images: imagesFor(input),
+            timeoutMs,
+            signal,
+            promptLabel: "caption",
+            inputName: input.name,
+          }),
+        { signal },
+      );
+      return r ? r.text : null; // null → the job notes it ran without a caption
     })();
     descCache.set(input.id, p);
     return p;
@@ -305,25 +318,25 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
       if (!referenceImages.length) return null;
       if (mock) return `[mock style caption of ${referenceImages.length} reference image(s)]`;
       if (!describer) return null;
-      try {
-        const acq = await km.acquireOrWait(describer.keyEnv, 5000, signal);
-        if (!acq.available) return null;
-        const r = await getAdapter(describer, { mock: false }).call({
-          model: { ...describer, maxTokens: 1200 },
-          apiKey: acq.key as string,
-          systemContract: "You are a meticulous design analyst. Output a thorough plain-text description of visual style only.",
-          userPrompt: DESCRIBE_REF_PROMPT,
-          images: referenceImages,
-          timeoutMs,
-          signal,
-          promptLabel: "ref-caption",
-          inputName: "reference",
-        });
-        km.report(describer.keyEnv, acq.keyId as string, { errorClass: CLASS.OK });
-        return r.text;
-      } catch (_) {
-        return null;
-      }
+      const helper = describer;
+      const r = await withKeyRotation(
+        km,
+        helper.keyEnv,
+        ({ apiKey }) =>
+          getAdapter(helper, { mock: false }).call({
+            model: { ...helper, maxTokens: 1200 },
+            apiKey,
+            systemContract: "You are a meticulous design analyst. Output a thorough plain-text description of visual style only.",
+            userPrompt: DESCRIBE_REF_PROMPT,
+            images: referenceImages,
+            timeoutMs,
+            signal,
+            promptLabel: "ref-caption",
+            inputName: "reference",
+          }),
+        { signal },
+      );
+      return r ? r.text : null;
     })();
     return refCaptionPromise;
   }
@@ -350,12 +363,14 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
     // a failure here just means it keeps that default, so nothing needs to surface.
     .catch(() => {});
 
-  // Pre-warm captions so the first job doesn't stall on them: needed for text-only
-  // models and for grounding. The reference caption is text-only-only (vision models
-  // see the reference image directly, so they never need it described).
-  if (anyTextOnly || grounding) {
-    for (const input of inputItems) describeInput(input);
-  }
+  // Pre-warm captions so the first jobs don't stall on them. Every job is grounded now, so
+  // every input needs one, and firing all of them at once would put one concurrent vision
+  // request per input against a single helper pool — a burst the job scheduler itself would
+  // never allow (it caps each pool at poolConcurrency). Warm the same number the scheduler
+  // would run, then let the rest be pulled in lazily: describeInput caches its promise, so a
+  // job that arrives before its input is warmed simply starts the call itself and every
+  // later job for that input shares it.
+  for (const input of inputItems.slice(0, poolConcurrency)) describeInput(input);
   if (anyTextOnly && referenceImages.length) describeReference();
 
   const scheduledResults = await runJobsByPool<Job>(jobs, {
@@ -395,18 +410,17 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
         if (hasVision) {
           images = imagesFor(input);
           if (!images.length) job.note = "no images loaded";
-          // Optional grounding: a full written inventory of the screenshot rides along
-          // with the image so the model reimagines every element instead of dropping or
-          // inventing content. One shared caption per input (cached); its wait is charged
-          // to prepMs, not to generation time, so grounded rows stay comparable.
-          if (grounding) {
-            const capStart = Date.now();
-            caption = await describeInput(input);
-            prepMs += Date.now() - capStart;
-            if (caption) {
-              effectivePrompt += groundingBlock(caption);
-              if (!job.note) job.note = `grounded with a full description of the original${describer ? ` via ${describer.id}` : ""}`;
-            }
+          // Grounding: a full written inventory of the screenshot rides along with the
+          // image so the model reimagines every element instead of dropping or inventing
+          // content. One shared caption per input (cached); its wait is charged to prepMs,
+          // not to generation time, so a job's reported speed stays comparable to a
+          // text-only model's, which pays the same wait.
+          const capStart = Date.now();
+          caption = await describeInput(input);
+          prepMs += Date.now() - capStart;
+          if (caption) {
+            effectivePrompt += groundingBlock(caption);
+            if (!job.note) job.note = `grounded with a full description of the original${describer ? ` via ${describer.id}` : ""}`;
           }
           // Style reference rides along at the END of the image list; the prompt
           // tells the model those trailing images are direction, not the product.
@@ -436,8 +450,10 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
         job.startedAt = new Date().toISOString();
         onProgress({ type: "job", runId, job });
 
-        const poolSize = km.poolSize(model.keyEnv);
-        const maxAttempts = Math.max(1, Math.min(poolSize || 1, 6));
+        // One attempt per key in the pool (bounded by MAX_KEY_ATTEMPTS). acquire()
+        // already skips keys in cooldown, so a healthy pool never spends more than one
+        // attempt; only a pool full of dead/exhausted keys works through the budget.
+        const maxAttempts = km.attemptBudget(model.keyEnv);
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           if (signal?.aborted) {

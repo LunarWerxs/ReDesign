@@ -2,13 +2,73 @@
 // env-config parsing, captioning/labeling prompt text, and the prompt-text
 // helpers used to splice style-reference instructions into a job's prompt.
 
-import { KeyManager } from "../keyManager";
+import { CLASS, KeyManager } from "../keyManager";
+import type { ProviderError } from "../providers";
 
 // One shared KeyManager per process so cooldowns/health persist across runs.
 let _km: KeyManager | null = null;
 function getKeyManager(): KeyManager {
   if (!_km) _km = new KeyManager();
   return _km;
+}
+
+interface KeyAttemptContext {
+  apiKey: string;
+  attempt: number;
+  mask: string;
+}
+
+interface KeyRotationOptions {
+  /** Cap on attempts. Defaults to the pool's own budget (see KeyManager.attemptBudget). */
+  maxAttempts?: number;
+  /** How long acquire() may wait for a cooling key before giving up. */
+  waitMs?: number;
+  signal?: AbortSignal | null;
+}
+
+/**
+ * Run `attempt` against a key pool, rotating to a DIFFERENT key whenever the provider
+ * fails in a way a key could be responsible for (401 dead, 402 out of balance, 429,
+ * 5xx, network). One dead key must never fail a request while healthy keys sit unused.
+ *
+ * Every outcome is reported back to the KeyManager, so a dead key is cooled off and
+ * skipped for the rest of the run (and, via _propagate, in its other pools too).
+ *
+ * Returns null when the pool is empty, every usable key was tried, the caller aborted,
+ * or the failure was NOT the key's fault (a 400 / content problem — retrying that on a
+ * different key just burns quota to get the same answer).
+ */
+async function withKeyRotation<T>(
+  km: KeyManager,
+  pool: string,
+  attempt: (ctx: KeyAttemptContext) => Promise<T>,
+  opts: KeyRotationOptions = {},
+): Promise<T | null> {
+  const signal = opts.signal ?? null;
+  const waitMs = opts.waitMs ?? 5000;
+  const budget = km.attemptBudget(pool, opts.maxAttempts);
+  for (let i = 1; i <= budget; i++) {
+    if (signal?.aborted) return null;
+    const acq = await km.acquireOrWait(pool, waitMs, signal);
+    if (!acq.available) return null;
+    try {
+      const out = await attempt({ apiKey: acq.key as string, attempt: i, mask: acq.mask as string });
+      km.report(pool, acq.keyId as string, { errorClass: CLASS.OK });
+      return out;
+    } catch (err) {
+      if (signal?.aborted) return null;
+      const provErr = err as ProviderError;
+      const isProvider = provErr && provErr.name === "ProviderError";
+      km.report(pool, acq.keyId as string, {
+        errorClass: isProvider ? provErr.errorClass : CLASS.BAD_REQUEST, // don't blame the key for our bug
+        retryAfterMs: isProvider ? provErr.retryAfterMs : null,
+        message: provErr?.message,
+      });
+      if (!isProvider || !provErr.retryable) return null;
+      // else: the key is now cooling, loop around and acquire the next one
+    }
+  }
+  return null;
 }
 
 function cfgInt(name: string, def: number): number {
@@ -91,11 +151,11 @@ function brandStyleGuideBlock(guide: string): string {
   );
 }
 
-// Grounding block: a full written inventory of the screenshot, appended to a VISION
-// model's prompt when the "ground with description" toggle is on. The model can already
-// see the image; this is a completeness checklist so it stops quietly dropping or
-// inventing content in a single perceive-and-redesign pass. Deliberately does NOT ask it
-// to preserve layout — it is still reimagining, just from a complete understanding.
+// Grounding block: a full written inventory of the screenshot, appended to every VISION
+// model's prompt. The model can already see the image; this is a completeness checklist so
+// it stops quietly dropping or inventing content in a single perceive-and-redesign pass.
+// Deliberately does NOT ask it to preserve layout — it is still reimagining, just from a
+// complete understanding.
 function groundingBlock(caption: string): string {
   return (
     "\n\n--- INVENTORY OF THE ORIGINAL (for completeness, not layout) ---\n" +
@@ -110,6 +170,7 @@ function groundingBlock(caption: string): string {
 
 export {
   getKeyManager,
+  withKeyRotation,
   cfgInt,
   DESCRIBE_PROMPT,
   DESCRIBE_REF_PROMPT,
@@ -121,3 +182,4 @@ export {
   brandStyleGuideBlock,
   groundingBlock,
 };
+export type { KeyAttemptContext, KeyRotationOptions };

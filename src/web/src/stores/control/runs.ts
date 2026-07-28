@@ -58,6 +58,41 @@ if (typeof window !== 'undefined') {
 // round trip that scans recent runs server-side, coalesce into one request.
 const ESTIMATE_DEBOUNCE_MS = 300;
 
+// ── Stale progress card ───────────────────────────────────────────────────────
+// `redesign.focused-run` persists which run the progress card was watching, so a
+// reload mid-run puts you back where you were. That pointer has no expiry, so
+// opening the app days later restored a card whose jobs were all long since done —
+// it reads as "a run just finished" when nothing is happening at all.
+//
+// A run that finished while you were away is still worth showing for a short
+// window (that IS the reload-recovery case). Past it, the run belongs in history,
+// not on the live card, so the card starts empty. Only ever applied to FINISHED
+// runs: anything still queued/running is restored regardless of age.
+const STALE_CARD_MS = 5 * 60 * 1000;
+
+interface DatedRun {
+  status?: string | null;
+  finishedAt?: string | null;
+  createdAt?: string;
+}
+
+/**
+ * True when a finished run is too old to still deserve the live progress card.
+ *
+ * `finishedAt` is the real signal; `createdAt` is the fallback for a manifest written
+ * before finishedAt existed (an old run's start time is far enough in the past to date
+ * it correctly anyway). A run carrying NEITHER timestamp is left alone — an undateable
+ * run must not be expired on a guess.
+ */
+function isStaleFinishedRun(run?: DatedRun | null): boolean {
+  if (!run || isActiveStatus(run.status)) return false;
+  const stamp = run.finishedAt || run.createdAt;
+  const at = stamp ? Date.parse(stamp) : Number.NaN;
+  if (!Number.isFinite(at)) return false;
+  // Clock skew that dates a run in the future must not read as stale.
+  return Math.max(0, Date.now() - at) > STALE_CARD_MS;
+}
+
 export function createRunsActions(state: ControlState, deps: RunsDeps) {
   let estimateTimer: ReturnType<typeof setTimeout> | null = null;
   let estimateSeq = 0;
@@ -344,10 +379,22 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
    * Re-attach after a reload. The server keeps running with the browser closed and
    * writes every run's manifest to disk, so anything still queued/running is picked
    * back up live, and the last run being watched is restored read-only if it ended
-   * while the tab was away.
+   * while the tab was away — but only while that is still recent news, see
+   * STALE_CARD_MS.
    */
   async function resumeRuns() {
-    const remembered = state.focusedRunId.value;
+    let remembered = state.focusedRunId.value;
+    // Expire the pointer before anything can act on it, if the run it names finished
+    // long enough ago that the card would just be showing old news. The summary list
+    // is a disk read that already carries finishedAt, so this normally costs no extra
+    // request. Only applies to a run we aren't already tracking in this session — a
+    // card the user is actively looking at is theirs to keep.
+    if (remembered && !state.trackedRuns.has(remembered)) {
+      if (isStaleFinishedRun(state.runs.value.find((r) => r.runId === remembered))) {
+        focusRun(null);
+        remembered = null;
+      }
+    }
     for (const summary of state.runs.value) {
       if (!isActiveStatus(summary.status)) continue;
       // bootstrap() runs again on every Control remount, and this summary list is
@@ -377,6 +424,10 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     if (!state.runs.value.some((r) => r.runId === remembered)) return focusRun(null); // deleted since
     try {
       const manifest = await api.run(remembered);
+      // Second staleness gate, for a run the summary list hadn't caught up on. The
+      // manifest is authoritative for both status and finishedAt, so an old finished
+      // run is dropped here rather than ingested into a card nobody asked for.
+      if (isStaleFinishedRun(manifest)) return focusRun(null);
       ingestManifest(manifest);
       // The run list is a disk read and can lag the runner by a beat, so a run it
       // reported as finished may still be going. Attach if this fresher read says so.
@@ -445,7 +496,6 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       const combined = [guideText, ...attachmentBlocks].join('').trim();
       if (combined) body.brandStyleGuide = combined;
     }
-    if (state.groundOn.value) body.groundWithDescription = true;
 
     // Runs already in flight stay tracked: the server queues this one behind them
     // and streams its position, so the queue builds up instead of being refused.

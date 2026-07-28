@@ -207,9 +207,6 @@ export default {
     customPlaceholder: 'Optional. Runs in addition to the prompt presets you pick.',
     brandStyleGuide: 'Brand style guide',
     brandStyleGuideDescription: 'A brand brief (colors, fonts, voice) every generation must follow. Remembered across runs.',
-    ground: 'Ground with description',
-    groundDescription:
-      'Have a vision model write a full inventory of the screenshot first, then hand it to every image model so they capture every element and drop less. Best for faithful refreshes; can make bold reimaginings more conservative. Adds one vision call per input.',
     brandStyleGuidePlaceholder:
       'Paste your brand style guide: colors, typography, tone of voice, spacing, component rules… Applied to every model and prompt, and remembered for future runs.',
     brandStyleGuideSaveDefault: 'Save as default',

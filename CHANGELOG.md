@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.5.0] - 2026-07-28
+
+### Changed
+
+- Ground every run against a written inventory of the screenshot, and retire the "Ground with
+  description" toggle (along with the CLI `--ground` flag and the MCP `ground` argument). A
+  head-to-head test over two screenshots, five vision models, two prompts and two variants gave
+  grounding 9 of the 20 model-and-prompt matchups on content fidelity against 1, the rest tied and
+  the single loss going to a model that was truncating at its token limit under both conditions. It
+  kept all of a dense panel's content where ungrounded runs kept 87%, and blind judging over the
+  same 39 output pairs preferred it overall, with a third as many dropped elements and half as many
+  fabricated ones. The cost is one shared description call per input, so there was nothing left for
+  a setting to decide.
+
+### Fixed
+
+- Rotate to another API key when a generation fails on a dead or exhausted one, instead of failing
+  the request while healthy keys sit unused. The screenshot-description and run-naming calls used to
+  try a single key and silently give up, which cost a run its grounding; they now rotate like the
+  main generation loop, which itself now gets one attempt per key in the pool rather than a fixed
+  six. A model whose keys are all revoked is also no longer chosen to describe screenshots.
+- Clear the run progress card on load when the run it was watching finished more than five minutes
+  ago, so opening the app later starts on an empty card instead of replaying an old run's results.
+  A run still queued or generating is always restored, however long the app was closed.
+- Raise Qwen 3.5 Plus's output limit, which was half the rest of the fleet and truncated most of its
+  pages mid-document.
+
 ## [1.4.1] - 2026-07-26
 
 ### Added

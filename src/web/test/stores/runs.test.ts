@@ -437,6 +437,88 @@ describe("resumeRuns", () => {
     expect(state.trackedRuns.get("run1")?.total).toBe(99);
     expect(FakeEventSource.open.size).toBe(1); // no duplicate stream
   });
+
+  it("clears the progress card for a run that finished long ago", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [summary("old", "done", { finishedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() })];
+
+    await actions.resumeRuns();
+
+    expect(state.focusedRunId.value).toBeNull();
+    expect(state.runId.value).toBeNull();
+    expect(apiMock.run).not.toHaveBeenCalled(); // the summary alone settled it
+  });
+
+  it("still restores a run that finished moments ago", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [summary("old", "done", { finishedAt: new Date(Date.now() - 30 * 1000).toISOString() })];
+    apiMock.run.mockResolvedValueOnce(
+      manifest("old", "done", { counts: { total: 2, done: 2, ok: 2, error: 0, skipped: 0 }, jobs: [{ id: "j1", status: "ok" }] as Manifest["jobs"] }),
+    );
+
+    await actions.resumeRuns();
+
+    expect(state.runId.value).toBe("old");
+    expect(streaming("old")).toBe(false);
+  });
+
+  it("never expires a run that is still running, however old", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [
+      summary("old", "running", { createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }),
+    ];
+
+    await actions.resumeRuns();
+
+    expect(streaming("old")).toBe(true);
+    expect(state.runId.value).toBe("old");
+  });
+
+  it("falls back to createdAt when the manifest predates finishedAt", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [
+      summary("old", "done", { createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }),
+    ];
+
+    await actions.resumeRuns();
+
+    expect(state.focusedRunId.value).toBeNull();
+  });
+
+  it("leaves an undateable run alone rather than expiring it on a guess", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [summary("old", "done")]; // neither finishedAt nor createdAt
+    apiMock.run.mockResolvedValueOnce(manifest("old", "done")); // also undateable
+
+    await actions.resumeRuns();
+
+    expect(state.runId.value).toBe("old"); // conservative fallback: not expired on a guess
+  });
+
+  // The summary list still says "running" (it lagged), so resumeRuns's subscribe loop
+  // tracks and streams "old" before the *second* (manifest) staleness gate ever runs —
+  // `if (remembered && state.trackedRuns.has(remembered)) return;` fires first and the
+  // function returns early. The manifest's finishedAt is therefore never even fetched:
+  // this path cannot reach the manifest gate, so the run is not expired.
+  it("does not reach the manifest gate when the summary list still says running", async () => {
+    const { state, actions } = harness();
+    state.focusedRunId.value = "old";
+    state.runs.value = [summary("old", "running")];
+    apiMock.run.mockResolvedValueOnce(
+      manifest("old", "done", { finishedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString() }),
+    );
+
+    await actions.resumeRuns();
+
+    expect(apiMock.run).not.toHaveBeenCalled();
+    expect(streaming("old")).toBe(true);
+    expect(state.focusedRunId.value).toBe("old");
+  });
 });
 
 describe("deleteRuns", () => {
