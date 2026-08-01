@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.5.2] - 2026-08-01
+
+### Fixed
+
+- Put a toast's close button in its top-right corner. vue-sonner defaults it to the top-LEFT,
+  where it reads as a stray control floating beside the card rather than that card's own dismiss,
+  and it disagreed with every other dismiss in the app (dialogs, sheets), which all sit top-right.
+  It remains a default rather than a hard-code, so a caller can still move it back.
+- Handle the tray host's async rebuild more reliably, and show the dev tree correctly alongside a
+  packaged install.
+
+### Internal
+
+- Take the shared UI kit's toggle contrast fix and its grip-drag reset glide. Neither component
+  has a consumer in this app yet; the copies are carried so they stay in step with the kit.
+
 ## [1.5.1] - 2026-07-28
 
 ### Fixed
