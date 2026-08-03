@@ -1,6 +1,6 @@
 /**
  * Boot the Hono app on Bun.serve. Dynamic-port + instance-pointer pattern (matches RepoYeti and
- * ccmanagerui): the daemon hops to a free port when the preferred one is held by a foreign
+ * AgentHydra): the daemon hops to a free port when the preferred one is held by a foreign
  * process, records where it actually bound in ~/.redesign/runtime.json (src/instance.ts), and
  * exits early if a live instance is already answering there. SIGINT/SIGTERM graceful shutdown and
  * the startup console banner (models/keys loaded, settled-orphan-runs note, "web UI not built"
