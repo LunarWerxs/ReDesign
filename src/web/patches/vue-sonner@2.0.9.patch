@@ -1,0 +1,14 @@
+diff --git a/package.json b/package.json
+index 6739714a3ac43a809c57a2d8ba35761b004c69b5..c19943ae8fbc04bf038808d629b6b5d2b415ef06 100644
+--- a/package.json
++++ b/package.json
+@@ -82,7 +82,8 @@
+   "peerDependencies": {
+     "@nuxt/kit": "^4.0.3",
+     "@nuxt/schema": "^4.0.3",
+-    "nuxt": "^4.0.3"
++    "nuxt": "^4.0.3",
++    "vue": "^3.0.0"
+   },
+   "peerDependenciesMeta": {
+     "@nuxt/kit": {

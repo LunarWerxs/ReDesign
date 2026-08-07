@@ -23,7 +23,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "start": "bun run src/index.ts serve",
     "serve": "bun run src/index.ts serve",
-    "build": "npm --prefix src/web install && npm --prefix src/web run build",
+    "build": "bun install --cwd src/web && npm --prefix src/web run build",
     "build:web": "npm --prefix src/web run build",
     "dist": "bun run scripts/build.ts",
     "update-pricing": "bun run scripts/update-pricing.ts",

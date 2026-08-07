@@ -32,6 +32,7 @@
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.1.0",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/compiler-sfc": "^3.5.39",
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "happy-dom": "^20.10.6",
@@ -41,5 +42,8 @@
     "vite": "^8.1.3",
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.6"
+  },
+  "patchedDependencies": {
+    "vue-sonner@2.0.9": "patches/vue-sonner@2.0.9.patch"
   }
 }
