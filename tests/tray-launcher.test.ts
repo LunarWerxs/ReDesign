@@ -478,8 +478,14 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(link).toBeTruthy();
     if (!link) return;
 
-    expect(/wscript\.exe$/i.test((link.TargetPath || "").trim()) && fs.existsSync(link.TargetPath!)).toBe(true);
-    expect(samePath(link.Arguments, vbsPath)).toBe(true);
+    // The shortcut now runs the NATIVE tray host directly. wscript + Tray-Launch.vbs existed only
+    // to start PowerShell without a console flash, and the native host suppresses its own console,
+    // so both layers are gone: the daemon is created at ~25ms instead of ~475ms.
+    expect(/lunarwerx-tray\.exe$/i.test((link.TargetPath || "").trim()) && fs.existsSync(link.TargetPath!)).toBe(true);
+    // The config filename IS the per-app surface: the binary is generic and shared across apps, so
+    // a shortcut that lost this argument would start a tray host with nothing to host.
+    expect((link.Arguments || "").trim()).toBe("ReDesign-Tray.json");
+    expect(fs.existsSync(path.join(path.dirname(link.TargetPath!), (link.Arguments || "").trim()))).toBe(true);
     expect(samePath(link.WorkingDirectory, repoRoot)).toBe(true);
     expect(samePath((link.IconLocation || "").replace(/,\d+$/, ""), icoPath)).toBe(true);
   });

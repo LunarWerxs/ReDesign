@@ -1,0 +1,50 @@
+{
+  "_comment": [
+    "ReDesign's tray-host config, read by misc/lunarwerx-tray.exe (source vendored beside it in",
+    "misc/tray-host-native/). This file is the whole per-app surface; the host binary is generic and",
+    "shared, exactly as ReDesign-Tray.ps1's $TrayConfig hashtable was.",
+    "",
+    "Paths are relative to THIS file unless absolute. %VAR% expands an environment variable,",
+    "%VAR|fallback% supplies a default, and a leading ~ is the user profile."
+  ],
+
+  "displayName": "RēDesign",
+  "serviceName": "redesign",
+  "menuOpenLabel": "Open RēDesign",
+  "iconFile": "ReDesign.ico",
+  "appRoot": "..",
+
+  "_mutex": [
+    "{ROOTHASH} = the first 16 uppercase hex chars of SHA-256 over the lowercased resolved root, so",
+    "a SECOND CHECKOUT on this machine gets its own tray host instead of colliding on a fixed global",
+    "name. The host computes it the same way the PowerShell adapter did, so both agree."
+  ],
+  "mutexName": "Local\\redesign.tray.{ROOTHASH}",
+
+  "port": 5178,
+  "urlHost": "127.0.0.1",
+  "infoFile": "%REDESIGN_HOME|~\\.redesign%\\runtime.json",
+  "sentinelFile": "%REDESIGN_HOME|~\\.redesign%\\shutdown.request",
+
+  "startCommand": "{RUNTIME} run src\\index.ts serve",
+  "runtimeCandidates": ["~\\.bun\\bin\\bun.exe", "%APPDATA%\\npm\\node_modules\\bun\\bin\\bun.exe"],
+  "runtimeFallback": "bun",
+
+  "firstRun": [{ "missing": "src\\web\\dist\\index.html", "run": "misc\\Rebuild.bat" }],
+
+  "rebuildCommand": "misc\\Rebuild.bat",
+  "rebuildLogName": "ReDesign-Rebuild.log",
+  "isDevTree": "%REDESIGN_DEV%",
+
+  "_stray": [
+    "warn, NOT attach: a live daemon with no tray icon is a headless orphan here, and adopting it",
+    "would hide the thing the user has to go and stop."
+  ],
+  "onStrayDaemon": "warn",
+
+  "restartRetries": 1,
+  "usePortFreeWait": true,
+
+  "portableWindowSize": { "width": 840, "height": 760 },
+  "portableWindowSizeHint": true
+}
