@@ -17,6 +17,7 @@ import type {
   ReferenceUploadResponse,
   RunDeleteResponse,
   RunRequest,
+  RunRetryResponse,
   RunSummary,
   SpendToDate,
   SyncStatus,
@@ -56,6 +57,10 @@ export const screenshotUrl = (rel: string) => `/api/output/screenshot?file=${enc
 // → rendered output preview → 404). See src/thumbnail.ts. Immutable-cached, so it's fetched once.
 export const runThumbnailUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/thumbnail`;
 export const eventsUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`;
+// A zip of the run's successful outputs. Binary, so this is a URL for a plain <a href> download,
+// never routed through httpJson (see components/app/control/ViewSettings.vue) — the route is
+// same-origin guarded, and a same-origin anchor navigation satisfies that guard on its own.
+export const runDownloadUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/download`;
 
 export const api = {
   bootstrap: () => request<BootstrapResponse>('/api/bootstrap'),
@@ -77,6 +82,8 @@ export const api = {
     request<AppSettings>('/api/settings', { ...postJson({ portableMode: enabled }), method: 'PUT' }),
   setHideTrayIcon: (enabled: boolean) =>
     request<AppSettings>('/api/settings', { ...postJson({ hideTrayIcon: enabled }), method: 'PUT' }),
+  setOutputRetentionDays: (days: number) =>
+    request<AppSettings>('/api/settings', { ...postJson({ outputRetentionDays: days }), method: 'PUT' }),
   openPortableWindow: () =>
     request<{ ok: true; browser: string } | { ok: false; reason: 'no-browser' | 'spawn-failed' }>(
       '/api/portable-window',
@@ -122,6 +129,11 @@ export const api = {
   reorderQueue: (order: string[]) => request<{ order: string[] }>('/api/queue/reorder', postJson({ order })),
   cancelRun: (id: string) =>
     request<{ ok: boolean }>(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  // Re-runs only failed/skipped/cancelled jobs from `id`; `jobIds` narrows to a subset (a
+  // single card's retry), omitted retries every non-ok job in the run. 409s if that run is
+  // still going — see src/http/routes/runs.ts.
+  retryRun: (id: string, body: { jobIds?: string[]; autoStart?: boolean }) =>
+    request<RunRetryResponse>(`/api/runs/${encodeURIComponent(id)}/retry`, postJson(body)),
   healthCheck: (opts?: { signal?: AbortSignal }) =>
     request<HealthCheckResponse>('/api/health-check', { ...postJson({ models: 'all' }), signal: opts?.signal }),
   openOutput: (file: string, target: 'file' | 'folder') =>

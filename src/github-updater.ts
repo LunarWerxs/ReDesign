@@ -14,6 +14,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import type { UpdateApplyResult, UpdateStatus } from "./updater-engine.mjs";
@@ -156,6 +157,45 @@ async function extract(archive: string, destination: string): Promise<void> {
   }
 }
 
+async function sha256File(file: string): Promise<string> {
+  const hash = createHash("sha256");
+  hash.update(new Uint8Array(await Bun.file(file).arrayBuffer()));
+  return hash.digest("hex");
+}
+
+/**
+ * The digest SHA256SUMS.txt records for `assetName`, or null when the file or the entry is
+ * missing. Every release publishes this file (see .github/workflows/release.yml "Build checksums"),
+ * where it is generated with `sha256sum` and stripped down to bare asset names.
+ *
+ * This is the ONLY thing standing between a hijacked release and code execution: without it the
+ * next check downloads whatever the API points at, and verifyVersion() below "validates" it by
+ * RUNNING it. So a missing or unparseable sums file is a hard stop, never a warn-and-continue.
+ */
+async function expectedSha256(release: Release | null, assetName: string): Promise<string | null> {
+  const sums = (release?.assets ?? []).find((a) => a.name === "SHA256SUMS.txt");
+  if (!sums) return null;
+  let text: string;
+  try {
+    const response = await fetch(sums.browser_download_url, {
+      headers: { accept: "text/plain", "user-agent": `${SERVICE}/${VERSION}` },
+      redirect: "follow",
+    });
+    if (!response.ok) return null;
+    text = await response.text();
+  } catch {
+    return null;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    // `sha256sum` output: "<64 hex>  <name>", with a leading '*' on the name in binary mode.
+    const match = /^([a-fA-F0-9]{64})\s+\*?(.+?)\s*$/.exec(line.trim());
+    if (!match) continue;
+    const [, digest, name] = match;
+    if (digest && name && basename(name) === assetName) return digest.toLowerCase();
+  }
+  return null;
+}
+
 function verifyVersion(executable: string, expected: string): Promise<boolean> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -206,9 +246,11 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
   if (!status.updateAvailable) return failure("already up to date");
 
   const remoteVersion = (status.remoteCommit ?? "").replace(/^v/, "");
+  let release: Release | null = null;
   let asset: ReleaseAsset | null = null;
   try {
-    asset = assetForPlatform((await latestRelease()).assets ?? []);
+    release = await latestRelease();
+    asset = assetForPlatform(release.assets ?? []);
   } catch {}
   if (!asset) return failure(`no ${releaseTarget()} archive is attached to v${remoteVersion}`);
 
@@ -231,6 +273,21 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
     });
     if (!response.ok) return failure(`download failed (HTTP ${response.status})`);
     await Bun.write(archive, response);
+
+    // Authenticate the download BEFORE unpacking it and long before verifyVersion() executes it.
+    // Auto-update is on by default and unattended, so this check is what keeps a hijacked release
+    // from becoming silent code execution on every install.
+    const expected = await expectedSha256(release, asset.name);
+    if (!expected) {
+      return failure(`no published checksum for ${asset.name}; refusing to install v${remoteVersion}`);
+    }
+    const actual = await sha256File(archive);
+    if (actual !== expected) {
+      output.push(`checksum mismatch: expected ${expected}, got ${actual}`);
+      return failure(`${asset.name} failed its checksum; refusing to install v${remoteVersion}`);
+    }
+    output.push("checksum verified");
+
     await extract(archive, staging);
 
     const candidate = join(staging, bundledName);

@@ -2,12 +2,12 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { useStorage } from '@vueuse/core';
 import { toast } from 'vue-sonner';
-import { api, eventsUrl } from '@/lib/api';
+import { api, ApiError, eventsUrl } from '@/lib/api';
 import { toggleIn } from '@/lib/array';
 import { recordFirstStar } from '@/lib/starTally';
 import { t } from '@/i18n';
 import { useControlStore } from '@/stores/control';
-import type { InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunSummary } from '@/types';
+import type { InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunRetryResponse, RunSummary } from '@/types';
 
 export interface InputGroup {
   input: InputItem;
@@ -46,6 +46,7 @@ export const useViewerStore = defineStore('viewer', () => {
   let liveSource: EventSource | null = null;
   let liveJobIndexes = new Map<string, number>();
   let runsRequestSeq = 0;
+  let loadRequestSeq = 0;
   const confirmedDeletedRunIds = new Set<string>();
 
   const isLive = computed(
@@ -73,11 +74,14 @@ export const useViewerStore = defineStore('viewer', () => {
     // and made large matrix runs (inputs × models × prompts × variants) needlessly expensive.
     for (const job of m.jobs || []) {
       const key = itemKey(job.id, m.runId);
+      // 'skipped' jobs (no API keys configured, all keys cooling down) carry a real,
+      // actionable message in job.error — surface them alongside errors, gated behind the
+      // same showErrors preference, rather than silently dropping them like a pending job.
       if (
         hiddenModelSet.has(job.modelId) ||
         hiddenPromptSet.has(job.promptId) ||
         (!showHiddenItems.value && hiddenItemKeys.has(key)) ||
-        (job.status !== 'ok' && !(job.status === 'error' && showErrors.value))
+        (job.status !== 'ok' && !((job.status === 'error' || job.status === 'skipped') && showErrors.value))
       ) {
         continue;
       }
@@ -283,27 +287,61 @@ export const useViewerStore = defineStore('viewer', () => {
   }
 
   async function load(id: string | null) {
+    // A slow response for a run the user has since navigated away from must not resolve last
+    // and clobber whatever load() (or refreshManifest()) started after it — that would silently
+    // overwrite a newer manifest and, since acceptManifest() calls stopPoll() once a manifest
+    // looks finished, could kill the live SSE stream of the run the user actually selected.
+    // Mirrors the runsRequestSeq pattern in loadRuns() below: only the latest request wins.
+    const seq = ++loadRequestSeq;
     stopPoll();
     runId.value = id;
     if (!id) {
       acceptManifest(null);
       return;
     }
+    let next: Manifest | null;
     try {
-      acceptManifest(await api.run(id));
+      next = await api.run(id);
     } catch {
+      if (seq !== loadRequestSeq) return;
       acceptManifest(null);
       return;
     }
+    if (seq !== loadRequestSeq) return;
+    acceptManifest(next);
     startLiveUpdates(id);
   }
 
   async function refreshManifest() {
     if (!runId.value) return;
+    const seq = ++loadRequestSeq;
     try {
-      acceptManifest(await api.run(runId.value));
+      const next = await api.run(runId.value);
+      if (seq !== loadRequestSeq) return;
+      acceptManifest(next);
     } catch {
       /* transient; keep polling */
+    }
+  }
+
+  /**
+   * Re-run failed/skipped/cancelled jobs from the currently loaded run. `jobIds` narrows to a
+   * single card's retry (ErrorCard's per-job button); omitted retries every non-ok job (the
+   * run-level "Retry failed" action, ViewSettings.vue). Returns the server's `{ runIds, jobCount }`
+   * so the caller can navigate to the new run, or null on failure (a toast already explained why).
+   */
+  async function retryJobs(jobIds?: string[]): Promise<RunRetryResponse | null> {
+    if (!runId.value) return null;
+    try {
+      const result = await api.retryRun(runId.value, jobIds ? { jobIds } : {});
+      toast.success(t('runs.retryStarted', { count: result.jobCount }, result.jobCount));
+      return result;
+    } catch (e) {
+      // A 409 (this run is still going) carries a message worth showing verbatim rather than
+      // a generic one, per the retry route's contract (src/http/routes/runs.ts).
+      if (e instanceof ApiError && e.status === 409) toast.error(e.message);
+      else toast.error(t('runs.retryFailed'), { description: e instanceof Error ? e.message : String(e) });
+      return null;
     }
   }
 
@@ -359,6 +397,7 @@ export const useViewerStore = defineStore('viewer', () => {
     deleteRuns,
     load,
     refreshManifest,
+    retryJobs,
     stopPoll,
     toggleModel,
     togglePrompt,

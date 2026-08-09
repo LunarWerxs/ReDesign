@@ -43,15 +43,21 @@ function isMockUsage(usage: unknown): boolean {
  * Recognizes:
  *   - Anthropic:        { input_tokens, output_tokens }
  *   - OpenAI-compatible: { prompt_tokens, completion_tokens }
- *   - Gemini:           { promptTokenCount, candidatesTokenCount }
+ *   - Gemini:           { promptTokenCount, candidatesTokenCount, thoughtsTokenCount? }
  *   - mock adapter:     { mock: true, input_tokens, output_tokens }
  * Unrecognized/missing usage normalizes to zeros (cost math stays additive/safe).
+ *
+ * Reasoning tokens are billed as OUTPUT by every provider that charges for them, but they are
+ * reported separately: Gemini puts thinking tokens in `thoughtsTokenCount` ALONGSIDE (not inside)
+ * candidatesTokenCount, and OpenAI-compatible endpoints nest reasoning_tokens under
+ * completion_tokens_details, where it is already included in completion_tokens. So Gemini's has to
+ * be added and OpenAI's must NOT be, or the same tokens get billed twice.
  */
 function normalizeUsage(usage: unknown): NormalizedTokens {
   if (!usage || typeof usage !== "object") return { inputTokens: 0, outputTokens: 0 };
   const u = usage as Record<string, unknown>;
   const inputTokens = num(u.input_tokens ?? u.prompt_tokens ?? u.promptTokenCount);
-  const outputTokens = num(u.output_tokens ?? u.completion_tokens ?? u.candidatesTokenCount);
+  const outputTokens = num(u.output_tokens ?? u.completion_tokens ?? u.candidatesTokenCount) + num(u.thoughtsTokenCount);
   return { inputTokens, outputTokens };
 }
 
@@ -141,8 +147,11 @@ interface SpendToDateResult {
  * each run's total was already computed once by runReimagine and cached in its
  * manifest, so this doesn't re-read every job's raw usage on every call).
  */
-function spendToDate(options: store.ReadManifestOptions = {}): SpendToDateResult {
-  const runs = store.listRuns(options);
+function spendToDate(options: store.ReadManifestOptions = {}, prefetchedRuns?: store.RunSummary[]): SpendToDateResult {
+  // listRuns() readdirs OUTPUT_DIR and stats every run dir. /api/bootstrap already has that list
+  // in hand, so it passes it in rather than making the app's hottest endpoint do the same walk
+  // twice. Callers without one (the CLI, tests) keep the old behaviour.
+  const runs = prefetchedRuns ?? store.listRuns(options);
   let totalCost = 0;
   let runCount = 0;
   let anyEstimatePricing = false;

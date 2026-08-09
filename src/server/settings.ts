@@ -176,8 +176,13 @@ function setEnvKeyPool(poolName: string, keys: string[]): void {
     if (next.length && next.at(-1) !== "") next.push("");
     next.push(`${poolName}=${value}`);
   }
-  // .env holds secrets, write with owner-only permissions (0600).
-  fs.writeFileSync(ENV_FILE, next.join(eol) + (hadTrailingNewline ? eol : ""), { mode: 0o600 });
+  // .env holds every provider's keys, so write it the way util.ts's writeJSON writes state files:
+  // temp file first, then an atomic rename. A crash or a kill mid-write would otherwise truncate
+  // the file and take every pool with it. Owner-only permissions (0600) are set on the temp file
+  // so the secret is never briefly readable by anyone else.
+  const tmp = `${ENV_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, next.join(eol) + (hadTrailingNewline ? eol : ""), { mode: 0o600 });
+  fs.renameSync(tmp, ENV_FILE);
 
   const indexedRe = new RegExp(`^${escapeRegExp(poolName)}_\\d+$`);
   for (const envKey of Object.keys(process.env)) {

@@ -14,11 +14,14 @@
  */
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { toast } from 'vue-sonner';
 import {
   CheckIcon,
   CheckSquare2Icon,
   ImageOffIcon,
   Loader2Icon,
+  RotateCcwIcon,
+  SearchIcon,
   Trash2Icon,
   XIcon,
 } from '@lucide/vue';
@@ -34,14 +37,17 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { runThumbnailUrl } from '@/lib/api';
+import { api, runThumbnailUrl } from '@/lib/api';
 import { formatAgo } from '@/lib/relativeTime';
 import { useViewerStore } from '@/stores/viewer';
+import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { RunSummary } from '@/types';
 
 const store = useViewerStore();
+const controlStore = useControlStore();
 const router = useRouter();
 
 // Stamped once on setup: a reactive clock here would re-render every card on a timer for a
@@ -57,6 +63,20 @@ function isEmptyFinished(run: RunSummary) {
   return total === 0 && !(run.counts?.ok || 0);
 }
 const runs = computed(() => store.runs.filter((r) => !isEmptyFinished(r)));
+
+// Filters the gallery by run title or run id substring — an old run is otherwise findable only
+// by scrolling. Kept separate from `runs` above: selection state (deletableRuns, the "select
+// all" toolbar, the watch that prunes stale selections) stays anchored to the full list so
+// typing into the search box never silently drops an in-progress multi-select.
+const search = ref('');
+const filteredRuns = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return runs.value;
+  return runs.value.filter(
+    (run) => runTitle(run).toLowerCase().includes(q) || run.runId.toLowerCase().includes(q),
+  );
+});
+
 const selectionMode = ref(false);
 const selectedRunIds = ref<string[]>([]);
 const selectedSet = computed(() => new Set(selectedRunIds.value));
@@ -112,6 +132,30 @@ function onThumbError(run: RunSummary) {
 
 function open(runId: string) {
   void router.push({ path: '/viewer', query: { run: runId } });
+}
+
+// Track in-flight fetches so a fast double-click can't fire the same request twice.
+const runningAgainIds = ref(new Set<string>());
+
+/**
+ * Prefill the control panel from this finished run and jump to it — the user still presses Run
+ * (see stores/control/run-again.ts, which does the actual mapping once bootstrap() has re-synced
+ * the live catalog on the other side of the navigation).
+ */
+async function runAgain(run: RunSummary) {
+  if (runningAgainIds.value.has(run.runId)) return;
+  runningAgainIds.value = new Set(runningAgainIds.value).add(run.runId);
+  try {
+    const manifest = await api.run(run.runId);
+    controlStore.stageRunAgain(manifest);
+    void router.push('/');
+  } catch (e) {
+    toast.error(t('runGallery.runAgainFailed'), { description: e instanceof Error ? e.message : String(e) });
+  } finally {
+    const next = new Set(runningAgainIds.value);
+    next.delete(run.runId);
+    runningAgainIds.value = next;
+  }
 }
 
 function isSelected(runId: string) {
@@ -241,8 +285,16 @@ watch(
       </div>
     </div>
 
+    <div v-if="runs.length" class="relative mb-4">
+      <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input v-model="search" :placeholder="t('runGallery.searchPlaceholder')" class="h-8 pl-8" />
+    </div>
+
     <p v-if="!runs.length" class="py-16 text-center text-sm text-muted-foreground">
       {{ t('runGallery.empty') }}
+    </p>
+    <p v-else-if="!filteredRuns.length" class="py-16 text-center text-sm text-muted-foreground">
+      {{ t('runGallery.noMatches') }}
     </p>
 
     <div
@@ -251,7 +303,7 @@ watch(
       style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))"
     >
       <div
-        v-for="run in runs"
+        v-for="run in filteredRuns"
         :key="run.runId"
         data-run-card
         :data-run-id="run.runId"
@@ -287,22 +339,45 @@ watch(
             <CheckIcon v-if="isSelected(run.runId)" class="size-3" />
           </span>
 
-          <Tooltip v-else-if="canDelete(run)">
-            <TooltipTrigger as-child>
-              <Button
-                data-run-delete
-                variant="outline"
-                size="icon-sm"
-                class="absolute right-2 top-2 z-20 bg-background/90 text-destructive opacity-0 shadow-sm backdrop-blur transition-opacity hover:bg-destructive hover:text-destructive-foreground group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100"
-                :aria-label="t('runGallery.deleteRun', { title: runTitle(run) })"
-                @click.stop="requestDelete([run.runId])"
-                @keydown.stop
-              >
-                <Trash2Icon class="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ t('runGallery.deleteRun', { title: runTitle(run) }) }}</TooltipContent>
-          </Tooltip>
+          <div
+            v-else-if="canDelete(run)"
+            class="absolute right-2 top-2 z-20 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100"
+          >
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  data-run-again
+                  variant="outline"
+                  size="icon-sm"
+                  class="bg-background/90 text-foreground shadow-sm backdrop-blur hover:bg-accent"
+                  :disabled="runningAgainIds.has(run.runId)"
+                  :aria-label="t('runGallery.runAgain', { title: runTitle(run) })"
+                  @click.stop="runAgain(run)"
+                  @keydown.stop
+                >
+                  <Loader2Icon v-if="runningAgainIds.has(run.runId)" class="size-4 animate-spin" />
+                  <RotateCcwIcon v-else class="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('runGallery.runAgain', { title: runTitle(run) }) }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button
+                  data-run-delete
+                  variant="outline"
+                  size="icon-sm"
+                  class="bg-background/90 text-destructive shadow-sm backdrop-blur hover:bg-destructive hover:text-destructive-foreground"
+                  :aria-label="t('runGallery.deleteRun', { title: runTitle(run) })"
+                  @click.stop="requestDelete([run.runId])"
+                  @keydown.stop
+                >
+                  <Trash2Icon class="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t('runGallery.deleteRun', { title: runTitle(run) }) }}</TooltipContent>
+            </Tooltip>
+          </div>
 
           <!-- Spinner / placeholder sit BEHIND the image as absolute layers. The image itself is
                never display:none (no v-show): a `loading="lazy"` img with display:none has no

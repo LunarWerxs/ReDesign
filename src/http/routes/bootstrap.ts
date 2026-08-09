@@ -58,6 +58,10 @@ async function recordPulse(event: string, properties?: unknown): Promise<{ ok: b
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/bootstrap", (c) => {
     const settings = modelSettings();
+    // One run-directory walk, shared by the run list and the spend total (spendToDate would
+    // otherwise repeat it): this is the endpoint every page load hits.
+    const runOptions = runStoreOptions();
+    const runs = store.listRuns(runOptions);
     return c.json({
       models: settings.models,
       archivedModels: settings.archivedModels,
@@ -66,8 +70,8 @@ export function register(app: Hono, _deps: Deps): void {
       inputs: listInputs(),
       references: listReferences(),
       keys: keySnapshot(),
-      runs: store.listRuns(runStoreOptions()).slice(0, 50),
-      spend: spendToDate(runStoreOptions()),
+      runs: runs.slice(0, 50),
+      spend: spendToDate(runOptions, runs),
       providerDefaults: PROVIDER_DEFAULTS,
     });
   });

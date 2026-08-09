@@ -57,7 +57,12 @@ function getKeyPool(envName: string): string[] {
     if (re.test(k)) out.push(...String(process.env[k]).split(","));
   }
   const cleaned = out.map((s) => s.trim()).filter(Boolean);
-  return [...new Set(cleaned)];
+  const unique = [...new Set(cleaned)];
+  // Every key value the app ever loads passes through here, so this is the one place that can
+  // teach redactSecrets() about formats its prefix patterns don't recognise (Mistral's raw hex,
+  // Meta's LLM_<appid>_<secret>, and anything a future provider invents).
+  registerSecretValues(unique);
+  return unique;
 }
 
 // ---------------------------------------------------------------------------
@@ -158,20 +163,44 @@ function normalizeSelectionIds(selection: SelectionInput, { extraKeys = ["ids"] 
   return Array.isArray(ids) ? ids : [];
 }
 
+// Live key values seen by getKeyPool(), so redactSecrets() can mask formats no prefix pattern
+// matches. Shape-based patterns below still run first and still cover the common case (and the
+// case where a key was never loaded into this process), this is the backstop for the rest.
+const knownSecretValues = new Set<string>();
+
+/** Teach redactSecrets() about concrete key values. Short strings are ignored so a stray empty or
+ *  placeholder value can never turn redaction into a scrambler for ordinary text. */
+function registerSecretValues(values: Iterable<string>): void {
+  for (const value of values) {
+    const trimmed = String(value || "").trim();
+    if (trimmed.length >= 12) knownSecretValues.add(trimmed);
+  }
+}
+
 // Mask anything that looks like an API key so secrets can never reach disk,
 // logs, manifests, or HTTP responses (e.g. via an echoed provider error body).
 function redactSecrets(str?: string | null): string | null | undefined {
   if (!str) return str;
-  return String(str)
+  let out = String(str)
     .replace(/sk-ant-[A-Za-z0-9_-]{8,}/g, "sk-ant-...REDACTED")
     .replace(/sk-proj-[A-Za-z0-9_-]{8,}/g, "sk-proj-...REDACTED")
     .replace(/AIza[A-Za-z0-9_-]{20,}/g, "AIza...REDACTED")
     .replace(/xai-[A-Za-z0-9_-]{16,}/g, "xai-...REDACTED")
     .replace(/gsk_[A-Za-z0-9]{20,}/g, "gsk_...REDACTED")
+    // Meta AI: LLM_<appid>_<secret> (keyDetect.ts classifies this shape explicitly).
+    .replace(/LLM_[A-Za-z0-9]+_[A-Za-z0-9_-]{12,}/g, "LLM_...REDACTED")
     // Generic sk- catch-all (OpenAI legacy, DeepSeek, Qwen, OpenRouter sk-or-v1-),
     // last so the more specific prefixes above win. Includes -/_ so hyphenated
     // keys like sk-or-v1-... are fully masked.
     .replace(/sk-[A-Za-z0-9_-]{16,}/g, "sk-...REDACTED");
+  // Value-based backstop for prefix-less formats (Mistral is raw hex). Longest first so a key
+  // that contains another as a substring can't leave a readable tail behind.
+  if (knownSecretValues.size) {
+    for (const secret of [...knownSecretValues].sort((a, b) => b.length - a.length)) {
+      if (out.includes(secret)) out = out.split(secret).join("...REDACTED");
+    }
+  }
+  return out;
 }
 
 function ensureDir(dir: string): string {
@@ -226,10 +255,13 @@ function readJSON<T>(file: string, fallback: T): T {
 // Atomic-ish JSON write (write temp then rename) to avoid corrupt state files.
 // The temp name includes the pid so two processes never clobber each other's
 // temp file mid-write (the final rename is atomic; last writer wins the file).
-function writeJSON(file: string, data: unknown): void {
+// `pretty` defaults to true because these files are meant to be readable when something goes
+// wrong. A run manifest is the exception: it is rewritten every 750ms for the length of a run and
+// carries every job, so it opts out (see store.ts writeManifest).
+function writeJSON(file: string, data: unknown, { pretty = true }: { pretty?: boolean } = {}): void {
   ensureDir(path.dirname(file));
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.writeFileSync(tmp, pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -326,6 +358,7 @@ export {
   IMAGE_EXTS,
   mapLimit,
   redactSecrets,
+  registerSecretValues,
   C,
 };
 export type { ImagePayload, SelectionInput, MapLimitResult, ResolveInsideError };

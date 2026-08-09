@@ -172,7 +172,11 @@ interface Manifest {
 function writeManifest(runId: string, manifest: Manifest): void {
   ensureDir(runDir(runId));
   const mp = manifestPath(runId);
-  writeJSON(mp, manifest);
+  // Compact, not pretty-printed: this is rewritten every 750ms for the whole length of a run and
+  // grows with the job count, so the indentation is the majority of the bytes written. Everything
+  // that reads it back goes through JSON.parse, and the viewer renders it, so nothing depends on
+  // the on-disk formatting.
+  writeJSON(mp, manifest, { pretty: false });
   try {
     const st = fs.statSync(mp);
     cacheRunSummary(mp, { mtimeMs: st.mtimeMs, size: st.size, summary: summarizeManifest(manifest, runId) });
@@ -347,7 +351,9 @@ function maybeSettleStaleManifest(fallbackRunId: string, mp: string, manifest: M
   const runId = manifest.runId || fallbackRunId;
   if (!shouldSettleStaleManifest(runId, manifest, st, opts)) return { manifest, stale: false };
   const settled = settleStaleManifest(manifest, fallbackRunId, opts);
-  writeJSON(mp, settled);
+  // Compact, same as writeManifest: every writer of manifest.json has to agree on the format, or
+  // settling an orphaned run silently re-inflates the largest manifests we have.
+  writeJSON(mp, settled, { pretty: false });
   let nextStat = st;
   try {
     nextStat = fs.statSync(mp);
@@ -426,6 +432,81 @@ function settleStaleRuns(options: ReadManifestOptions = {}): SettleStaleRunsResu
   return { settled, runs: listRuns(opts) };
 }
 
+interface PruneRunsResult {
+  deleted: string[];
+  freedBytes: number;
+}
+
+/** Total bytes under a run dir. Best-effort: an unreadable entry contributes 0 rather than throwing. */
+function runDirBytes(dir: string): number {
+  let total = 0;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (_) {
+    return 0;
+  }
+  for (const e of entries) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) total += runDirBytes(full);
+    else {
+      try {
+        total += fs.statSync(full).size;
+      } catch (_) {
+        /* vanished mid-walk */
+      }
+    }
+  }
+  return total;
+}
+
+/** Bytes currently held by output/, for the disk-usage readout in Settings. */
+function outputBytes(): number {
+  return fs.existsSync(OUTPUT_DIR) ? runDirBytes(OUTPUT_DIR) : 0;
+}
+
+/**
+ * Delete FINISHED runs whose last activity is older than `maxAgeDays`. Opt-in retention, swept
+ * once at boot (see app-settings.ts outputRetentionDays and the call in http/serve.ts): before
+ * this, nothing ever removed a run except the user, so output/ grew forever.
+ *
+ * Deliberately conservative. A run that is still active, or that has no parseable manifest, or
+ * whose age cannot be established, is LEFT ALONE. This function destroys the user's saved work,
+ * so every uncertain case has to resolve to "keep".
+ */
+function pruneRuns({ maxAgeDays, nowMs = Date.now() }: { maxAgeDays: number; nowMs?: number }): PruneRunsResult {
+  const result: PruneRunsResult = { deleted: [], freedBytes: 0 };
+  if (!Number.isFinite(maxAgeDays) || maxAgeDays <= 0) return result;
+  if (!fs.existsSync(OUTPUT_DIR)) return result;
+  const cutoff = nowMs - maxAgeDays * 24 * 60 * 60 * 1000;
+
+  for (const name of fs.readdirSync(OUTPUT_DIR)) {
+    const dir = path.join(OUTPUT_DIR, name);
+    const mp = path.join(dir, "manifest.json");
+    let st: fs.Stats;
+    try {
+      st = fs.statSync(mp);
+    } catch (_) {
+      continue; // not a run dir (the small state files beside them live here too)
+    }
+    const manifest = readJSON<Manifest | null>(mp, null);
+    if (!manifest) continue;
+    if (ACTIVE_RUN_STATUSES.has(manifest.status)) continue;
+    const lastActivity = manifestActivityMs(manifest, st);
+    if (!lastActivity || lastActivity >= cutoff) continue;
+    const bytes = runDirBytes(dir);
+    try {
+      fs.rmSync(dir, { recursive: true, force: false });
+    } catch (_) {
+      continue;
+    }
+    runSummaryCache.delete(mp);
+    result.deleted.push(manifest.runId || name);
+    result.freedBytes += bytes;
+  }
+  return result;
+}
+
 function deleteRun(runId: unknown): string {
   const dir = resolveRunDir(runId);
   const mp = path.join(dir, "manifest.json");
@@ -451,6 +532,8 @@ export {
   listRuns,
   settleStaleManifest,
   settleStaleRuns,
+  pruneRuns,
+  outputBytes,
   deleteRun,
 };
-export type { Manifest, Job, Counts, RunSummary, ReadManifestOptions };
+export type { Manifest, Job, Counts, RunSummary, ReadManifestOptions, PruneRunsResult };

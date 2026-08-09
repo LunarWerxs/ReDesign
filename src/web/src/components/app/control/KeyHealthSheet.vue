@@ -30,6 +30,7 @@ import { providerOptions, providerLabel as providerLabelFor, OPENAI_FAMILY } fro
 import CloudSyncSection from './CloudSyncSection.vue';
 import AutoUpdateSection from './AutoUpdateSection.vue';
 import AppearanceSection from './AppearanceSection.vue';
+import OutputRetentionSection from './OutputRetentionSection.vue';
 import AppActionsBar from '@/components/app/AppActionsBar.vue';
 import SettingsTabs from '@/shell/SettingsTabs.vue';
 import { useRoute } from 'vue-router';
@@ -418,7 +419,11 @@ async function confirmDeleteKey() {
             <CloudSyncSection />
           </div>
 
-          <AutoUpdateSection />
+          <div class="mb-5">
+            <AutoUpdateSection />
+          </div>
+
+          <OutputRetentionSection />
         </div>
 
         <!-- Main: models + keys (dashboard only; the viewer has no main tab) ───── -->

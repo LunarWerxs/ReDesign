@@ -1,5 +1,110 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+- **The auto-updater now verifies what it downloaded before it runs it.** Every release already
+  publishes a `SHA256SUMS.txt`; nothing checked it. The only integrity test was `verifyVersion()`,
+  which *executes* the freshly downloaded binary and compares what it prints to the expected
+  version, so a tampered release was authenticated by running it. The archive's SHA-256 is now
+  matched against the published sums before it is unpacked or executed, and a missing, unreadable
+  or mismatched checksum aborts the update. Auto-update is on by default and unattended, which is
+  what made this worth closing first.
+- **The API body-size cap now covers the API.** `body-limit.ts` said "every mutating JSON route is
+  fronted by `bodyLimit()`"; it was actually wired onto two upload routes out of thirty-four. Every
+  other route, `/api/run` and `/api/settings` included, parsed an unbounded body, and neither Hono
+  nor Bun imposes a default. It is now applied once across `/api/*`, with the two upload routes
+  keeping their larger 40 MB cap.
+- **`GET /api/output/screenshot` is same-origin guarded.** It spawns headless Chromium per call and
+  was the one route with a real side effect and no guard.
+- Redaction covers the key formats the app itself routes to. The scrubber matched only prefixed
+  keys, so Mistral's raw hex and Meta's `LLM_<appid>_<secret>` could survive into a job error, and
+  job errors are persisted to the manifest and served over the API. It now also redacts by matching
+  the actual configured key values, which covers any provider format, including future ones.
+
+### Fixed
+
+- **A failed manifest write no longer kills the daemon.** The 750 ms flush ran
+  `store.writeManifest` inside a `setInterval` with no `try`/`catch`, and there is no
+  `uncaughtException` handler, so one transient `ENOSPC`, `EPERM` or antivirus lock ended the
+  process and took every other active and queued run with it. It now logs and retries on the next
+  tick.
+- **The `.env` holding every provider's keys is written atomically.** It was the one state file in
+  the codebase rewritten in place rather than through the temp-file-plus-rename that `writeJSON`
+  uses "to avoid corrupt state files". A crash mid-write could truncate every pool at once.
+- **Generating a thumbnail can no longer overwrite a running run's manifest.** The thumbnailer read
+  the manifest, then awaited up to 30 s of headless rendering, then wrote back the snapshot it took
+  *before* the render, discarding every job result, count and cost written in between. It now
+  re-reads immediately before writing.
+- **Switching runs quickly no longer strands the viewer.** `load()` had no request sequencing, so a
+  slow response for an older run could land last and, because accepting a finished-looking manifest
+  stops the poll, silently close the live stream of the run actually selected. Same guard added to
+  `bootstrap()`, which re-fires on every Control remount.
+- **Jobs skipped for dead or cooling keys are visible again.** They carry a real explanation ("no
+  API keys configured for X", "all keys cooling down") that the viewer dropped entirely and the
+  progress card only showed while the run was live. This is exactly the out-of-credit and
+  rate-limited case the run flow exists to explain.
+- A local write failure after a successful, already-billed API call no longer discards the cost and
+  benches a healthy key. Usage and cost are recorded the moment the call returns; a disk failure
+  after that is reported as its own error and does not retry onto another key, which would have
+  paid twice for the same output.
+- Gemini thinking tokens are counted. `thoughtsTokenCount` is billed as output and reported
+  separately from `candidatesTokenCount`, and nothing read it, so reasoning-capable Gemini runs
+  under-reported spend.
+- Key health from the last 400 ms survives shutdown; the debounced save is now flushed before exit.
+- Failure messages in the viewer are readable in full via tooltip instead of being cut at 140
+  characters, output preview iframes have accessible names, and the progress card no longer prints
+  the raw internal status enum next to translated labels.
+- Prices no longer freeze at whatever they were on the day of install. `pricing.json` was seeded
+  once and never refreshed, including across auto-updates, despite having no user-editable path.
+
+### Added
+
+- **Retry just the failed jobs.** `POST /api/runs/:id/retry` re-runs only the failed, skipped or
+  cancelled jobs of a run instead of paying for the whole fan-out again because one key died. It
+  groups by input and prompt and submits per-model quantities, so the retry reproduces exactly the
+  failed set and never silently re-runs combinations that already succeeded.
+- **Download a whole run.** `GET /api/runs/:id/download` streams a zip of a run's successful
+  outputs, built by a small dependency-free writer.
+- **Run again.** A finished run can prefill the control panel from its own manifest, which now also
+  records the brand style guide so a rerun is genuinely reproducible.
+- A desktop notification when an unattended run finishes and the tab is hidden.
+- Search in the all-runs gallery.
+- Opt-in output retention (`outputRetentionDays`, off by default) swept once at boot, plus a
+  disk-usage readout in Settings. Nothing had ever removed a run except the user.
+- `--model-quantities` and `--brand-style-guide` / `--brand-style-guide-file` on `redesign run`, and
+  `model_quantities`, `brand_style_guide`, reference fields and a `retry_run` tool on the MCP
+  server. The README promised every UI feature had a command-line twin; these two did not.
+
+### Internal
+
+- **`npm run build` works again.** It had been failing outright while CI stayed green, because the
+  checkout was left half-migrated: `src/web/bunfig.toml` was deleted without a matching reinstall,
+  so `node_modules` no longer matched the linker that produced it and Rolldown could not resolve
+  `clsx`. The repo-level `bunfig.toml` files are gone for good (install strategy is machine-specific
+  and a committed `[install]` block breaks cold CI runners), the install is clean again, and both
+  install paths are now verified: Bun locally, `npm ci` in CI and in the release build.
+- `src/web`'s `patchedDependencies` entry is documented rather than mysterious. `vue-sonner` does
+  not declare `vue` as a peer, which only matters under an isolated linker where its files live
+  outside the project and nothing up the tree resolves `vue`. It is load-bearing for a Bun install
+  and inert for an npm one.
+- CI runs Biome. It had been configured since the repo started and gated on nothing.
+- The per-job worker moved out of `runReimagine` into `runner/job-worker.ts`. It was ~225 lines
+  inside an already 500-line function, closing over two dozen bindings; the body is unchanged and
+  its dependencies are now an explicit context object.
+- The output height-measure script is embedded when an output is written instead of injected on
+  every request, so previews stream off disk. Pre-existing outputs migrate on first view.
+- The custom-option sub-dialog moved out of `PromptBuilderDialog.vue` (821 lines to 608).
+- `/api/bootstrap` walks the run directory once instead of twice, run manifests are written
+  compactly by every writer, and each job's HTML is written asynchronously. A directory-mtime cache
+  for the input and reference listings was tried and removed again: it could not see a file added
+  more than one level deep inside a group, and it let an upload re-list from a stale entry in the
+  same request that wrote. Guarding that costs more than the walk it saved.
+- Tests for the untested `.env` rewriting in `server/settings.ts`, and request-level smoke coverage
+  for the route modules that had none.
+- The README no longer claims keys never hit disk in the clear; it says where they actually live.
+
 ## [1.5.3] - 2026-08-06
 
 ### Changed

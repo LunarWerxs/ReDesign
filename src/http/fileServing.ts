@@ -11,6 +11,7 @@ import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as store from "../store";
 import { resolveInside } from "../util";
+import { hasOutputHeightMeasure, injectOutputHeightMeasure } from "../outputMeasure";
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -65,73 +66,6 @@ function requestFresh(c: Context, st: fs.Stats, etag: string): boolean {
   return Number.isFinite(since) && st.mtimeMs <= since + 1000;
 }
 
-function outputHeightMeasureScript(): string {
-  return `<script data-reimagine-height>
-(function () {
-  var messageType = 'reimagine:frame-height';
-  var maxHeight = 20000;
-  var lastHeight = 0;
-
-  function finite(n) {
-    return typeof n === 'number' && isFinite(n) ? n : 0;
-  }
-
-  function readHeight() {
-    var d = document.documentElement;
-    var b = document.body;
-    return Math.ceil(Math.max(
-      finite(window.innerHeight),
-      finite(d && d.scrollHeight),
-      finite(d && d.offsetHeight),
-      finite(d && d.clientHeight),
-      finite(b && b.scrollHeight),
-      finite(b && b.offsetHeight),
-      finite(b && b.clientHeight)
-    ));
-  }
-
-  function sendHeight() {
-    var height = Math.max(1, Math.min(maxHeight, readHeight()));
-    if (Math.abs(height - lastHeight) < 2) return;
-    lastHeight = height;
-    parent.postMessage({ type: messageType, height: height }, '*');
-  }
-
-  function observe(el) {
-    if (!el || !('ResizeObserver' in window)) return;
-    try { new ResizeObserver(sendHeight).observe(el); } catch (_) {}
-  }
-
-  function start() {
-    observe(document.documentElement);
-    observe(document.body);
-    sendHeight();
-  }
-
-  window.addEventListener('load', sendHeight);
-  document.addEventListener('DOMContentLoaded', start);
-  start();
-  [0, 50, 250, 1000, 2500, 5000].forEach(function (delay) {
-    setTimeout(sendHeight, delay);
-  });
-  var ticks = 0;
-  var timer = setInterval(function () {
-    sendHeight();
-    ticks += 1;
-    if (ticks > 12) clearInterval(timer);
-  }, 1000);
-})();
-</script>`;
-}
-
-function injectOutputHeightMeasure(html: string): string {
-  const script = `\n${outputHeightMeasureScript()}\n`;
-  const matches = Array.from(String(html).matchAll(/<\/body\s*>/gi));
-  const last = matches.at(-1);
-  if (last && typeof last.index === "number") return html.slice(0, last.index) + script + html.slice(last.index);
-  return html + script;
-}
-
 interface ServeFileOptions {
   download?: boolean;
   sandbox?: boolean;
@@ -176,8 +110,40 @@ async function serveFile(c: Context, baseDir: string, relPath: unknown, { downlo
     return new Response(null, { status: 304, headers });
   }
   if (measured) {
+    // Outputs written by this version already carry the measurement script (injected at write time
+    // in runner/reimagine.ts), so they fall through to the streamed path below. Anything older is
+    // migrated ONCE, here, on first view: inject, write the completed document back, then serve it.
+    // That keeps a pre-existing run's auto-height working without every gallery card paying a full
+    // synchronous read and regex scan on every request forever.
     const html = fs.readFileSync(full, "utf8");
-    return new Response(injectOutputHeightMeasure(html), { status: 200, headers });
+    if (!hasOutputHeightMeasure(html)) {
+      const injected = injectOutputHeightMeasure(html);
+      // Temp file then rename, never a write in place. This is the user's generated output, the
+      // artifact the whole app exists to produce, and a crash or a kill partway through an in-place
+      // write leaves a truncated document with nothing to restore it from. Same pattern as
+      // util.ts's writeJSON and the .env write in server/settings.ts.
+      const tmp = `${full}.${process.pid}.tmp`;
+      try {
+        fs.writeFileSync(tmp, injected);
+        fs.renameSync(tmp, full);
+      } catch (_) {
+        // Read-only output dir, or a locked file: serve the injected copy anyway and try again on
+        // the next view. Clean up the temp file so a failed migration can't litter the run folder.
+        try {
+          fs.rmSync(tmp, { force: true });
+        } catch (_) {
+          /* nothing further to do */
+        }
+      }
+      // The ETag and Last-Modified above were computed from the PRE-migration stat, so they
+      // describe a file that no longer exists. Serving them would let a client cache this
+      // response under a validator the next request will not reproduce; drop them instead. The
+      // migration happens once per file, so the caching loss is a one-off.
+      headers["Cache-Control"] = "no-store";
+      delete headers.ETag;
+      delete headers["Last-Modified"];
+      return new Response(injected, { status: 200, headers });
+    }
   }
   return new Response(Bun.file(full), { status: 200, headers });
 }

@@ -80,6 +80,9 @@ export interface Prompt {
   starred?: boolean;
   pickerHidden?: boolean;
   builder?: PromptBuilderRecipe;
+  /** 'preset' | 'custom', set only on the copy recorded onto a run's manifest (src/config/prompts.ts
+   *  resolvePrompts) so "Run again" can tell a one-off custom prompt apart from a saved preset. */
+  source?: string;
 }
 
 export interface PromptSaveRequest {
@@ -178,6 +181,29 @@ export interface RunSummaryMeta {
   source?: string;
 }
 
+/**
+ * The submission a run was built from, recorded onto its manifest (src/runner/reimagine.ts) so
+ * the run stays reproducible from itself alone: the failed-job retry route rebuilds a
+ * resubmission from `config` (src/http/routes/runs.ts), and "Run again" (RunGallery.vue) maps it
+ * onto the control panel's selection state.
+ */
+export interface ManifestConfig {
+  inputIds?: string[];
+  modelIds?: string[];
+  promptIds?: string[];
+  variants?: number;
+  /** Per-model copy count override; a model absent here just uses the flat `variants` above. */
+  variantsByModel?: Record<string, number>;
+  concurrency?: number | null;
+  poolConcurrency?: number | null;
+  maxImagesPerInput?: number | null;
+  reference?: { images: string[]; count?: number; note: string | null } | null;
+  /** Already combined with any attachment text at submit time (stores/control/runs.ts
+   *  addToQueue) — there is no way to split attachments back out of it. */
+  brandStyleGuide?: string;
+  grounded?: boolean;
+}
+
 export interface Manifest {
   runId: string;
   status: RunStatus;
@@ -186,6 +212,7 @@ export interface Manifest {
   finishedAt?: string | null;
   mock?: boolean;
   summary?: RunSummaryMeta | null;
+  config?: ManifestConfig;
   counts?: Counts;
   cost?: RunCost;
   // `held` means the run is parked in the queue and will not start until a "Run queue"
@@ -197,6 +224,13 @@ export interface Manifest {
   models: Model[];
   jobs: Job[];
   error?: string;
+}
+
+/** POST /api/runs/:id/retry response: which new run(s) the retried jobs landed in, grouped by
+ *  (input, prompt) so an exact reproduction of the failed set may span more than one run. */
+export interface RunRetryResponse {
+  runIds: string[];
+  jobCount: number;
 }
 
 export interface RunSummary {
@@ -449,6 +483,11 @@ export interface AppSettings {
   autoUpdateIntervalSecs: number;
   portableMode: boolean;
   hideTrayIcon: boolean;
+  /** 0 = keep every run forever (the default). The cleanup sweep runs once at startup
+   *  (src/http/serve.ts), so a lower value takes effect on the next launch, not immediately. */
+  outputRetentionDays: number;
+  /** Read-only: current size of output/, walked on demand (src/store.ts outputBytes()). */
+  outputBytes: number;
 }
 
 // Server-Sent Events emitted by GET /api/runs/:id/events.

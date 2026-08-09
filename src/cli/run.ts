@@ -4,6 +4,7 @@
  * web UI's run history. Extracted verbatim from the old src/cli.js switch case so the CLI entry
  * (src/cli/main.ts) stays a thin dispatcher.
  */
+import fs from "node:fs";
 import { C } from "../util";
 import { runReimagine } from "../runner";
 import type { Manifest } from "../store";
@@ -34,6 +35,39 @@ function asSelection(v: string | boolean | string[] | undefined): SelectionInput
   return v;
 }
 
+/**
+ * `--model-quantities "gpt-5=3,claude-opus-5=1"` — how many copies of EACH model to run, the CLI
+ * twin of the web app's per-model quantity steppers. Overrides `--variants` for the models it
+ * names. Invalid or non-positive entries are dropped rather than failing the run: a typo in one
+ * model's count should not throw away a whole batch the user already decided to spend on.
+ */
+function parseModelQuantities(v: string | boolean | string[] | undefined): Record<string, number> | undefined {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const out: Record<string, number> = {};
+  for (const pair of v.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const id = pair.slice(0, eq).trim();
+    const n = Number.parseInt(pair.slice(eq + 1).trim(), 10);
+    if (id && Number.isFinite(n) && n > 0) out[id] = n;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** `--brand-style-guide <text>` or `--brand-style-guide-file <path>`; the file wins if both are given. */
+function readBrandStyleGuide(args: Args): string | undefined {
+  const file = args["brand-style-guide-file"];
+  if (typeof file === "string" && file.trim()) {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch (err) {
+      throw new Error(`could not read --brand-style-guide-file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const inline = args["brand-style-guide"];
+  return typeof inline === "string" && inline.trim() ? inline : undefined;
+}
+
 export async function runCmd(args: Args): Promise<void> {
   const opts = {
     inputs: asSelection(args.input || args.inputs) ?? "all",
@@ -46,6 +80,8 @@ export async function runCmd(args: Args): Promise<void> {
       ? { images: args.reference === true ? "all" : args.reference, note: typeof args["reference-note"] === "string" ? args["reference-note"] : undefined }
       : null,
     variants: Number.parseInt(String(args.variants), 10) || 1,
+    modelQuantities: parseModelQuantities(args["model-quantities"]),
+    brandStyleGuide: readBrandStyleGuide(args),
     mock: !!args.mock || process.env.MOCK === "1",
     concurrency: Number.parseInt(String(args.concurrency), 10) || undefined,
     poolConcurrency: Number.parseInt(String(args["pool-concurrency"]), 10) || undefined,

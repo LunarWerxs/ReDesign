@@ -112,6 +112,12 @@ ${C.bold("RēDesign")} (ReDesign), run UI screenshots through many AI models.
     --reference all|a.png,b  feed style reference image(s) from reference/
     --reference-note "text"  tell the model how to use the reference
     --variants N            outputs per model/prompt (default 1)
+    --model-quantities id=n,id=n
+                            per-model output counts (overrides --variants for those models)
+    --brand-style-guide "text"
+                            brand/style notes appended to every prompt in the run
+    --brand-style-guide-file path
+                            read those notes from a file (wins over the inline form)
     --mock                  no real API calls, placeholder HTML (for testing)
     --concurrency N         max parallel calls across the whole run
     --pool-concurrency N    max parallel calls per key pool/provider lane

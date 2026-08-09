@@ -16,9 +16,17 @@ interface AppLifecycleDeps {
 }
 
 export function createAppLifecycleActions(state: ControlState, deps: AppLifecycleDeps) {
+  // App.vue keys the RouterView Transition by route name, so Control -> Viewer -> Control
+  // remounts Control.vue and re-fires bootstrap() with no guard of its own. Without a
+  // sequence token, an older /api/bootstrap response resolving after a newer one would
+  // silently revert a selection the user made after the newer response already landed —
+  // same fix as refreshCostEstimate()'s estimateSeq in ./runs.ts, mirrored here.
+  let bootstrapSeq = 0;
   async function bootstrap() {
+    const seq = ++bootstrapSeq;
     try {
       const data = await api.bootstrap();
+      if (seq !== bootstrapSeq) return; // superseded by a newer bootstrap() call
       state.inputs.value = data.inputs;
       state.models.value = data.models;
       state.archivedModels.value = data.archivedModels || [];
@@ -74,6 +82,7 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
       }
       void deps.checkForUpdate();
     } catch (e) {
+      if (seq !== bootstrapSeq) return; // a newer bootstrap() already resolved (or failed) since
       toast.error(t('actions.loadFailed'), { description: errMessage(e) });
     }
   }

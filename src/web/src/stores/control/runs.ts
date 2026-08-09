@@ -93,6 +93,49 @@ function isStaleFinishedRun(run?: DatedRun | null): boolean {
   return Math.max(0, Date.now() - at) > STALE_CARD_MS;
 }
 
+// ── "Your run finished" while the tab is backgrounded ──────────────────────────
+// The finish toast below is invisible once the user has tabbed away, and a fan-out can run for
+// minutes unattended. A Web Notification is the one channel that reaches them outside the tab.
+let notificationPermissionRequested = false;
+
+/**
+ * Ask for Notification permission the first time a run is actually started this session — never
+ * on page load (a cold ask before the user has done anything reads as spam, and most browsers
+ * auto-deny an unprompted request anyway). No-ops in an environment without the Notification API
+ * and never re-prompts once the browser has already recorded an answer.
+ */
+function requestNotificationPermissionOnce(): void {
+  if (notificationPermissionRequested) return;
+  notificationPermissionRequested = true;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'default') return;
+  void Notification.requestPermission().catch(() => {
+    /* degrade silently — a denied/blocked prompt just means no notification later */
+  });
+}
+
+/**
+ * Fire a Web Notification for a finished run, but ONLY while the tab is hidden (a visible tab
+ * already has the toast below) and ONLY once permission was already granted — this never itself
+ * prompts, see requestNotificationPermissionOnce(). Degrades silently everywhere else: API
+ * missing, permission denied/not yet asked, or the constructor throwing (some browsers still do,
+ * even with permission granted, e.g. no active service worker on certain platforms).
+ */
+function notifyIfHidden(status: string | null | undefined, title: string): void {
+  if (typeof document === 'undefined' || !document.hidden) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  const body =
+    status === 'cancelled'
+      ? t('runs.notifyCancelledBody', { title })
+      : status === 'error'
+        ? t('runs.notifyFailedBody', { title })
+        : t('runs.notifyDoneBody', { title });
+  try {
+    new Notification(t('runs.notifyTitle'), { body });
+  } catch {
+    /* degrade silently, see doc comment above */
+  }
+}
+
 export function createRunsActions(state: ControlState, deps: RunsDeps) {
   let estimateTimer: ReturnType<typeof setTimeout> | null = null;
   let estimateSeq = 0;
@@ -370,6 +413,14 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       const next = state.backlogRuns.value[0];
       if (next) focusRun(next.runId);
     }
+    // A finished run's summary already lives in state.runs (refreshRuns() above), so
+    // its full per-job Map here is just live-progress state — worth keeping ONLY for
+    // whatever the progress card is still showing (itself, if nothing was queued
+    // behind it to hand off to). Anything else — a backlog run that finished off-
+    // screen, or the run just handed off from above — is dropped, otherwise every
+    // run's job list would accumulate in memory for the life of the session.
+    if (state.focusedRunId.value !== runId) state.untrackRun(runId);
+    notifyIfHidden(status, entry?.title || runId);
     if (status === 'cancelled') toast(t('runs.cancelled'));
     else if (status === 'error') toast.error(t('runs.failed'));
     else toast.success(t('runs.finished'));
@@ -463,6 +514,10 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       toast(t('runs.pickPrompt'));
       return false;
     }
+
+    // Past the guards: this submission is actually going out. Lazily ask for notification
+    // permission here rather than on page load, see requestNotificationPermissionOnce().
+    requestNotificationPermissionOnce();
 
     // Only send quantities that differ from the default of 1; the backend defaults
     // every other selected model to a single copy.
@@ -558,6 +613,10 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
   async function runQueue() {
     const held = state.heldRuns.value;
     if (!held.length) return;
+    // A "Run queue" press on an already-parked batch starts generation without ever going
+    // through addToQueue(), so it needs its own lazy permission ask too (idempotent past the
+    // first call either way, see requestNotificationPermissionOnce()).
+    requestNotificationPermissionOnce();
     state.startingQueue.value = true;
     try {
       const { started } = await api.startQueue();

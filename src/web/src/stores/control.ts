@@ -8,6 +8,8 @@ import { createSyncActions } from './control/sync';
 import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
 import { createPortableModeSettingsActions } from './control/portable-mode-settings';
 import { createHideTraySettingsActions } from './control/hide-tray-settings';
+import { createOutputRetentionSettingsActions } from './control/output-retention-settings';
+import { createRunAgainActions } from './control/run-again';
 import { useSelfUpdate } from '@/lib/useSelfUpdate';
 import { api } from '@/lib/api';
 import type { UpdateApplyResult, UpdateStatus } from '@/types';
@@ -35,6 +37,10 @@ export const useControlStore = defineStore('control', () => {
   const portableModeSettingsActions = createPortableModeSettingsActions();
   // Hide-tray-icon opt-in, see @/stores/control/hide-tray-settings.
   const hideTraySettingsActions = createHideTraySettingsActions();
+  // Output retention (0/off + a disk-usage readout), see @/stores/control/output-retention-settings.
+  const outputRetentionSettingsActions = createOutputRetentionSettingsActions();
+  // "Run again" prefill (RunGallery.vue), see @/stores/control/run-again.
+  const runAgainActions = createRunAgainActions(state);
 
   return {
     // data
@@ -104,6 +110,10 @@ export const useControlStore = defineStore('control', () => {
     // hide tray icon opt-in
     hideTrayIconEnabled: hideTraySettingsActions.hideTrayIconEnabled,
     hideTrayIconLoading: hideTraySettingsActions.hideTrayIconLoading,
+    // output retention (+ disk usage readout)
+    outputRetentionDays: outputRetentionSettingsActions.outputRetentionDays,
+    outputBytes: outputRetentionSettingsActions.outputBytes,
+    outputRetentionLoading: outputRetentionSettingsActions.outputRetentionLoading,
     // getters
     runnableModels: state.runnableModels,
     runnableModelIds: state.runnableModelIds,
@@ -171,5 +181,9 @@ export const useControlStore = defineStore('control', () => {
     setPortableMode: portableModeSettingsActions.setPortableMode,
     loadHideTrayIconSetting: hideTraySettingsActions.loadHideTrayIconSetting,
     setHideTrayIcon: hideTraySettingsActions.setHideTrayIcon,
+    loadOutputRetentionSetting: outputRetentionSettingsActions.loadOutputRetentionSetting,
+    setOutputRetentionDays: outputRetentionSettingsActions.setOutputRetentionDays,
+    stageRunAgain: runAgainActions.stageRunAgain,
+    applyPendingRunAgain: runAgainActions.applyPendingRunAgain,
   };
 });

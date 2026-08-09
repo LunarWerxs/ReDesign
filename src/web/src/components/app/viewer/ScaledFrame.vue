@@ -6,7 +6,9 @@ import type { ViewerHeight } from '@/stores/viewer';
 // rawUrl must point at /output-raw/<encPath> (server serves it with a CSP sandbox
 // header). The iframe sandbox below intentionally OMITS allow-same-origin so
 // model-generated HTML can never reach our origin or API.
-const props = defineProps<{ rawUrl: string; rw: number; ar: number; height: ViewerHeight; scale: number }>();
+// title is required: a run's grid holds dozens of identical-looking iframes, and without a
+// distinct accessible name a screen reader announces every one of them the same way.
+const props = defineProps<{ rawUrl: string; title: string; rw: number; ar: number; height: ViewerHeight; scale: number }>();
 
 const wrap = useTemplateRef<HTMLElement>('wrap');
 const frame = useTemplateRef<HTMLIFrameElement>('frame');
@@ -84,6 +86,7 @@ useIframeScale(wrap, frame, () => ({
       ref="frame"
       data-output-frame
       loading="lazy"
+      :title="title"
       sandbox="allow-scripts allow-forms allow-popups allow-modals"
       :src="rawUrl"
       class="absolute left-0 top-0 origin-top-left border-0"

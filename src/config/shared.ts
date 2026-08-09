@@ -25,9 +25,21 @@ for (const [file, seed] of [
   [MODELS_FILE, modelsSeed],
   [PROMPTS_FILE, promptsSeed],
   [PROMPTS_DEFAULTS_FILE, promptDefaultsSeed],
-  [PRICING_FILE, pricingSeed],
 ] as const) {
   if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
+}
+
+// pricing.json is the one seed with no user-editable path: nothing in the UI, the CLI or the API
+// writes it (scripts/update-pricing.ts refreshes the SEED in the repo, which then ships inside the
+// binary). Copy-on-first-run therefore froze an install's cost estimates at whatever prices were
+// current the day it was installed, forever, including across auto-updates. Re-seed it whenever the
+// shipped seed differs from what is on disk; there is no user edit here to lose.
+const pricingSeedText = `${JSON.stringify(pricingSeed, null, 2)}\n`;
+try {
+  const onDisk = fs.existsSync(PRICING_FILE) ? fs.readFileSync(PRICING_FILE, "utf8") : null;
+  if (onDisk !== pricingSeedText) fs.writeFileSync(PRICING_FILE, pricingSeedText, "utf8");
+} catch (_) {
+  /* a read-only or locked config dir must not stop the app booting; stale prices are survivable */
 }
 
 interface JsonCacheEntry<T> {

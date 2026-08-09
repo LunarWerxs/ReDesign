@@ -38,7 +38,10 @@ export function register(app: Hono, _deps: Deps): void {
   // allow-same-origin (its document is unreadable from the SPA), so the capture is taken
   // server-side by headless Chromium (shared renderer, see src/thumbnail.ts renderHtmlToPng —
   // same engine that backfills gallery thumbnails).
-  app.get("/api/output/screenshot", async (c) => {
+  // Guarded like the mutating routes even though it is a GET: it spawns headless Chromium per
+  // call, so it is a real compute side effect, and the shared guard is what rejects the null
+  // Origin a sandboxed output iframe would send if it tried to drive it.
+  app.get("/api/output/screenshot", requireSameOrigin(), async (c) => {
     const full = resolveOutputHtmlFile(c.req.query("file"));
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-shot-"));
     const png = path.join(tmpDir, "shot.png");

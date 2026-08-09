@@ -47,6 +47,26 @@ const obj = (properties: Record<string, unknown> = {}, required: string[] = []) 
 });
 const str = (v: unknown): string => String(v ?? "");
 
+/**
+ * Parse the `model_quantities` string ("gpt-5=3,claude-opus-5=1") into the per-model copy counts
+ * /api/run expects. MCP tool inputs are flat scalars, so the map arrives as text, same as the CLI's
+ * --model-quantities. Malformed or non-positive entries are dropped rather than failing the call:
+ * an agent typo in one model's count should not throw away the whole run.
+ */
+const modelQuantities = (v: unknown): Record<string, number> | undefined => {
+  const raw = str(v).trim();
+  if (!raw) return undefined;
+  const out: Record<string, number> = {};
+  for (const pair of raw.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq === -1) continue;
+    const id = pair.slice(0, eq).trim();
+    const n = Number.parseInt(pair.slice(eq + 1).trim(), 10);
+    if (id && Number.isFinite(n) && n > 0) out[id] = n;
+  }
+  return Object.keys(out).length ? out : undefined;
+};
+
 export const TOOLS: McpEngineTool[] = [
   {
     name: "snapshot",
@@ -90,6 +110,8 @@ export const TOOLS: McpEngineTool[] = [
       reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
       reference_note: { type: "string", description: "how the model should use the reference image(s)" },
       variants: { type: "number", description: "outputs per model/prompt (default 1)" },
+      model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
+      brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
       mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
       concurrency: { type: "number", description: "max parallel calls across the whole run" },
       max_images: { type: "number", description: "cap reference images per input group" },
@@ -105,11 +127,32 @@ export const TOOLS: McpEngineTool[] = [
         prompts: { presets: a.prompts || (a.custom ? [] : "all"), custom: a.custom || null },
         reference: a.reference ? { images: a.reference, note: a.reference_note || null } : null,
         variants: a.variants || 1,
+        modelQuantities: modelQuantities(a.model_quantities),
+        brandStyleGuide: a.brand_style_guide || null,
         mock: !!a.mock,
         concurrency: a.concurrency,
         maxImages: a.max_images,
         label: a.label,
       }),
+  },
+  {
+    name: "retry_run",
+    description:
+      "Re-run only the failed, skipped or cancelled jobs of a finished run, instead of paying for the whole fan-out again. Omit jobIds to retry all of them. Returns { runIds, jobCount }; each returned run id streams and completes like any other run.",
+    inputSchema: obj(
+      {
+        runId: { type: "string", description: "the run to retry jobs from" },
+        jobIds: { type: "string", description: "optional comma-separated job ids; default is every non-successful job in the run" },
+      },
+      ["runId"],
+    ),
+    run: (a) => {
+      const ids = str(a.jobIds ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return post(`/api/runs/${encodeURIComponent(str(a.runId))}/retry`, ids.length ? { jobIds: ids } : {});
+    },
   },
   {
     name: "cancel_run",
@@ -127,6 +170,10 @@ export const TOOLS: McpEngineTool[] = [
       custom: { type: "string", description: "a custom prompt to run alongside (or instead of) the presets" },
       models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
       variants: { type: "number", description: "outputs per model/prompt (default 1)" },
+      model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
+      brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
+      reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
+      reference_note: { type: "string", description: "how the model should use the reference image(s)" },
       mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
       wait: { type: "boolean", description: "poll until the run finishes (or timeout_secs elapses) and return a digest instead of just { runId } (default false)" },
       timeout_secs: { type: "number", description: "max seconds to poll when wait:true (default 120, capped at 300)" },
@@ -137,7 +184,10 @@ export const TOOLS: McpEngineTool[] = [
         inputs: a.inputs || "all",
         models: a.models || "all",
         prompts: { presets: a.prompts || (a.custom ? [] : "all"), custom: a.custom || null },
+        reference: a.reference ? { images: a.reference, note: a.reference_note || null } : null,
         variants: a.variants || 1,
+        modelQuantities: modelQuantities(a.model_quantities),
+        brandStyleGuide: a.brand_style_guide || null,
         mock: !!a.mock,
         label: a.label,
       })) as { runId: string };

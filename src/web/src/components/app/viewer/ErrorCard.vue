@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { EyeIcon, StarIcon, XIcon } from '@lucide/vue';
+import { EyeIcon, RotateCcwIcon, StarIcon, XIcon } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -18,9 +18,11 @@ const props = defineProps<{
   scale: number;
   starred: boolean;
   itemHidden: boolean;
+  /** True while this run is still queued/running — the retry route 409s until it finishes. */
+  retryDisabled?: boolean;
 }>();
 
-defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void }>();
+defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void; (e: 'retry'): void }>();
 
 const previewScale = computed(() => Math.max(0.1, props.scale || 1));
 const frameAspect = computed(() =>
@@ -28,6 +30,9 @@ const frameAspect = computed(() =>
     ? props.rw / (props.height * previewScale.value)
     : props.ar / previewScale.value,
 );
+// A 'skipped' job (no API keys configured, all keys cooling down) is not a failure — it never
+// ran — so it gets a muted label and styling instead of the destructive red used for a real error.
+const skipped = computed(() => props.job.status === 'skipped');
 </script>
 
 <template>
@@ -41,6 +46,21 @@ const frameAspect = computed(() =>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ promptLabel }}</span>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :disabled="retryDisabled"
+              :aria-label="t('viewer.retryItem')"
+              @click.stop="$emit('retry')"
+            >
+              <RotateCcwIcon class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ retryDisabled ? t('viewer.retryItemWaitTitle') : t('viewer.retryItemTitle') }}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
             <Button
@@ -75,12 +95,20 @@ const frameAspect = computed(() =>
       </div>
     </div>
     <div
-      class="grid place-items-center bg-destructive/10 p-3.5 text-center text-destructive"
+      class="grid place-items-center p-3.5 text-center"
+      :class="skipped ? 'bg-muted/40 text-muted-foreground' : 'bg-destructive/10 text-destructive'"
       :style="{ aspectRatio: String(frameAspect) }"
     >
       <div>
-        <div>{{ t('viewer.failed') }}</div>
-        <div class="mt-1.5 text-xs text-muted-foreground">{{ (job.error || '').slice(0, 140) }}</div>
+        <div>{{ skipped ? t('viewer.skipped') : t('viewer.failed') }}</div>
+        <Tooltip v-if="job.error">
+          <TooltipTrigger as-child>
+            <!-- 140 chars is a preview only — the backend keeps up to 300, and the tooltip
+                 below is what makes the rest of it reachable rather than silently truncated. -->
+            <div class="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{{ job.error.slice(0, 140) }}</div>
+          </TooltipTrigger>
+          <TooltipContent class="max-w-xs whitespace-pre-wrap">{{ job.error }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   </div>

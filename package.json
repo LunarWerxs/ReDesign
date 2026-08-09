@@ -23,6 +23,7 @@
     "prepare": "git config core.hooksPath .githooks || true",
     "start": "bun run src/index.ts serve",
     "serve": "bun run src/index.ts serve",
+    "//build": "bun installs src/web (the machine-global isolated linker + global store keeps node_modules as links instead of a second real copy, see ~/.bunfig.toml); vite still runs under node. CI and scripts/build.ts deliberately use `npm ci` from package-lock.json instead: a cold runner has no warm store and no global bun config, and the release artifact should come from the committed npm lockfile. Both layouts are verified to build and to pass the vitest suite.",
     "build": "bun install --cwd src/web && npm --prefix src/web run build",
     "build:web": "npm --prefix src/web run build",
     "dist": "bun run scripts/build.ts",

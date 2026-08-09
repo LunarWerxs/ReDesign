@@ -3,7 +3,7 @@
 // popover so they can live as sections inside the combined Settings sidebar.
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChevronDownIcon } from '@lucide/vue';
+import { ChevronDownIcon, DownloadIcon, RefreshCwIcon } from '@lucide/vue';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import FilterSelect from '@/components/app/viewer/FilterSelect.vue';
 import { useViewerStore } from '@/stores/viewer';
 import { useControlStore } from '@/stores/control';
 import { starTallyReadout } from '@/lib/starTally';
+import { runDownloadUrl } from '@/lib/api';
 import { t } from '@/i18n';
 import type { RunDeleteResponse } from '@/types';
 
@@ -162,6 +163,29 @@ const currentTask = computed(() => {
   return r?.title || r?.summary?.title || store.runId || t('viewSettings.noRunSelected');
 });
 const errorCount = computed(() => store.manifest?.counts?.error || 0);
+
+// ── Run-level actions: retry every failed/skipped/cancelled job, or download every
+// successful output as a zip (viewer.ts retryJobs() / lib/api.ts runDownloadUrl()). ─────
+const hasRetryableJobs = computed(() =>
+  (store.manifest?.jobs || []).some(
+    (j) => j.status === 'error' || j.status === 'skipped' || j.status === 'cancelled',
+  ),
+);
+const hasSuccessfulOutputs = computed(() => (store.manifest?.counts?.ok ?? 0) > 0);
+const downloadAllUrl = computed(() => (store.runId ? runDownloadUrl(store.runId) : ''));
+const retryingAll = ref(false);
+
+async function retryFailed() {
+  if (retryingAll.value) return;
+  retryingAll.value = true;
+  try {
+    const result = await store.retryJobs();
+    const target = result?.runIds.length === 1 ? result.runIds[0] : null;
+    if (target) router.push({ path: '/viewer', query: { run: target } });
+  } finally {
+    retryingAll.value = false;
+  }
+}
 const flyoutTitle = computed(() => (runsFlyoutMode.value === 'switch' ? t('viewSettings.switchRun') : t('viewSettings.recentRuns')));
 const flyoutDescription = computed(() =>
   runsFlyoutMode.value === 'switch'
@@ -266,6 +290,33 @@ function selectCustomInput(event: FocusEvent) {
           <ChevronDownIcon class="size-3 shrink-0 text-muted-foreground/60" />
         </span>
       </button>
+    </section>
+
+    <!-- Actions: run-level retry / download, only meaningful with a run actually open -->
+    <section v-if="store.runId && (hasRetryableJobs || hasSuccessfulOutputs)" class="py-1">
+      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {{ t('viewSettings.actionsSection') }}
+      </p>
+      <button
+        v-if="hasRetryableJobs"
+        type="button"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        :disabled="store.isLive || retryingAll"
+        :title="store.isLive ? t('viewSettings.retryFailedWaitTitle') : t('viewSettings.retryFailedTitle')"
+        @click="retryFailed"
+      >
+        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.retryFailed') }}</span>
+        <RefreshCwIcon class="size-3.5 shrink-0 text-muted-foreground/60" :class="retryingAll ? 'animate-spin' : ''" />
+      </button>
+      <a
+        v-if="hasSuccessfulOutputs"
+        :href="downloadAllUrl"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent"
+        :title="t('viewSettings.downloadAllTitle')"
+      >
+        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.downloadAll') }}</span>
+        <DownloadIcon class="size-3.5 shrink-0 text-muted-foreground/60" />
+      </a>
     </section>
 
     <!-- Display -->

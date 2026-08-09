@@ -104,10 +104,21 @@ function jobCostLabel(job: { cost?: { totalCost: number } | null }) {
 // The runner's per-job note explains the non-obvious cases (a text-only model fed
 // an auto caption, an output truncated at the token limit) — worth surfacing, since
 // those are exactly the rows a user asks "why was that one so slow/short?" about.
+// `skipped` carries the reason too (e.g. "no API keys configured", "all keys
+// cooling down"), and that's the row a user is MOST likely to hover asking why.
 function jobTooltip(job: Job): string {
-  if (job.status === 'error' && job.error) return job.error;
+  if ((job.status === 'error' || job.status === 'skipped') && job.error) return job.error;
   return job.note || '';
 }
+
+// store.runStatus is the raw RunStatus enum value ('running' | 'cancelled' | 'done' |
+// 'error' | 'queued'); 'done' and 'error' are already conveyed by the ok/error counters
+// next to it, so only the states those counters DON'T speak for get a label here.
+const runStatusLabel = computed(() => {
+  if (store.runStatus === 'running') return t('progress.generating');
+  if (store.runStatus === 'cancelled') return t('progress.cancelled');
+  return '';
+});
 
 // A fan-out is inputs × models × prompts × copies, so a run the UI itself can build
 // reaches ~900 jobs — and every row used to sit in the DOM at once, which is enough
@@ -159,8 +170,7 @@ const {
           <span class="text-success">{{ t('progress.okCount', { count: store.progress.ok }) }}</span>
           <span v-if="store.progress.error" class="text-destructive">{{ t('progress.errorCount', { count: store.progress.error }) }}</span>
           <span v-if="store.progress.skipped">{{ t('progress.skippedCount', { count: store.progress.skipped }) }}</span>
-          <!-- i18n-ignore -->
-          <span v-if="store.runStatus">{{ store.runStatus }}</span>
+          <span v-if="runStatusLabel">{{ runStatusLabel }}</span>
           <span v-if="runningCostLabel" class="ml-auto font-mono">{{ runningCostLabel }}</span>
         </template>
       </div>

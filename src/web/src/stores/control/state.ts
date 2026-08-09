@@ -1,4 +1,4 @@
-import { useStorage } from '@vueuse/core';
+import { debounceFilter, useStorage } from '@vueuse/core';
 import { computed, reactive, ref } from 'vue';
 import { ApiError } from '@/lib/api';
 import type {
@@ -17,6 +17,34 @@ import type {
 } from '@/types';
 
 const TERMINAL = new Set(['ok', 'error', 'skipped', 'cancelled']);
+
+/**
+ * Force a debounced `useStorage` ref to disk when the page goes away.
+ *
+ * The two long-text fields below are debounced so typing a multi-thousand-character prompt is not
+ * a synchronous localStorage write per keystroke. The cost of that is a ~400ms window in which the
+ * newest text exists only in memory, and a reload or a tab close inside that window used to be
+ * silently lossy for text the user had already typed. Writing the current value directly on
+ * pagehide closes it. Mirrors flushPendingDeletes in ./runs.ts, which does the same for a pending
+ * delete. `pagehide` rather than `beforeunload` alone because it is the one that fires reliably on
+ * mobile and on bfcache navigations; both are registered, and the write is idempotent.
+ */
+function registerUnloadFlush(key: string, read: () => string): void {
+  if (typeof window === 'undefined') return;
+  const flush = () => {
+    try {
+      // RAW string, deliberately not JSON.stringify: useStorage picks its serializer from the
+      // default value's type, and for a string default that is StorageSerializers.string, which
+      // writes the value verbatim. Encoding it here would store a quoted string that the next
+      // read hands back complete with its quotes.
+      window.localStorage.setItem(key, read());
+    } catch {
+      /* private mode / quota: the debounced write is still the normal path */
+    }
+  };
+  window.addEventListener('pagehide', flush);
+  window.addEventListener('beforeunload', flush);
+}
 
 /** A run the client is watching: the one in flight plus anything queued behind it. */
 export interface TrackedRun {
@@ -89,13 +117,20 @@ export function createControlState() {
   // NOTE: there is deliberately no `maxImages` here any more (removed 2026-07-21). Every image
   // the user ticks is sent; a silent cap was dropping selections without saying so.
   const customOn = useStorage('redesign.custom-on', false);
-  const custom = useStorage('redesign.custom-prompt', '');
+  // Bound straight to a <Textarea> v-model (OptionsCard.vue), so every keystroke would
+  // otherwise be a synchronous stringify + localStorage write; debounce coalesces a
+  // long prompt's typing into one write ~400ms after the user pauses (trailing-edge,
+  // so the final keystroke is never dropped, just delayed).
+  const custom = useStorage('redesign.custom-prompt', '', undefined, { eventFilter: debounceFilter(400) });
+  registerUnloadFlush('redesign.custom-prompt', () => custom.value);
   const advancedOpen = useStorage('redesign.advanced-open', false);
   const refNote = ref('');
   // Brand style guide: a durable brand brief appended to every generation prompt.
   // Persisted per-browser (unlike the one-off refNote); a brand outlives a single run.
   const brandOn = useStorage('redesign.brand-style-guide-on', false);
-  const brandStyleGuide = useStorage('redesign.brand-style-guide', '');
+  // Same v-model-on-a-textarea localStorage thrash as `custom` above (BrandStyleGuideBlock.vue).
+  const brandStyleGuide = useStorage('redesign.brand-style-guide', '', undefined, { eventFilter: debounceFilter(400) });
+  registerUnloadFlush('redesign.brand-style-guide', () => brandStyleGuide.value);
   // A saved "default" style guide, separate from the field above so a user can
   // temporarily edit/override the guide for one run without losing their default.
   const brandStyleGuideDefault = useStorage('redesign.brand-style-guide-default', '');

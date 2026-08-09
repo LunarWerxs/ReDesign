@@ -59,6 +59,14 @@ function shutdown(): void {
     new Promise<void>((resolve) => setTimeout(resolve, 6_000)),
   ]).finally(() => {
     try {
+      // km.report() debounces its save behind a 400ms unref'd timer, so a key just benched or
+      // just proven dead may still exist only in memory here. Flush it or that verdict is lost
+      // and the next boot spends a request re-proving a key we already knew was bad.
+      try {
+        getKeyManager().save();
+      } catch (error) {
+        console.error(C.dim(`  ⚠ Final key-state save failed: ${error instanceof Error ? error.message : String(error)}`));
+      }
       cleanupInstance();
       server?.stop(true);
     } finally {
@@ -141,6 +149,22 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
   process.on("exit", cleanupInstance);
 
   const settled = store.settleStaleRuns({ staleAfterMs: 0, reason: ORPHANED_RUN_MESSAGE }).settled;
+
+  // Opt-in retention sweep, once per boot and never on a timer: output/ otherwise grows forever
+  // (a run is only ever removed by the user deleting it). Off unless outputRetentionDays is set.
+  const retentionDays = loadAppSettings().outputRetentionDays;
+  if (typeof retentionDays === "number" && retentionDays > 0) {
+    try {
+      const pruned = store.pruneRuns({ maxAgeDays: Math.min(3650, Math.max(1, Math.floor(retentionDays))) });
+      if (pruned.deleted.length) {
+        console.log(
+          C.dim(`  ▸ Retention: removed ${pruned.deleted.length} run(s) older than ${retentionDays}d, freed ${(pruned.freedBytes / 1048576).toFixed(1)} MB`),
+        );
+      }
+    } catch (error) {
+      console.error(C.dim(`  ⚠ Retention sweep failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+  }
 
   // "Sync my settings with Connections", load the persisted refresh token, then (if the owner
   // enabled sync) pull the cloud copy in the background so a fresh machine converges without

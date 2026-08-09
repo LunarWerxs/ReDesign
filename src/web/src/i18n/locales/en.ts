@@ -111,6 +111,14 @@ export default {
     pendingDelete: 'Removed {count} run | Removed {count} runs',
     undo: 'Undo',
     restored: 'Restored {count} run | Restored {count} runs',
+    // Retry (failed/skipped/cancelled jobs -> new run), see stores/viewer.ts retryJobs()
+    retryStarted: '{count} job queued for retry | {count} jobs queued for retry',
+    retryFailed: 'Retry failed',
+    // Web Notification for an unattended run (document.hidden), see stores/control/runs.ts
+    notifyTitle: 'RēDesign',
+    notifyDoneBody: '{title} finished',
+    notifyFailedBody: '{title} failed',
+    notifyCancelledBody: '{title} was cancelled',
   },
   // Input/screenshot store toasts
   content: {
@@ -183,9 +191,13 @@ export default {
     queuedStatus: 'Queued... this run will start when earlier batches finish.',
     runningStatus: 'Running... outputs will appear as models finish.',
     noOutputsMatch: 'No outputs match the current filters.',
+    skipped: 'Skipped',
     outputsCount: '{count} output | {count} outputs',
     starTally: '{model} starred first in {count} of your last {total} runs',
     mockRunNotice: 'This run used Mock mode, so every job shows the same placeholder output instead of a real AI result.',
+    retryItem: 'Retry',
+    retryItemTitle: 'Retry this job',
+    retryItemWaitTitle: 'Wait for this run to finish before retrying',
   },
   filter: {
     prompts: 'Prompts',
@@ -305,6 +317,10 @@ export default {
     deleteRun: 'Delete {title}',
     deleteRunTitle: 'Delete “{title}”?',
     activeRunCannotDelete: 'A queued or running batch cannot be deleted',
+    searchPlaceholder: 'Search runs...',
+    noMatches: 'No runs match.',
+    runAgain: 'Run {title} again',
+    runAgainFailed: 'Could not prefill from this run',
   },
   modelSelect: {
     models: 'Models',
@@ -493,6 +509,12 @@ export default {
     status: 'Status',
     showErrorsTitle: 'Show outputs that failed to generate',
     errors: 'Errors',
+    actionsSection: 'Actions',
+    retryFailed: 'Retry failed',
+    retryFailedTitle: 'Retry every failed or skipped job in this run',
+    retryFailedWaitTitle: 'Wait for this run to finish before retrying',
+    downloadAll: 'Download all',
+    downloadAllTitle: 'Download every successful output in this run as a zip',
   },
   progress: {
     runProgress: 'Run progress',
@@ -504,6 +526,7 @@ export default {
     waiting: 'waiting',
     parked: 'parked',
     generating: 'generating',
+    cancelled: 'cancelled',
     queueLabel: 'Queue ({count})',
     dragToReorder: 'Drag to reorder',
     doneOfTotal: '{done}/{total} done',
@@ -685,5 +708,24 @@ export default {
   tooltipPreference: {
     label: 'Show tooltips',
     hint: 'Toggle hover tooltips across the app. Off hides descriptive hover text everywhere except the small info icons in Settings.',
+  },
+  // "Run again" prefill (RunGallery.vue -> stores/control/run-again.ts)
+  runAgain: {
+    prefilled: 'Prefilled from the previous run',
+    droppedInputs: 'inputs',
+    droppedModels: 'models',
+    droppedPrompts: 'prompts',
+    droppedReferences: 'reference images',
+    droppedSummary: 'No longer available, skipped: {items}',
+    noConfig: 'This run has no saved configuration to reuse',
+  },
+  outputRetention: {
+    label: 'Output storage',
+    hint: 'How long finished runs stay on disk before a cleanup sweep removes old outputs. The sweep runs once at startup, not immediately — a lower setting takes effect on the next launch.',
+    diskUsageLabel: 'Disk usage',
+    keepLabel: 'Keep runs for',
+    forever: 'Forever',
+    days: '{count} day | {count} days',
+    toggleFailed: 'Could not update output retention setting',
   },
 } as const;

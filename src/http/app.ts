@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { mountWeb } from "./web";
 import { requireSameOrigin } from "./origin-guard";
+import { jsonBodyLimit } from "./body-limit";
 import type { Deps } from "./deps";
 import * as bootstrap from "./routes/bootstrap";
 import * as inputs from "./routes/inputs";
@@ -51,6 +52,22 @@ export function createApp(hooks: AppHooks = {}): Hono {
   const app = new Hono();
 
   const deps: Deps = { requestShutdown: hooks.requestShutdown || (() => {}) };
+
+  // Blanket body cap across the API. Neither Hono nor Bun imposes a default, so before this every
+  // mutating route parsed an unbounded body; wiring it here (rather than per route) is what makes
+  // body-limit.ts's "every mutating JSON route is fronted by bodyLimit()" actually true, including
+  // for routes added later. The two upload routes declare their own, LARGER cap in routes/inputs.ts
+  // and are skipped so this default can't clamp a legitimate 40 MB screenshot upload down to 5 MB.
+  //
+  // The cross-site guard runs FIRST, before the body is buffered. Both are cheap, but the guard is
+  // header-only and its whole job is to reject a forged cross-origin request on sight; making it
+  // wait behind a 5 MB read would let an attacker's page cost us that read before being turned
+  // away. The per-route requireSameOrigin() calls stay where they are (they are what the route
+  // modules document, and running the header check twice costs nothing).
+  const OWN_BODY_LIMIT_PATHS = new Set(["/api/inputs/upload", "/api/reference/upload"]);
+  const apiBodyLimit = jsonBodyLimit();
+  app.use("/api/*", requireSameOrigin());
+  app.use("/api/*", (c, next) => (OWN_BODY_LIMIT_PATHS.has(c.req.path) ? next() : apiBodyLimit(c, next)));
 
   // Register every route module. Registration order mirrors server.js's original if/else-if
   // dispatch order (bootstrap/pulse, inputs, prompts, models, keys, runs, updates, health-check,

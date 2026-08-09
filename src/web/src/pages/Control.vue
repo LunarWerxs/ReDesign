@@ -7,8 +7,12 @@ import ProgressCard from '@/components/app/control/ProgressCard.vue';
 
 const store = useControlStore();
 
-onMounted(() => {
-  store.bootstrap();
+onMounted(async () => {
+  await store.bootstrap();
+  // Applies "Run again"'s staged prefill (RunGallery.vue), if any — deliberately AFTER
+  // bootstrap() so it lands on a fresh catalog instead of one bootstrap is about to reconcile
+  // out from under it (see stores/control/run-again.ts). A no-op on every other mount.
+  store.applyPendingRunAgain();
 });
 </script>
 

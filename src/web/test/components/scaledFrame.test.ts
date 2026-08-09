@@ -24,6 +24,7 @@ it("keeps far-away preview iframes unmounted and activates them near the viewpor
   const wrapper = mount(ScaledFrame, {
     props: {
       rawUrl: "/output-raw/run/result.html",
+      title: "Model One — Prompt A",
       rw: 1280,
       ar: 0.72,
       height: "aspect",

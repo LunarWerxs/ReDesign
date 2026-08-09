@@ -144,6 +144,20 @@ describe("grouped", () => {
     expect(store.grouped[0]!.okCount).toBe(1);
   });
 
+  it("excludes skipped jobs until showErrors is on", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({
+      jobs: [job("a"), job("b", { status: "skipped", error: "no API keys configured for X" })],
+    });
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+
+    store.showErrors = true;
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a", "b"]);
+    // A skipped job never ran, so it must not inflate the ok tally either.
+    expect(store.grouped[0]!.okCount).toBe(1);
+  });
+
   it("never shows a pending job, even with showErrors on", () => {
     const store = useViewerStore();
     store.manifest = manifest({ jobs: [job("a"), job("b", { status: "running" })] });
@@ -340,6 +354,42 @@ describe("load", () => {
     await store.load("run1");
 
     expect(store.manifest).toBeNull();
+  });
+
+  it("does not let a stale response resurrect a run the user navigated away from", async () => {
+    // Regression test for the race: an older load()'s response resolving AFTER a newer one
+    // must not overwrite the newer manifest, and — since acceptManifest() calls stopPoll()
+    // once a manifest looks finished — must not kill the newer run's live SSE stream either.
+    const store = useViewerStore();
+    let resolveFirst!: (value: Manifest) => void;
+    let resolveSecond!: (value: Manifest) => void;
+    runMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const first = store.load("run1");
+    const second = store.load("run2");
+    resolveSecond(manifest({ runId: "run2", status: "running" }));
+    await second;
+    expect(store.manifest?.runId).toBe("run2");
+
+    // run1's response arrives late, after run2 is already the active, live selection.
+    resolveFirst(manifest({ runId: "run1", status: "done" }));
+    await first;
+
+    expect(store.runId).toBe("run2");
+    expect(store.manifest?.runId).toBe("run2");
+    expect(store.isLive).toBe(true);
   });
 });
 

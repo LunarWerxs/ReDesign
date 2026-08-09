@@ -43,6 +43,7 @@
     "vitest": "^4.1.10",
     "vue-tsc": "^3.3.6"
   },
+  "//patchedDependencies": "Bun-only, and load-bearing on this machine. vue-sonner does not declare `vue` as a peer dependency; under the machine-global isolated linker + global store (~/.bunfig.toml) its files live in the store, where nothing up the tree resolves `vue`, so vitest dies with 'Cannot find package vue imported from ...bun-store...'. Declaring the peer makes bun link vue as a sibling. npm ignores this field entirely and its hoisted layout resolves vue anyway, so CI and the release build (both npm ci) are unaffected.",
   "patchedDependencies": {
     "vue-sonner@2.0.9": "patches/vue-sonner@2.0.9.patch"
   }

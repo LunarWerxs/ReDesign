@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref, useTemplateRef, watch } from 'vue';
 import { useStorage } from '@vueuse/core';
 import {
   BookmarkIcon,
@@ -16,14 +16,12 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
   Dialog,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -34,14 +32,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'vue-sonner';
 import {
   buildPromptFromRecipe,
@@ -52,13 +42,12 @@ import {
 } from '@/lib/prompt-builder';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
+import CustomOptionDialog from './prompt-builder-dialog/CustomOptionDialog.vue';
 import type {
   Prompt,
   PromptBuilderCustomOptionSnapshot,
   PromptBuilderModifierId,
   PromptBuilderOption,
-  PromptBuilderOptionCategory,
-  PromptBuilderOptionSaveRequest,
   PromptBuilderRecipe,
   PromptBuilderScopeId,
 } from '@/types';
@@ -90,14 +79,12 @@ const deleteConfirmOpen = ref(false);
 
 const optionDialogOpen = ref(false);
 const optionDeleteConfirmOpen = ref(false);
-const optionSaving = ref(false);
-const optionDeleting = ref(false);
-const optionForm = ref<PromptBuilderOptionSaveRequest>({
-  label: '',
-  description: '',
-  instruction: '',
-  category: 'structure',
-});
+// Imperative handle onto the extracted create/edit sub-dialog (see openCreateOption /
+// openEditOption callers below): its optionSaving/optionDeleting now live inside it,
+// exposed as optionBusy so this dialog's own busy computed still folds them in.
+const customOptionDialog = useTemplateRef<InstanceType<typeof CustomOptionDialog>>(
+  'customOptionDialog',
+);
 
 function localizeBuiltIn<
   T extends { labelKey: `promptBuilder.${string}`; descriptionKey: `promptBuilder.${string}` },
@@ -184,11 +171,7 @@ const recipeSummary = computed(() =>
   ),
 );
 const isEditing = computed(() => !!props.prompt?.id);
-const optionIsEditing = computed(() => !!optionForm.value.id);
-const optionFormValid = computed(
-  () => !!optionForm.value.label.trim() && !!optionForm.value.instruction.trim(),
-);
-const optionBusy = computed(() => optionSaving.value || optionDeleting.value);
+const optionBusy = computed(() => customOptionDialog.value?.optionBusy ?? false);
 const busy = computed(() => saving.value || deleting.value || optionBusy.value);
 
 function close(force = false) {
@@ -235,75 +218,6 @@ function removeSavedOption(id: string) {
     ...recipe.value,
     customOptions: selectedCustomOptions.value.filter((option) => option.id !== id),
   });
-}
-
-function openCreateOption(category: PromptBuilderOptionCategory) {
-  optionForm.value = {
-    label: '',
-    description: '',
-    instruction: '',
-    category,
-  };
-  optionDialogOpen.value = true;
-}
-
-function openEditOption(option: PromptBuilderOption) {
-  optionForm.value = {
-    id: option.id,
-    label: option.label,
-    description: option.description ?? '',
-    instruction: option.instruction,
-    category: option.category,
-  };
-  optionDialogOpen.value = true;
-}
-
-function onOptionDialogOpenChange(open: boolean) {
-  if (!open && optionBusy.value) return;
-  optionDialogOpen.value = open;
-}
-
-async function saveOption() {
-  if (!optionFormValid.value || optionBusy.value) return;
-  const wasNew = !optionForm.value.id;
-  optionSaving.value = true;
-  try {
-    const saved = await store.savePromptBuilderOption({
-      ...optionForm.value,
-      label: optionForm.value.label.trim(),
-      description: optionForm.value.description?.trim() || undefined,
-      instruction: optionForm.value.instruction.trim(),
-    });
-    if (!saved) return;
-
-    const selected = selectedCustomOptions.value;
-    const selectedIndex = selected.findIndex((option) => option.id === saved.id);
-    const next =
-      wasNew || selectedIndex >= 0
-        ? [
-            ...selected.filter((option) => option.id !== saved.id),
-            optionSnapshot(saved),
-          ]
-        : selected;
-    recipe.value = normalizePromptBuilderRecipe({ ...recipe.value, customOptions: next });
-    optionDialogOpen.value = false;
-  } finally {
-    optionSaving.value = false;
-  }
-}
-
-async function confirmDeleteOption() {
-  const id = optionForm.value.id;
-  if (!id || optionBusy.value) return;
-  optionDeleting.value = true;
-  try {
-    if (!(await store.deletePromptBuilderOption(id))) return;
-    removeSavedOption(id);
-    optionDeleteConfirmOpen.value = false;
-    optionDialogOpen.value = false;
-  } finally {
-    optionDeleting.value = false;
-  }
 }
 
 function useOnce() {
@@ -458,7 +372,7 @@ watch(
               size="xs"
               data-create-builder-option
               :aria-label="category.createLabel"
-              @click="openCreateOption(category.id)"
+              @click="customOptionDialog?.openCreateOption(category.id)"
             >
               <PlusIcon class="size-3.5" />
               {{ t('promptBuilder.createOption') }}
@@ -549,7 +463,7 @@ watch(
                 :data-edit-builder-option="option.id"
                 class="absolute right-2 top-2"
                 :aria-label="t('promptBuilder.editOption', { label: option.label })"
-                @click="openEditOption(option)"
+                @click="customOptionDialog?.openEditOption(option)"
               >
                 <PencilIcon class="size-3.5" />
               </Button>
@@ -684,138 +598,11 @@ watch(
     </AlertDialogContent>
   </AlertDialog>
 
-  <Dialog :open="optionDialogOpen" @update:open="onOptionDialogOpenChange">
-    <DialogContent class="sm:max-w-xl">
-      <DialogHeader>
-        <DialogTitle>
-          {{
-            optionIsEditing
-              ? t('promptBuilder.editOptionTitle')
-              : t('promptBuilder.createOptionTitle')
-          }}
-        </DialogTitle>
-        <DialogDescription>{{ t('promptBuilder.optionDialogDescription') }}</DialogDescription>
-      </DialogHeader>
-
-      <form class="grid gap-4" :aria-busy="optionBusy" @submit.prevent="saveOption">
-        <div class="grid gap-1.5">
-          <Label for="prompt-builder-option-category">
-            {{ t('promptBuilder.optionCategory') }}
-          </Label>
-          <Select v-model="optionForm.category" :disabled="optionBusy">
-            <SelectTrigger id="prompt-builder-option-category">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="structure">
-                {{ t('promptBuilder.optionCategoryStructure') }}
-              </SelectItem>
-              <SelectItem value="design">
-                {{ t('promptBuilder.optionCategoryDesign') }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div class="grid gap-1.5">
-          <Label for="prompt-builder-option-name">{{ t('promptBuilder.optionName') }}</Label>
-          <Input
-            id="prompt-builder-option-name"
-            v-model="optionForm.label"
-            :placeholder="t('promptBuilder.optionNamePlaceholder')"
-            maxlength="100"
-            :disabled="optionBusy"
-            required
-          />
-        </div>
-
-        <div class="grid gap-1.5">
-          <Label for="prompt-builder-option-description">
-            {{ t('promptBuilder.optionDescription') }}
-          </Label>
-          <Input
-            id="prompt-builder-option-description"
-            v-model="optionForm.description"
-            :placeholder="t('promptBuilder.optionDescriptionPlaceholder')"
-            maxlength="300"
-            :disabled="optionBusy"
-          />
-        </div>
-
-        <div class="grid gap-1.5">
-          <Label for="prompt-builder-option-instruction">
-            {{ t('promptBuilder.optionInstruction') }}
-          </Label>
-          <Textarea
-            id="prompt-builder-option-instruction"
-            v-model="optionForm.instruction"
-            class="min-h-36"
-            :placeholder="t('promptBuilder.optionInstructionPlaceholder')"
-            maxlength="4000"
-            :disabled="optionBusy"
-            required
-          />
-          <p class="text-xs text-muted-foreground">
-            {{ t('promptBuilder.optionInstructionHint') }}
-          </p>
-        </div>
-
-        <div class="flex items-center justify-end gap-2">
-          <Button
-            v-if="optionIsEditing"
-            type="button"
-            variant="destructive"
-            class="mr-auto"
-            :disabled="optionBusy"
-            @click="optionDeleteConfirmOpen = true"
-          >
-            <Trash2Icon class="size-4" />
-            {{ t('promptBuilder.deleteOption') }}
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            :disabled="optionBusy"
-            @click="optionDialogOpen = false"
-          >
-            {{ t('promptBuilder.cancel') }}
-          </Button>
-          <Button type="submit" :disabled="optionBusy || !optionFormValid">
-            <Loader2Icon v-if="optionSaving" class="size-4 animate-spin" />
-            {{
-              optionIsEditing
-                ? t('promptBuilder.saveChanges')
-                : t('promptBuilder.createAndSelect')
-            }}
-          </Button>
-        </div>
-      </form>
-    </DialogContent>
-  </Dialog>
-
-  <AlertDialog v-model:open="optionDeleteConfirmOpen">
-    <AlertDialogContent>
-      <AlertDialogHeader>
-        <AlertDialogTitle>
-          {{ t('promptBuilder.deleteOptionTitle', { label: optionForm.label }) }}
-        </AlertDialogTitle>
-        <AlertDialogDescription>
-          {{ t('promptBuilder.deleteOptionDescription') }}
-        </AlertDialogDescription>
-      </AlertDialogHeader>
-      <AlertDialogFooter>
-        <AlertDialogCancel :disabled="optionDeleting">
-          {{ t('promptBuilder.cancel') }}
-        </AlertDialogCancel>
-        <AlertDialogAction
-          variant="destructive"
-          :disabled="optionDeleting"
-          @click.prevent="confirmDeleteOption"
-        >
-          <Loader2Icon v-if="optionDeleting" class="size-4 animate-spin" />
-          {{ t('promptBuilder.deleteOption') }}
-        </AlertDialogAction>
-      </AlertDialogFooter>
-    </AlertDialogContent>
-  </AlertDialog>
+  <CustomOptionDialog
+    ref="customOptionDialog"
+    v-model:recipe="recipe"
+    v-model:option-dialog-open="optionDialogOpen"
+    v-model:option-delete-confirm-open="optionDeleteConfirmOpen"
+    :option-snapshot="optionSnapshot"
+  />
 </template>

@@ -14,6 +14,7 @@ import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin, PORT, HOST } from "../origin-guard";
 import { ROOT, readJSON } from "../../util";
+import * as store from "../../store";
 import { loadAppSettings, saveAppSettings } from "../../app-settings";
 import { readInstanceInfo, updateInstanceInfo, instanceFilePath } from "../../instance";
 import { openPortableWindow } from "../../portable-window.mjs";
@@ -68,6 +69,11 @@ function snapshot() {
     autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
     portableMode: loadAppSettings().portableMode === true,
     hideTrayIcon: loadAppSettings().hideTrayIcon === true,
+    // 0 = keep every run forever (the default). The sweep itself runs once at boot, see
+    // http/serve.ts, so changing this takes effect on the next start rather than immediately.
+    outputRetentionDays: loadAppSettings().outputRetentionDays ?? 0,
+    // Walks output/, so it is computed on demand rather than on every settings read.
+    outputBytes: store.outputBytes(),
   };
 }
 
@@ -95,6 +101,13 @@ export function register(app: Hono, _deps: Deps): void {
       // Keep runtime.json current so the tray/start.cmd launcher picks up the change on its
       // next open, without waiting for a daemon restart (see src/instance.ts / instance-pointer.mjs).
       updateInstanceInfo({ portableMode: b.portableMode });
+    }
+    // Retention deletes the user's saved runs, so only an explicit finite number sets it and
+    // anything out of range is clamped rather than rejected; 0 (or negative) means keep forever.
+    if (typeof b.outputRetentionDays === "number" && Number.isFinite(b.outputRetentionDays)) {
+      const days = Math.floor(b.outputRetentionDays);
+      settings.outputRetentionDays = days > 0 ? Math.min(3650, Math.max(1, days)) : 0;
+      saveAppSettings(settings);
     }
     if (typeof b.hideTrayIcon === "boolean") {
       settings.hideTrayIcon = b.hideTrayIcon;

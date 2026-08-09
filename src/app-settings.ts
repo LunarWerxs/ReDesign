@@ -35,6 +35,14 @@ export interface AppSettings {
    * shortcut to get the UI back.
    */
   hideTrayIcon?: boolean;
+  /**
+   * Delete finished runs older than this many days, swept once at boot (see store.pruneRuns and
+   * the call in http/serve.ts). Absent or 0 = keep everything forever, which is the default and
+   * the historical behaviour: nothing has ever removed a run except the user deleting it, so
+   * output/ grows without bound. OPT-IN on purpose, deleting someone's saved work on a timer is
+   * not something to switch on for them. Clamped to [1, 3650] when set.
+   */
+  outputRetentionDays?: number;
 }
 
 let cached: AppSettings | null = null;

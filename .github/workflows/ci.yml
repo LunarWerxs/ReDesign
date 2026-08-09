@@ -31,6 +31,11 @@ jobs:
           restore-keys: bun-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      # Biome. Configured since the repo started but never gated on until 2026-08-09, so a lint
+      # regression could land on main unnoticed. Linux only: the rules are platform-independent and
+      # running it three times just to see the same output is wasted matrix minutes.
+      - if: runner.os == 'Linux'
+        run: bun run lint
       - run: bun test tests
         env:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI

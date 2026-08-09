@@ -14,8 +14,27 @@ import { streamSSE } from "hono/streaming";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 import * as store from "../../store";
+import { resolveInside } from "../../util";
+import { buildZip, type ZipEntry } from "../../zip";
 import { ensureRunThumbnail } from "../../thumbnail";
+import { loadModels } from "../../config";
 import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, releaseQueue, reorderQueue, heldRunCount, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
+
+/** The fields runReimagine writes onto every job that the retry route needs to rebuild a run. */
+interface RetryJob {
+  id: string;
+  status: string;
+  inputId: string;
+  promptId: string;
+  modelId: string;
+}
+
+/** A prompt as recorded on the manifest, enough to tell a preset from a custom one. */
+interface ManifestPrompt {
+  id: string;
+  source?: string;
+  user?: string;
+}
 
 export function register(app: Hono, _deps: Deps): void {
   // Static segments ("delete") are registered before the "/:id" param routes below, Hono's
@@ -86,6 +105,147 @@ export function register(app: Hono, _deps: Deps): void {
       // browser keep it — the render only ever needs to happen once.
       "cache-control": "public, max-age=31536000, immutable",
     });
+  });
+
+  // Every successful output of a run as one .zip. Without it a run's redesigns can only be taken
+  // off the machine one file at a time, which is the whole reason a bake-off is awkward to share.
+  app.get("/api/runs/:id/download", requireSameOrigin(), async (c) => {
+    const id = c.req.param("id");
+    let m: store.Manifest | null;
+    try {
+      m = store.readManifest(id, runStoreOptions());
+    } catch (err) {
+      const status = (err as { status?: number })?.status ?? 400;
+      return c.json({ error: "invalid run id" }, status as 400 | 404);
+    }
+    if (!m) return c.json({ error: "run not found" }, 404);
+
+    const jobs = (m.jobs || []).filter((j) => j.status === "ok" && j.file);
+    if (!jobs.length) return c.json({ error: "this run has no successful outputs" }, 404);
+
+    const entries: ZipEntry[] = [];
+    for (const job of jobs) {
+      // job.file is "<runId>/<inputId>/<name>.html"; resolveInside re-checks it against OUTPUT_DIR
+      // rather than trusting a path read back off disk.
+      let abs: string;
+      try {
+        abs = resolveInside(store.OUTPUT_DIR, job.file as string, { decode: false }).full;
+      } catch (_) {
+        continue;
+      }
+      let data: Buffer;
+      let modified: Date | undefined;
+      try {
+        data = await fs.promises.readFile(abs);
+        modified = (await fs.promises.stat(abs)).mtime;
+      } catch (_) {
+        continue; // an output deleted from under us shouldn't fail the whole download
+      }
+      // Flatten one level below the run so the zip opens as <runId>/<input>/<file>.html.
+      entries.push({ name: String(job.file).split("/").slice(1).join("/") || `${job.id}.html`, data: new Uint8Array(data), modified });
+    }
+    if (!entries.length) return c.json({ error: "no output files are still on disk for this run" }, 404);
+
+    let zip: Uint8Array<ArrayBuffer>;
+    try {
+      zip = await buildZip(entries);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "could not build the archive" }, 500);
+    }
+    const safeId = String(m.runId || id).replace(/[^\w.-]+/g, "_") || "run";
+    return c.body(zip, 200, {
+      "content-type": "application/zip",
+      "content-disposition": `attachment; filename="${safeId}.zip"`,
+      "cache-control": "no-store",
+    });
+  });
+
+  // Re-run only the jobs that failed or were skipped, instead of paying for the whole fan-out
+  // again because one key was dead. Body: { jobIds?: string[], autoStart?: boolean }; with no
+  // jobIds every non-ok job is retried.
+  //
+  // Grouped by (input, prompt) and submitted with per-model quantities so the retry reproduces
+  // EXACTLY the failed set. Sending one run with the union of inputs/models/prompts would be
+  // simpler and would silently re-run combinations that already succeeded, which on this app
+  // means spending real money the user did not ask to spend.
+  app.post("/api/runs/:id/retry", requireSameOrigin(), async (c) => {
+    const id = c.req.param("id");
+    let m: store.Manifest | null;
+    try {
+      m = store.readManifest(id, runStoreOptions());
+    } catch (err) {
+      const status = (err as { status?: number })?.status ?? 400;
+      return c.json({ error: "invalid run id" }, status as 400 | 404);
+    }
+    if (!m) return c.json({ error: "run not found" }, 404);
+    if (activeRuns.get(id) && !activeRuns.get(id)?.finished) {
+      return c.json({ error: "this run is still going; wait for it to finish or cancel it first" }, 409);
+    }
+
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { jobIds?: unknown; autoStart?: unknown };
+    const wanted = Array.isArray(body.jobIds) ? new Set(body.jobIds.map((x) => String(x))) : null;
+    // store.Job is deliberately loose (a status plus an index signature) because store.ts doesn't
+    // own the job shape; narrow it here to the fields the runner actually writes and this route
+    // needs to rebuild a submission.
+    const retryable = ((m.jobs || []) as unknown as RetryJob[]).filter(
+      (j) => j.status === "error" || j.status === "skipped" || j.status === "cancelled",
+    );
+    const targets = wanted ? retryable.filter((j) => wanted.has(String(j.id))) : retryable;
+    if (!targets.length) return c.json({ error: "nothing to retry in this run" }, 400);
+
+    const config = (m.config || {}) as Record<string, unknown>;
+    const manifestPrompts = (Array.isArray(m.prompts) ? m.prompts : []) as ManifestPrompt[];
+    const promptById = new Map(manifestPrompts.map((p) => [p.id, p]));
+    const reference = config.reference as { images?: unknown; note?: string | null } | null | undefined;
+
+    // A model that has since been deleted or disabled is silently dropped by resolveModels rather
+    // than raising, so a retry could report "3 jobs" and quietly submit 2. Work out up front which
+    // models are still runnable, count only those, and hand the caller the dropped ids so the UI
+    // can say what will not come back.
+    const liveModelIds = new Set(loadModels().filter((mo) => mo.enabled !== false).map((mo) => mo.id));
+    const droppedModels = [...new Set(targets.map((j) => j.modelId).filter((mid) => !liveModelIds.has(mid)))];
+    const runnable = targets.filter((j) => liveModelIds.has(j.modelId));
+    if (!runnable.length) {
+      return c.json({ error: `none of these jobs' models are still available: ${droppedModels.join(", ")}`, droppedModels }, 400);
+    }
+
+    // inputId -> promptId -> modelId -> how many jobs of that exact combination need redoing.
+    // Nested maps rather than a joined string key so no id value can collide with a separator.
+    const groups = new Map<string, Map<string, Map<string, number>>>();
+    for (const job of runnable) {
+      const byPrompt = groups.get(job.inputId) ?? new Map<string, Map<string, number>>();
+      const byModel = byPrompt.get(job.promptId) ?? new Map<string, number>();
+      byModel.set(job.modelId, (byModel.get(job.modelId) ?? 0) + 1);
+      byPrompt.set(job.promptId, byModel);
+      groups.set(job.inputId, byPrompt);
+    }
+
+    const runIds: string[] = [];
+    for (const [inputId, byPrompt] of groups) {
+      for (const [promptId, models] of byPrompt) {
+        const prompt = promptById.get(promptId);
+        // A custom prompt is not addressable by id (resolvePrompts rebuilds it from its text), so
+        // pass the recorded text back through rather than losing it on retry.
+        const isCustom = prompt?.source === "custom";
+        runIds.push(
+          enqueueRun({
+            label: `Retry · ${m.runId || id}`,
+            mock: m.mock === true,
+            inputs: [inputId],
+            models: [...models.keys()],
+            prompts: isCustom ? { custom: String(prompt?.user || "") } : { presets: [promptId] },
+            modelQuantities: Object.fromEntries(models),
+            concurrency: config.concurrency as number | undefined,
+            poolConcurrency: config.poolConcurrency as number | undefined,
+            maxImages: config.maxImagesPerInput as number | undefined,
+            reference: reference?.images ? { images: reference.images, note: reference.note || undefined } : null,
+            brandStyleGuide: typeof config.brandStyleGuide === "string" ? config.brandStyleGuide : null,
+            autoStart: body.autoStart !== false,
+          }),
+        );
+      }
+    }
+    return c.json({ runIds, jobCount: runnable.length, ...(droppedModels.length ? { droppedModels } : {}) });
   });
 
   app.get("/api/runs/:id", (c) => {

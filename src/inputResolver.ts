@@ -39,6 +39,13 @@ interface InputItem {
   preview: string;
 }
 
+// NOTE: a directory-mtime cache was tried here and removed again (2026-08-09). It fingerprinted the
+// root plus its immediate subdirectories, which cannot see a file added two levels deep inside a
+// group (listImagesIn recurses without bound), and it left saveUploadedImages/deleteInput able to
+// re-list from a stale entry in the same request that wrote. Guarding all of that costs more than
+// the walk it saves: this folder holds a handful of screenshots and is read once per page load.
+// Correctness of "the file I just dropped in shows up" is the whole job of this listing.
+
 /**
  * Discover input items. Rules (per the spec):
  *   - A loose image file in input/ is a single-image subject.

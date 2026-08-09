@@ -45,11 +45,13 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 - **Every model at once.** Claude, GPT, Gemini, DeepSeek, and Qwen out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
 - **Many takes per model, one run.** Ask a single model for three variants and another for one, all in the same fan-out. A bake-off is more useful when you can see a model's range, not just one roll of the dice.
 - **A stack of prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
-- **A viewer worth using.** Start from an all-runs thumbnail gallery, filter by model or preset, set the column count, and preview at phone through desktop widths. Stars and hidden-output choices survive a refresh, and the original always sits first so you have something to compare against.
+- **A viewer worth using.** Start from an all-runs thumbnail gallery, search it, filter by model or preset, set the column count, and preview at phone through desktop widths. Stars and hidden-output choices survive a refresh, and the original always sits first so you have something to compare against. Take a whole run away as a zip when you want to review it offline.
+- **One dead key doesn't cost you the batch.** If a model fails or gets skipped because its keys are cooling down, retry just those jobs rather than paying for the whole fan-out again. Any past run can also be reloaded into the control panel exactly as it was and run again.
 - **A queue you control.** Park several batches before spending keys, start them together, add more work behind a live run, and drag waiting batches into the order you want.
 - **Paste your keys, skip the setup.** Drop in one key or a whole pile at once. It works out which service each belongs to, checking live when a key could belong to more than one, and files them in the right pool. Give each provider a stack of keys and it cycles through them, quietly benching the ones that start failing, then bringing them back later.
 - **Safe by design.** The HTML each model writes runs in a locked-down iframe. You can click around in it, but it cannot touch your data.
 - **It knows what it costs.** A per-run cost meter, plus an estimate before you hit Run, so a big fan-out never surprises you.
+- **It tells you when it's finished.** A fan-out runs for minutes, so if you have tabbed away it raises a desktop notification rather than a toast you will never see.
 - **Scriptable.** Everything in the UI has a command-line twin, and there is an MCP server so an AI agent can drive it too.
 
 ## A little deeper
@@ -57,12 +59,15 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 - **All config, no code.** Models and prompts live in `~/.redesign/config/` (set `REDESIGN_HOME` to move it), seeded on first run and shared by the packaged app and a from-source checkout alike. Add a model, disable one, or point it at a newer version without touching the app. The copies under `src/config/` are the shipped seeds, not your live settings.
 - **Reference images.** Drop or paste in a look you like, choose exactly which references to send, and every model borrows their mood and colors rather than their layout.
 - **Grounded by default.** Every run inventories the screenshot once with a vision model and hands that description to every model alongside the image, so redesigns keep the real content instead of quietly dropping a tab or inventing a metric. It measurably beat the ungrounded path on content fidelity, so it is simply how runs work now, with no switch to remember.
-- **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front. Your keys never hit disk in the clear.
+- **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front.
+- **Where your keys live.** In `.env` beside the app, written owner-only (`0600`), and nowhere else. They are never sent anywhere but the provider you configured, never written into a run's saved output or its key-health state, and they are stripped out of any provider error text before it is stored or shown. If you use the optional Connections sync, its session token is additionally encrypted at rest with DPAPI on Windows; on macOS and Linux that token is stored as a plain `0600` file.
 
 ## From the command line
 
 ```sh
 bun run src/index.ts run      # queue a run (add --mock for a free dry run)
+                              # --model-quantities id=n,id=n  per-model output counts
+                              # --brand-style-guide-file b.md  brand notes for every prompt
 bun run src/index.ts models   # models and how many keys each has
 bun run src/index.ts keys     # key health
 bun run src/index.ts mcp      # start the MCP server for agents

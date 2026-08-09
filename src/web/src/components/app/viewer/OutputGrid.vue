@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import { Badge } from '@/components/ui/badge';
 import { useViewerStore } from '@/stores/viewer';
 import { armFrameFocusGuard, useFrameFocusGuard } from '@/composables/useFrameFocusGuard';
@@ -10,6 +11,7 @@ import ErrorCard from './ErrorCard.vue';
 import { t } from '@/i18n';
 
 const store = useViewerStore();
+const router = useRouter();
 
 // Previews that autofocus themselves on load would otherwise scroll the page to whichever one
 // won the race. Re-arm on every run change, since that's when a fresh batch of frames loads.
@@ -27,6 +29,15 @@ function modelColor(id: string) {
 }
 function promptLabel(id: string) {
   return promptMap.value.get(id)?.label || id;
+}
+
+/** A single job's retry (ErrorCard's per-card button). Always exactly one job, so it always
+ *  lands in exactly one run — jump the viewer to it rather than leaving the user on this stale
+ *  page (store.retryJobs already toasted the outcome either way). */
+async function retryJob(jobId: string) {
+  const result = await store.retryJobs([jobId]);
+  const target = result?.runIds[0];
+  if (target) void router.push({ path: '/viewer', query: { run: target } });
 }
 
 const emptyMsg = computed(() => {
@@ -60,7 +71,7 @@ const emptyMsg = computed(() => {
       <ReferenceCard :input="group.input" />
       <template v-for="job in group.jobs" :key="job.id">
         <ErrorCard
-          v-if="job.status === 'error'"
+          v-if="job.status === 'error' || job.status === 'skipped'"
           :job="job"
           :model-label="modelLabel(job.modelId)"
           :model-color="modelColor(job.modelId)"
@@ -71,8 +82,10 @@ const emptyMsg = computed(() => {
           :scale="store.previewScale"
           :starred="store.isItemStarred(job.id)"
           :item-hidden="store.isItemHidden(job.id)"
+          :retry-disabled="store.isLive"
           @toggle-star="store.toggleItemStarred(job.id)"
           @toggle-hidden="store.toggleItemHidden(job.id)"
+          @retry="retryJob(job.id)"
         />
         <OutputCard
           v-else
@@ -92,6 +105,6 @@ const emptyMsg = computed(() => {
       </template>
     </template>
   </div>
-  <!-- eslint-disable-next-line vue/no-v-html -->
+  <!-- v-html: emptyMsg is our own i18n string (it carries inline markup), never model output. -->
   <div v-else class="p-16 text-center text-muted-foreground" v-html="emptyMsg" />
 </template>

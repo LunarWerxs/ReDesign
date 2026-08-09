@@ -26,6 +26,8 @@ const props = defineProps<{
 defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void }>();
 
 const rawUrl = computed(() => outputRawUrl(props.job.file || '', { measure: props.height === 'auto' }));
+// Distinct accessible name per iframe — see the comment on ScaledFrame's title prop.
+const frameTitle = computed(() => `${props.modelLabel} — ${props.promptLabel}`);
 
 // Server-side render-to-PNG (the sandboxed iframe is unreadable client-side); the fetch
 // keeps a spinner on the button for the few seconds headless Chromium needs.
@@ -146,6 +148,6 @@ const sub = () => {
         </Tooltip>
       </div>
     </div>
-    <ScaledFrame :raw-url="rawUrl" :rw="rw" :ar="ar" :height="height" :scale="scale" />
+    <ScaledFrame :raw-url="rawUrl" :title="frameTitle" :rw="rw" :ar="ar" :height="height" :scale="scale" />
   </div>
 </template>

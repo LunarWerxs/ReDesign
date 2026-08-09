@@ -25,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import * as store from "./store";
+import { readJSON } from "./util";
 import { INPUT_DIR } from "./inputResolver";
 import { resolveChromiumBrowser } from "./portable-window.mjs";
 
@@ -149,7 +150,13 @@ function firstOutputHtml(m: store.Manifest | null): string | null {
 /** Record `thumbName` (a run-dir-relative filename) on the manifest so summaries pick it up. */
 function recordThumb(runId: string, m: store.Manifest, thumbName: string): void {
   try {
-    store.writeManifest(runId, { ...m, thumb: thumbName });
+    // Re-read immediately before writing. The caller captured `m` BEFORE a render that can take
+    // up to RENDER_TIMEOUT_MS, and runReimagine's 750ms flush writes job results, counts and cost
+    // into the same file throughout — spreading the pre-render snapshot would silently discard
+    // them. Read the raw JSON rather than store.readManifest so this can't trip the stale-run
+    // settling path for a run that is legitimately still going.
+    const fresh = readJSON<store.Manifest | null>(store.manifestPath(runId), null) || m;
+    store.writeManifest(runId, { ...fresh, thumb: thumbName });
   } catch {
     /* the file is on disk regardless; a failed manifest write just means we may re-copy later */
   }
