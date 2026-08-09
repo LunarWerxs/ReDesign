@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.6.0] - 2026-08-09
 
 ### Security
 
@@ -103,6 +103,11 @@
   same request that wrote. Guarding that costs more than the walk it saved.
 - Tests for the untested `.env` rewriting in `server/settings.ts`, and request-level smoke coverage
   for the route modules that had none.
+- Take the shared kit's injection-proof `detached-spawn`. Its WMI-unavailable fallback built a
+  `cmd /c start ""` string and let cmd re-parse its own metacharacters, so an argv element holding
+  `&`, `|` or `^` (all legal in a Windows filename, and this primitive is handed file paths) broke
+  out as a separate command. It now hands off through PowerShell `Start-Process -ArgumentList`
+  with each argument pre-quoted, so nothing re-splits.
 - The README no longer claims keys never hit disk in the clear; it says where they actually live.
 
 ## [1.5.3] - 2026-08-06
