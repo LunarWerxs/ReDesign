@@ -26,8 +26,13 @@ Here are six of the redesigns a single run produced from one sample dashboard, c
 
 On Windows, download `redesign-windows-x64.exe` from
 [Releases](https://github.com/LunarWerxs/ReDesign/releases) and run it directly. It is an
-icon-bearing GUI executable with the web app embedded and no console window. The ZIP beside it is
-the smaller automatic-update transport.
+icon-bearing GUI executable with the web app embedded and no console window. The plain ZIP beside it
+is the smaller automatic-update transport.
+
+Want a system-tray icon? Take `redesign-windows-x64-with-tray.zip` instead, run
+`misc\Create-Shortcut.ps1` once, and launch from the shortcut it creates. The icon is drawn by a
+small separate launcher (`misc\lunarwerx-tray.exe`), so running `redesign.exe` on its own never
+produces one.
 
 To run from source on any supported OS, you need [Bun](https://bun.sh) 1.2 or newer.
 

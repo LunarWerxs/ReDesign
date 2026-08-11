@@ -88,6 +88,28 @@ jobs:
             # deterministic asset consumed by the compiled auto-updater.
             cp dist/redesign.exe "out/redesign-${target}.exe"
             (cd dist && 7z a -tzip "$GITHUB_WORKSPACE/out/redesign-${target}.zip" redesign.exe > /dev/null)
+            # A THIRD Windows asset: the same executable plus the misc/ tray toolkit, for anyone who
+            # wants the notification-area icon rather than a bare window. RēDesign draws no tray icon
+            # itself — misc/lunarwerx-tray.exe does, as a separate launcher — so without these files
+            # a downloaded build simply cannot have one, whatever the app's settings say.
+            #
+            # Deliberately a SEPARATE asset. The zip above is the auto-updater's transport and is
+            # asserted elsewhere to hold exactly one file; the updater also matches its asset by
+            # exact name, so this one (a different name) can never be mistaken for it.
+            tray="redesign-${target}-with-tray"
+            mkdir -p "tmp/${tray}/misc"
+            cp dist/redesign.exe "tmp/${tray}/"
+            cp misc/lunarwerx-tray.exe misc/ReDesign-Tray.json misc/ReDesign.ico \
+               misc/Create-Shortcut.ps1 misc/New-TrayShortcut.ps1 \
+               misc/Tray-Host.ps1 misc/ReDesign-Tray.ps1 misc/Tray-Launch.vbs \
+               "tmp/${tray}/misc/"
+            (cd tmp && 7z a -tzip "$GITHUB_WORKSPACE/out/${tray}.zip" "$tray" > /dev/null)
+            # The toolkit is the entire point of this asset, and a bundle missing it still looks
+            # fine, so assert rather than hope.
+            for f in lunarwerx-tray.exe ReDesign-Tray.json ReDesign.ico Create-Shortcut.ps1 \
+                     New-TrayShortcut.ps1 Tray-Host.ps1 ReDesign-Tray.ps1 Tray-Launch.vbs; do
+              test -f "tmp/${tray}/misc/$f" || { echo "::error::tray bundle is missing misc/$f"; exit 1; }
+            done
           elif [ -f dist/redesign ]; then
             tar -C dist -czf "out/redesign-${target}.tar.gz" redesign
           else
