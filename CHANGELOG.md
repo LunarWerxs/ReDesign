@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.6.3] - 2026-08-11
+
+### Changed
+
+- **Silent self-updates are now opt-in; the app always tells you instead.** Since 1.5 the daemon
+  quietly updated and restarted itself by default. It now follows the same policy as our other
+  apps: a check still runs on the same cadence, but by default an available update is announced
+  (a persistent toast with an "Update now" button, riding a new daemon-wide event stream at
+  `GET /api/events`) rather than installed behind your back. Setting `autoUpdate: true` restores
+  exactly the old silent behavior, active-run deferral and dirty-tree guard included, and the new
+  `updateNotify` setting can silence the announcements. The reasoning is borrowed from
+  QuickDictate's v0.5.4 change: an unattended installer means anyone able to publish a release
+  reaches every install within a day, so installing stays a human's click.
+
 ## [1.6.2] - 2026-08-10
 
 ### Added

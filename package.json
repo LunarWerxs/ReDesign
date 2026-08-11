@@ -1,6 +1,6 @@
 {
   "name": "redesign",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "license": "MIT",
   "private": true,
   "description": "Run UI/UX screenshots through many AI models and collect reimagined HTML prototypes.",
