@@ -82,8 +82,9 @@ bun run src/index.ts mcp      # start the MCP server for agents
 
 RēDesign pings LunarWerx's Studio endpoint (the same one its update check already uses) so we
 know roughly how many people run it. Each ping carries the app version, a coarse OS tag (e.g.
-`win11`, `macos`, `linux`), and a random install id generated once and stored locally, nothing
-else. Country is derived server-side from the request; no IP address is stored. It never sends
+`win11`, `macos`, `linux`), and a random install id generated once and stored locally. From that
+request, the server also derives and stores a coarse location (country, region, city, timezone),
+your network's ASN, locale, and a truncated user agent, but never an IP address. It never sends
 your account, your files, your screenshots, your API keys, or anything else about you or your
 machine. Set `REDESIGN_NO_PING=1` to turn it off entirely.
 

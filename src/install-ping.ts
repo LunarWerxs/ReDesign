@@ -10,10 +10,10 @@
  *     fetch to this same URL instead of adding a second one — packaged installs get the ping for
  *     free every time they check for updates.
  *   - pingInstallOnBoot(), fired once from cli/lifecycle.ts's serveCmd on every daemon start,
- *     covers everything github-updater.ts doesn't: from-source checkouts (which update via git
- *     through updater-engine.mjs, never touching this URL) and any packaged run that never opens
- *     the web UI (so the frontend-triggered update check never fires). Throttled to at most once
- *     per 24h via a persisted timestamp so restarting the daemon often never spams the endpoint.
+ *     covers packaged runs that never open the web UI (so the frontend-triggered update check
+ *     never fires). Throttled to at most once per 24h via a persisted timestamp so restarting the
+ *     daemon often never spams the endpoint. From-source checkouts (`bun run src/index.ts`) are
+ *     dev mode by the same `IS_PACKAGED` test util.ts uses elsewhere, so they never ping either.
  *
  * This repoints the DORMANT `recordPulse`/`POST /api/pulse` mechanism that used to live in
  * http/routes/bootstrap.ts: event-named posts to an operator-supplied REDESIGN_PULSE_URL that no
@@ -24,7 +24,7 @@
 import os from "node:os";
 import path from "node:path";
 import pkg from "../package.json";
-import { ROOT, readJSON, writeJSON } from "./util";
+import { IS_PACKAGED, ROOT, readJSON, writeJSON } from "./util";
 
 /** Shared by github-updater.ts so both call sites hit the exact same URL. */
 export const PING_URL = "https://studio.connections.icu/v1/app/redesign/latest";
@@ -85,13 +85,16 @@ export function coarseOsTag(): string {
   return process.platform;
 }
 
-/** Skip in dev/test/CI runs and whenever the owner opted out. */
+/** Skip in dev/test/CI runs, whenever running from a source checkout instead of the compiled
+ *  binary (`!IS_PACKAGED`, the same dev-mode test util.ts uses elsewhere), and whenever the
+ *  owner opted out. */
 function pingDisabled(): boolean {
   return (
     process.env.REDESIGN_NO_PING === "1" ||
     process.env.NODE_ENV === "test" ||
     process.env.BUN_ENV === "test" ||
-    Boolean(process.env.CI)
+    Boolean(process.env.CI) ||
+    !IS_PACKAGED
   );
 }
 

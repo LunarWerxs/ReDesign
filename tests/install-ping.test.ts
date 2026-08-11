@@ -6,13 +6,23 @@
  * tests/app-settings.test.ts), and stubs the process-global `fetch` (same pattern as
  * tests/connections.test.ts) so nothing here ever reaches the real network. `NODE_ENV` is "test"
  * throughout a `bun test` run (see tests/setup.ts's preload), which is itself one of the ping's
- * opt-out gates, so exercising the "enabled" path means temporarily unsetting it.
+ * opt-out gates, so exercising the "enabled" path means temporarily unsetting it. The ping is
+ * also gated on util.ts's `IS_PACKAGED` (never pings from a source checkout / dev mode), which
+ * `bun test` always runs under, so the "enabled" path additionally fakes that `true` via
+ * `mock.module` (same technique as tests/settings.test.ts).
  */
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, mock } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "../src/util";
 import { coarseOsTag, getInstallId, PING_URL, pingInstallOnBoot } from "../src/install-ping";
+
+// pingDisabled() also gates on util.ts's IS_PACKAGED (a compiled/packaged run, never a source
+// checkout), the same dev-detection idiom tests/settings.test.ts already mocks this way: a plain
+// snapshot taken before mocking, restored after, since mock.module mutates the live "../src/util"
+// namespace in place (so it retroactively affects install-ping.ts's already-bound import too).
+const realUtilLive = await import("../src/util");
+const realUtilSnapshot = { ...realUtilLive };
 
 const STATE_FILE = path.join(ROOT, "output", ".reimagine-state.json");
 
@@ -36,8 +46,10 @@ interface Sent {
   headers: Record<string, string>;
 }
 
-/** Run `fn` with NODE_ENV/CI/REDESIGN_NO_PING cleared (so the ping is actually enabled) and a
- *  captured `fetch`, restoring both the env and the real fetch afterwards. */
+/** Run `fn` with NODE_ENV/CI/REDESIGN_NO_PING cleared and IS_PACKAGED faked `true` (so the ping is
+ *  actually enabled, as if this were a real packaged install rather than the `bun test` source
+ *  checkout it actually is) and a captured `fetch`, restoring the env, the util mock, and the real
+ *  fetch afterwards. */
 async function withPingEnabled(
   respond: (() => Response) | "throw",
   fn: (sent: Sent[]) => Promise<void> | void,
@@ -45,6 +57,7 @@ async function withPingEnabled(
   const keys = ["NODE_ENV", "BUN_ENV", "CI", "REDESIGN_NO_PING"] as const;
   const previous = new Map(keys.map((k) => [k, process.env[k]]));
   for (const k of keys) delete process.env[k];
+  mock.module("../src/util", () => ({ ...realUtilSnapshot, IS_PACKAGED: true }));
 
   const sent: Sent[] = [];
   const realFetch = globalThis.fetch;
@@ -60,6 +73,7 @@ async function withPingEnabled(
     await fn(sent);
   } finally {
     globalThis.fetch = realFetch;
+    mock.module("../src/util", () => realUtilSnapshot);
     for (const [k, v] of previous) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -134,6 +148,17 @@ test("the boot ping is throttled to at most once per 24h", async () => {
     pingInstallOnBoot();
     await Bun.sleep(10);
     expect(sent).toEqual([]); // last ping was seconds ago, well inside the 24h floor
+  });
+});
+
+test("a source checkout (IS_PACKAGED false) never pings, even with every other gate cleared", async () => {
+  await withPingEnabled(() => new Response("{}", { status: 200 }), async (sent) => {
+    // withPingEnabled fakes IS_PACKAGED true; override it back to the real dev-mode value here to
+    // prove the boot ping is inert on a from-source run regardless of the other opt-out env vars.
+    mock.module("../src/util", () => ({ ...realUtilSnapshot, IS_PACKAGED: false }));
+    pingInstallOnBoot();
+    await Bun.sleep(10);
+    expect(sent).toEqual([]);
   });
 });
 
