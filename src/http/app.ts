@@ -22,6 +22,7 @@ import * as models from "./routes/models";
 import * as keys from "./routes/keys";
 import * as runs from "./routes/runs";
 import * as updates from "./routes/updates";
+import * as events from "./routes/events";
 import * as health from "./routes/health";
 import * as output from "./routes/output";
 import * as connections from "./routes/connections";
@@ -29,7 +30,12 @@ import * as costs from "./routes/costs";
 import * as settingsRoute from "./routes/settings";
 import { loadAppSettings } from "../app-settings";
 import { writeShutdownRequest } from "../instance";
-import { setAutoUpdateEnabled, setAutoUpdateIntervalSecs, AUTO_UPDATE_INTERVAL_DEFAULT_S } from "../auto-update";
+import {
+  setAutoUpdateEnabled,
+  setUpdateNotifyEnabled,
+  setAutoUpdateIntervalSecs,
+  AUTO_UPDATE_INTERVAL_DEFAULT_S,
+} from "../auto-update";
 
 interface StatusError extends Error {
   status?: number;
@@ -41,12 +47,14 @@ export interface AppHooks {
 }
 
 export function createApp(hooks: AppHooks = {}): Hono {
-  // Auto-update: ON by default (2026-07-21) → only an explicit `false` turns it off, so an
-  // install that never touched the toggle stays current on its own. The timer only STARTS after
-  // boot (startAutoUpdate in cli/lifecycle.ts); this just primes the runtime flags from the
+  // Auto-update: notify-only by default (2026-08-11) → the check timer runs whenever EITHER
+  // flag is on, but only an explicit `autoUpdate: true` opts into unattended silent installs;
+  // an explicit `updateNotify: false` is the only way to stop being told. The timer only STARTS
+  // after boot (startAutoUpdate in cli/lifecycle.ts); this just primes the runtime flags from the
   // persisted settings file (see src/app-settings.ts), createApp() in tests never spins a real timer.
   const settings = loadAppSettings();
-  setAutoUpdateEnabled(settings.autoUpdate !== false);
+  setAutoUpdateEnabled(settings.autoUpdate === true);
+  setUpdateNotifyEnabled(settings.updateNotify !== false);
   setAutoUpdateIntervalSecs(settings.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
 
   const app = new Hono();
@@ -73,6 +81,8 @@ export function createApp(hooks: AppHooks = {}): Hono {
   // dispatch order (bootstrap/pulse, inputs, prompts, models, keys, runs, updates, health-check,
   // output, then the Connections OAuth + settings-sync routes, registered before the SPA
   // fallback so its GET /oauth/* navigations aren't swallowed by it, then costs, then mountWeb LAST).
+  // events (GET /api/events, src/bus.ts's daemon-wide SSE) rides alongside updates since it
+  // exists for the same feature (auto-update's notify path).
   bootstrap.register(app, deps);
   inputs.register(app, deps);
   prompts.register(app, deps);
@@ -80,6 +90,7 @@ export function createApp(hooks: AppHooks = {}): Hono {
   keys.register(app, deps);
   runs.register(app, deps);
   updates.register(app, deps);
+  events.register(app, deps);
   health.register(app, deps);
   output.register(app, deps);
   connections.register(app, deps);

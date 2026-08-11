@@ -112,6 +112,40 @@ describe("routes/connections.ts", () => {
   });
 });
 
+describe("routes/settings.ts", () => {
+  it("GET /api/settings exposes updateNotify alongside autoUpdate", async () => {
+    const res = await app.request("/api/settings");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.ok).toBe(true);
+    expect(typeof body.autoUpdate).toBe("boolean");
+    expect(typeof body.updateNotify).toBe("boolean");
+  });
+
+  it("PUT /api/settings toggles updateNotify independently of autoUpdate", async () => {
+    const before = (await (await app.request("/api/settings")).json()) as Record<string, unknown>;
+    try {
+      const res = await app.request("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updateNotify: !before.updateNotify }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body.updateNotify).toBe(!before.updateNotify);
+      // Untouched by a PUT that only names updateNotify.
+      expect(body.autoUpdate).toBe(before.autoUpdate);
+    } finally {
+      // Restore, this writes the real output/.reimagine-settings.json.
+      await app.request("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updateNotify: before.updateNotify }),
+      });
+    }
+  });
+});
+
 describe("routes/health.ts", () => {
   it("GET /api/health returns a sane liveness shape", async () => {
     const res = await app.request("/api/health");

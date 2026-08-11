@@ -688,9 +688,19 @@ export default {
     label: 'Updates',
     versionLabel: 'Version',
     versionUnknown: 'unknown',
-    enableLabel: 'Automatic updates',
-    hint: 'Check for a newer local build on demand, or let RēDesign check on a schedule and apply updates automatically (only when the working tree is clean). Applying restarts the server to load the new code, deferred until no run is active.',
-    toggleFailed: 'Could not update auto-update setting',
+    notifyLabel: 'Notify me about updates',
+    enableLabel: 'Install updates automatically',
+    hint: 'Check for a newer local build on demand, or let RēDesign check on a schedule. "Notify me" only tells you when one is ready; "Install automatically" additionally applies it and restarts the server (only when the working tree is clean, and never while a run is active).',
+    toggleFailed: 'Could not update this setting',
+  },
+  // Daemon-wide "update available" toast (src/bus.ts's "update_available" -> GET /api/events),
+  // see @/stores/control/update-notify-events.ts. Distinct from the actions.update* keys above,
+  // which cover the manual "Check now" button's own result toasts.
+  notify: {
+    updateAvailableTitle: 'A RēDesign update is available',
+    updateAvailableBody: 'Click Update now to install it and restart the server.',
+    updateBlockedBody: 'Update cannot be applied yet',
+    updateNow: 'Update now',
   },
   portableMode: {
     label: 'Portable window',

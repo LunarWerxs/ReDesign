@@ -472,14 +472,17 @@ export interface AuthMe {
   picture: string | null;
 }
 
-// Local daemon settings (GET/PUT /api/settings), currently just the auto-update opt-in +
-// cadence (see src/auto-update.ts). Distinct from the Connections cloud-synced appearance blob
-// above (SyncStatus / /api/settings/sync).
+// Local daemon settings (GET/PUT /api/settings), currently the auto-update notify + auto-apply
+// opt-ins + cadence (see src/auto-update.ts). Distinct from the Connections cloud-synced
+// appearance blob above (SyncStatus / /api/settings/sync).
 export interface AppSettings {
   ok: true;
   /** The running build's package.json version; '' when it couldn't be read. */
   version: string;
+  /** Silent auto-apply + self-relaunch. OFF unless explicitly turned on. */
   autoUpdate: boolean;
+  /** Tell the UI when an update is available (GET /api/events, "update_available"). ON by default. */
+  updateNotify: boolean;
   autoUpdateIntervalSecs: number;
   portableMode: boolean;
   hideTrayIcon: boolean;
@@ -497,3 +500,13 @@ export type RunEvent =
   | { type: 'job'; runId: string; job: Job }
   | { type: 'done'; runId: string; manifest: Manifest }
   | { type: 'error'; runId: string; message: string; manifest?: Manifest };
+
+// Server-Sent Events emitted by GET /api/events (src/bus.ts) — daemon-wide, not scoped to a run.
+// Today the only publisher is src/auto-update.ts's notify path.
+export type DaemonEvent = {
+  type: 'update_available';
+  from: string | null;
+  to: string | null;
+  canApply: boolean;
+  reason: string | null;
+};

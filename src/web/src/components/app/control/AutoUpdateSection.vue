@@ -55,6 +55,14 @@ async function onToggle(enabled: boolean): Promise<void> {
   }
 }
 
+async function onToggleNotify(enabled: boolean): Promise<void> {
+  try {
+    await store.setUpdateNotify(enabled);
+  } catch {
+    toast.error(t('autoUpdate.toggleFailed'));
+  }
+}
+
 onMounted(() => {
   void store.loadAutoUpdateSetting();
 });
@@ -82,6 +90,17 @@ onMounted(() => {
           <DownloadCloudIcon v-else class="size-3.5" />
           {{ t('actions.checkUpdatesShort') }}
         </Button>
+      </template>
+    </SettingsRow>
+    <SettingsRow :label="t('autoUpdate.notifyLabel')">
+      <template #control>
+        <Loader2Icon v-if="store.autoUpdateLoading" class="size-3.5 animate-spin text-muted-foreground" />
+        <Switch
+          v-else
+          :model-value="store.updateNotifyEnabled"
+          :aria-label="t('autoUpdate.notifyLabel')"
+          @update:model-value="(v) => onToggleNotify(!!v)"
+        />
       </template>
     </SettingsRow>
     <SettingsRow :label="t('autoUpdate.enableLabel')">

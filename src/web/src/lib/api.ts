@@ -57,6 +57,8 @@ export const screenshotUrl = (rel: string) => `/api/output/screenshot?file=${enc
 // → rendered output preview → 404). See src/thumbnail.ts. Immutable-cached, so it's fetched once.
 export const runThumbnailUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/thumbnail`;
 export const eventsUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`;
+// Daemon-wide SSE (src/bus.ts) — not scoped to a run, see @/stores/control/update-notify-events.
+export const daemonEventsUrl = '/api/events';
 // A zip of the run's successful outputs. Binary, so this is a URL for a plain <a href> download,
 // never routed through httpJson (see components/app/control/ViewSettings.vue) — the route is
 // same-origin guarded, and a same-origin anchor navigation satisfies that guard on its own.
@@ -74,10 +76,12 @@ export const api = {
   authLogout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
   checkUpdate: () => request<UpdateStatus>('/api/updates'),
   applyUpdate: () => request<UpdateApplyResult>('/api/updates/apply', { method: 'POST' }),
-  // ── local daemon settings (auto-update opt-in + cadence, portable window opt-in) ─────────────
+  // ── local daemon settings (auto-update notify/apply opt-ins + cadence, portable window opt-in) ─
   getSettings: () => request<AppSettings>('/api/settings'),
   setAutoUpdate: (enabled: boolean) =>
     request<AppSettings>('/api/settings', { ...postJson({ autoUpdate: enabled }), method: 'PUT' }),
+  setUpdateNotify: (enabled: boolean) =>
+    request<AppSettings>('/api/settings', { ...postJson({ updateNotify: enabled }), method: 'PUT' }),
   setPortableMode: (enabled: boolean) =>
     request<AppSettings>('/api/settings', { ...postJson({ portableMode: enabled }), method: 'PUT' }),
   setHideTrayIcon: (enabled: boolean) =>

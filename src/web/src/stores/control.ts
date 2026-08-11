@@ -6,6 +6,7 @@ import { createKeysModelsActions } from './control/keys-models';
 import { createRunsActions } from './control/runs';
 import { createSyncActions } from './control/sync';
 import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
+import { createUpdateNotifyEventsActions } from './control/update-notify-events';
 import { createPortableModeSettingsActions } from './control/portable-mode-settings';
 import { createHideTraySettingsActions } from './control/hide-tray-settings';
 import { createOutputRetentionSettingsActions } from './control/output-retention-settings';
@@ -31,8 +32,12 @@ export const useControlStore = defineStore('control', () => {
   });
   // "Sync my settings with Connections" (opt-in cloud sync of theme), see @/stores/control/sync.
   const syncActions = createSyncActions();
-  // Silent auto-update opt-in, see @/stores/control/auto-update-settings.
+  // Auto-update notify + silent-apply opt-ins, see @/stores/control/auto-update-settings.
   const autoUpdateSettingsActions = createAutoUpdateSettingsActions();
+  // Daemon-wide "update available" push, see @/stores/control/update-notify-events. Shares the
+  // manual applyUpdate() from useSelfUpdate so "Update now" (toast) and the Settings ▸ Updates
+  // button are the same code path.
+  const updateNotifyEventsActions = createUpdateNotifyEventsActions({ applyUpdate: selfUpdate.applyUpdate });
   // Portable window opt-in, see @/stores/control/portable-mode-settings.
   const portableModeSettingsActions = createPortableModeSettingsActions();
   // Hide-tray-icon opt-in, see @/stores/control/hide-tray-settings.
@@ -100,8 +105,9 @@ export const useControlStore = defineStore('control', () => {
     syncStatus: syncActions.syncStatus,
     syncLoading: syncActions.syncLoading,
     syncActionBusy: syncActions.syncActionBusy,
-    // auto-update opt-in
+    // auto-update opt-ins
     autoUpdateEnabled: autoUpdateSettingsActions.autoUpdateEnabled,
+    updateNotifyEnabled: autoUpdateSettingsActions.updateNotifyEnabled,
     autoUpdateLoading: autoUpdateSettingsActions.autoUpdateLoading,
     appVersion: autoUpdateSettingsActions.appVersion,
     // portable window opt-in
@@ -176,6 +182,8 @@ export const useControlStore = defineStore('control', () => {
     applyAppearance: syncActions.applyAppearance,
     loadAutoUpdateSetting: autoUpdateSettingsActions.loadAutoUpdateSetting,
     setAutoUpdate: autoUpdateSettingsActions.setAutoUpdate,
+    setUpdateNotify: autoUpdateSettingsActions.setUpdateNotify,
+    connectUpdateEvents: updateNotifyEventsActions.connect,
     loadPortableModeSetting: portableModeSettingsActions.loadPortableModeSetting,
     setPortableMode: portableModeSettingsActions.setPortableMode,
     loadHideTrayIconSetting: hideTraySettingsActions.loadHideTrayIconSetting,

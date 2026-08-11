@@ -1,9 +1,10 @@
 /**
  * Local daemon settings that aren't secrets and aren't per-user cloud-synced content (that's
- * src/connections.ts's `appearance` blob). Currently just the auto-update opt-in (see
- * src/auto-update.ts): whether the daemon self-updates + restarts on a schedule, and the check
- * cadence. Persisted alongside the other small local state files under output/ (pulse install id,
- * Connections refresh token), never inside the tracked repo.
+ * src/connections.ts's `appearance` blob). Currently the auto-update notify + auto-apply opt-ins
+ * (see src/auto-update.ts): whether the daemon tells the UI about an update, whether it also
+ * self-updates + restarts unattended, and the check cadence. Persisted alongside the other small
+ * local state files under output/ (pulse install id, Connections refresh token), never inside the
+ * tracked repo.
  */
 import path from "node:path";
 import { ROOT, readJSON, writeJSON } from "./util";
@@ -13,13 +14,22 @@ const SETTINGS_FILE = path.join(ROOT, "output", ".reimagine-settings.json");
 
 export interface AppSettings {
   /**
-   * Auto-update the app on a schedule: check the update remote, and when a newer commit is
-   * available AND the working tree is clean (canApply), pull + reinstall + rebuild, then
-   * self-relaunch so the new code takes over, see src/auto-update.ts. ON by default since
-   * 2026-07-21: absent = ON, only an explicit `false` (the settings toggle) turns it off.
-   * A dirty tree is never updated, and a pending restart waits for any active run to finish.
+   * Silently auto-update the app on a schedule: check the update remote, and when a newer commit
+   * is available AND the working tree is clean (canApply), pull + reinstall + rebuild, then
+   * self-relaunch so the new code takes over, see src/auto-update.ts. OFF by default since
+   * 2026-08-11 (previously on-by-default 2026-07-21 → 2026-08-11): absent/undefined means
+   * notify-only (see `updateNotify` below), only an explicit `true` (the settings toggle) opts
+   * into unattended installs; an explicit `false` disables it outright. A dirty tree is never
+   * updated, and a pending restart waits for any active run to finish.
    */
   autoUpdate?: boolean;
+  /**
+   * Tell the UI when an update is available (src/auto-update.ts's notify path, delivered over
+   * GET /api/events). ON by default: absent = ON, only an explicit `false` turns it off. This is
+   * the always-on half of the policy — the periodic check runs whenever this OR `autoUpdate` is
+   * on, and this alone never installs anything; it just surfaces an "Update now" offer.
+   */
+  updateNotify?: boolean;
   /** Auto-update check cadence in seconds. Clamped to [900, 604800]; absent = 21600 (6 h). */
   autoUpdateIntervalSecs?: number;
   /**

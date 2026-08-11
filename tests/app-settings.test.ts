@@ -1,4 +1,4 @@
-import { test, expect, afterEach } from "bun:test";
+import { test, expect, afterEach, beforeEach } from "bun:test";
 import fs from "node:fs";
 import { SETTINGS_FILE, loadAppSettings, saveAppSettings } from "../src/app-settings";
 
@@ -15,6 +15,14 @@ afterEach(() => {
   } else if (fs.existsSync(SETTINGS_FILE)) {
     fs.rmSync(SETTINGS_FILE, { force: true });
   }
+});
+
+// Every case below asserts a DEFAULT first, so each must start from "no file on disk" — the
+// ambient local file may legitimately carry explicit opt-ins (that is what it exists for), and
+// reading it would test this machine's choices instead of the module's defaults. The snapshot
+// above puts the real file back afterwards.
+beforeEach(() => {
+  if (fs.existsSync(SETTINGS_FILE)) fs.rmSync(SETTINGS_FILE, { force: true });
 });
 
 test("portableMode persists through save + reload (default off)", () => {
@@ -37,4 +45,30 @@ test("hideTrayIcon persists through save + reload (default off)", () => {
 
   const onDisk = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
   expect(onDisk.hideTrayIcon).toBe(true);
+});
+
+// Unified auto-update policy (2026-08-11): autoUpdate flipped to off-by-default (only an explicit
+// `true` opts into silent installs), updateNotify is new and on-by-default. See src/auto-update.ts
+// for how absent reads as "notify-only", and src/http/app.ts's createApp() for where these exact
+// expressions (`=== true` / `!== false`) are applied at boot.
+test("autoUpdate persists through save + reload (default notify-only, not silent-apply)", () => {
+  const settings = loadAppSettings();
+  expect(settings.autoUpdate).not.toBe(true);
+
+  settings.autoUpdate = true;
+  saveAppSettings(settings);
+
+  const onDisk = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+  expect(onDisk.autoUpdate).toBe(true);
+});
+
+test("updateNotify persists through save + reload (default on)", () => {
+  const settings = loadAppSettings();
+  expect(settings.updateNotify).not.toBe(false);
+
+  settings.updateNotify = false;
+  saveAppSettings(settings);
+
+  const onDisk = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8"));
+  expect(onDisk.updateNotify).toBe(false);
 });

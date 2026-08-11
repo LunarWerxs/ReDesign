@@ -1,9 +1,9 @@
 /**
  * GET/PUT /api/settings, local daemon settings that aren't secrets and aren't the Connections
  * cloud-synced appearance blob (that's /api/settings/sync, see routes/connections.ts). Currently
- * the auto-update opt-in + cadence (see src/auto-update.ts, src/app-settings.ts) and the portable
- * window opt-in (src/portable-window.mjs). Mirrors RepoYeti's PUT /api/settings shape/pattern,
- * scoped down to what RēDesign actually has.
+ * the auto-update notify + auto-apply opt-ins + cadence (see src/auto-update.ts,
+ * src/app-settings.ts) and the portable window opt-in (src/portable-window.mjs). Mirrors
+ * RepoYeti's PUT /api/settings shape/pattern, scoped down to what RēDesign actually has.
  *
  * Also owns POST /api/portable-window: opens this daemon's own live URL in a chromeless Chromium
  * app window, used both by the settings toggle (turning portableMode on) and, in principle, by
@@ -21,8 +21,10 @@ import { openPortableWindow } from "../../portable-window.mjs";
 import { WINDOW_SIZE_HINT_PARAM, windowSizeHintFor } from "../../window-size";
 import {
   autoUpdateEnabled,
+  updateNotifyEnabled,
   getAutoUpdateIntervalSecs,
   setAutoUpdateEnabled,
+  setUpdateNotifyEnabled,
   setAutoUpdateIntervalSecs,
 } from "../../auto-update";
 
@@ -66,6 +68,7 @@ function snapshot() {
   return {
     version: appVersion(),
     autoUpdate: autoUpdateEnabled(),
+    updateNotify: updateNotifyEnabled(),
     autoUpdateIntervalSecs: getAutoUpdateIntervalSecs(),
     portableMode: loadAppSettings().portableMode === true,
     hideTrayIcon: loadAppSettings().hideTrayIcon === true,
@@ -84,10 +87,17 @@ export function register(app: Hono, _deps: Deps): void {
     const b = ((await c.req.json().catch(() => ({}))) || {}) as Record<string, unknown>;
     const settings = loadAppSettings();
 
-    // Toggling this starts/stops the daemon-wide auto-update timer (see auto-update.ts).
+    // Toggling either of these starts/stops the daemon-wide auto-update timer (see
+    // auto-update.ts): the timer runs whenever EITHER is on, so turning one off while the other
+    // stays on leaves the check itself running.
     if (typeof b.autoUpdate === "boolean") {
       settings.autoUpdate = b.autoUpdate;
       setAutoUpdateEnabled(b.autoUpdate);
+      saveAppSettings(settings);
+    }
+    if (typeof b.updateNotify === "boolean") {
+      settings.updateNotify = b.updateNotify;
+      setUpdateNotifyEnabled(b.updateNotify);
       saveAppSettings(settings);
     }
     if (typeof b.autoUpdateIntervalSecs === "number" && Number.isFinite(b.autoUpdateIntervalSecs)) {

@@ -74,6 +74,11 @@ async function refreshCurrentSurface() {
   await controlStore.bootstrap();
 }
 
+// Daemon-wide "update available" push (src/bus.ts) — opened once for the whole app's lifetime,
+// same as the settings-sync load below, so an update is announced whether or not a run is active
+// and whether or not the owner ever opens Settings. See @/stores/control/update-notify-events.
+controlStore.connectUpdateEvents();
+
 // Load the settings-sync status once for the whole app, and again after returning
 // from the "Sign in with Connections" redirect (`?connected=1` on success, `?connect=failed`
 // otherwise), then strip the query param so a refresh doesn't re-trigger anything.
