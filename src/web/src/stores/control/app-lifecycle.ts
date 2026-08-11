@@ -5,8 +5,6 @@ import type { UpdateStatus } from '@/types';
 import { errMessage, isRunnable } from './state';
 import type { ControlState } from './state';
 
-let appOpenedPulsed = false;
-
 /** Self-update now lives in the shared `useSelfUpdate` composable; bootstrap only
  *  needs its `checkForUpdate` to kick off a background check once data has loaded. */
 interface AppLifecycleDeps {
@@ -76,22 +74,10 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
       state.providerDefaults.value = data.providerDefaults || {};
       // The server keeps generating with the tab closed; pick those runs back up.
       void deps.resumeRuns();
-      if (!appOpenedPulsed) {
-        appOpenedPulsed = true;
-        void recordPulse('app_opened');
-      }
       void deps.checkForUpdate();
     } catch (e) {
       if (seq !== bootstrapSeq) return; // a newer bootstrap() already resolved (or failed) since
       toast.error(t('actions.loadFailed'), { description: errMessage(e) });
-    }
-  }
-
-  async function recordPulse(event: string, properties?: Record<string, unknown>) {
-    try {
-      await api.recordPulse(event, properties);
-    } catch {
-      /* pulse is non-critical */
     }
   }
 
@@ -110,5 +96,5 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
     }
   }
 
-  return { bootstrap, recordPulse, shutdownServer };
+  return { bootstrap, shutdownServer };
 }

@@ -17,12 +17,19 @@ import {
 import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
+import { coarseOsTag, getInstallId, PING_URL } from "./install-ping";
 import type { UpdateApplyResult, UpdateStatus } from "./updater-engine.mjs";
 
 const SERVICE = "redesign";
 const REPO = "LunarWerxs/ReDesign";
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
-const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+// Studio's app-ping proxy: relays GitHub's releases/latest JSON for this repo verbatim (so
+// everything below is unchanged from talking to api.github.com directly), and logs one
+// anonymous install-count row per hit server-side — random id + version + coarse OS, never an
+// IP, hostname, username, or path. This IS the update check, not a second network call added
+// alongside it. See src/install-ping.ts for the shared id/OS plumbing and the from-source
+// boot-time ping this doesn't cover.
+const LATEST_API = PING_URL;
 const VERSION = pkg.version;
 
 export interface ReleaseAsset {
@@ -93,10 +100,12 @@ function baseStatus(overrides: Partial<UpdateStatus>): UpdateStatus {
 }
 
 async function latestRelease(): Promise<Release> {
-  const response = await fetch(LATEST_API, {
+  const qs = new URLSearchParams({ v: VERSION, os: coarseOsTag() });
+  const response = await fetch(`${LATEST_API}?${qs.toString()}`, {
     headers: {
       accept: "application/vnd.github+json",
       "user-agent": `${SERVICE}/${VERSION}`,
+      "X-Install-Id": getInstallId(),
     },
   });
   if (!response.ok) throw new Error(`GitHub Releases API returned HTTP ${response.status}`);

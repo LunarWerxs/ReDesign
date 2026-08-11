@@ -124,7 +124,6 @@ export const useControlStore = defineStore('control', () => {
     bootstrap: appLifecycleActions.bootstrap,
     checkForUpdate: selfUpdate.checkForUpdate,
     applyUpdate: selfUpdate.applyUpdate,
-    recordPulse: appLifecycleActions.recordPulse,
     toggleInput: selectionContentActions.toggleInput,
     toggleModel: selectionContentActions.toggleModel,
     setModelQty: selectionContentActions.setModelQty,

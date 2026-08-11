@@ -78,6 +78,15 @@ bun run src/index.ts keys     # key health
 bun run src/index.ts mcp      # start the MCP server for agents
 ```
 
+## Privacy
+
+RēDesign pings LunarWerx's Studio endpoint (the same one its update check already uses) so we
+know roughly how many people run it. Each ping carries the app version, a coarse OS tag (e.g.
+`win11`, `macos`, `linux`), and a random install id generated once and stored locally, nothing
+else. Country is derived server-side from the request; no IP address is stored. It never sends
+your account, your files, your screenshots, your API keys, or anything else about you or your
+machine. Set `REDESIGN_NO_PING=1` to turn it off entirely.
+
 ## Tests
 
 ```sh

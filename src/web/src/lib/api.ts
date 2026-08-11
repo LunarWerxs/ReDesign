@@ -89,8 +89,6 @@ export const api = {
       '/api/portable-window',
       postJson({}),
     ),
-  recordPulse: (event: string, properties?: Record<string, unknown>) =>
-    request<{ ok: boolean; enabled: boolean }>('/api/pulse', postJson({ event, properties })),
   uploadInputs: (images: UploadImage[]) =>
     request<UploadResponse>('/api/inputs/upload', postJson({ images })),
   uploadReferences: (images: UploadImage[]) =>

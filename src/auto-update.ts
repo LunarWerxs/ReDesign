@@ -16,7 +16,6 @@
  * can't stack. Primed + toggled live from src/http/app.ts + the settings route; started/stopped in
  * src/cli/lifecycle.ts.
  */
-import { recordPulse } from "./http/routes/bootstrap";
 import { hasActiveRun } from "./http/runQueue";
 import { applyUpdate, checkForUpdate } from "./updater";
 
@@ -88,7 +87,6 @@ export function isRestartPending(): boolean {
 export function maybeApplyDeferredRestart(): boolean {
   if (!restartPending || hasActiveRun()) return false;
   restartPending = false;
-  void recordPulse("auto_update_restarting", { message: "deferred restart, no run active" });
   hooks.relaunch();
   return true;
 }
@@ -126,7 +124,6 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
 
   applying = true;
   try {
-    void recordPulse("auto_update_applying", { from: status.currentCommit, to: status.remoteCommit });
     const res = await hooks.apply();
     if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
     if (res.restartRequired) {
@@ -135,7 +132,6 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
         restartPending = true;
         return { checked: true, applied: true, relaunched: false, reason: "deferred-active-run" };
       }
-      void recordPulse("auto_update_restarting", { message: res.message });
       hooks.relaunch();
       return { checked: true, applied: true, relaunched: true };
     }

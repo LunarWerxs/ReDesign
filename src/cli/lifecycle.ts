@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { setAutoUpdateHooks, startAutoUpdate } from "../auto-update";
 import { loadModels, loadPrompts, resolveModels } from "../config";
 import { healthCheckModel } from "../healthCheck";
+import { pingInstallOnBoot } from "../install-ping";
 import { listInputs, listReferences } from "../inputResolver";
 import { findLiveInstance } from "../instance";
 import { openUi } from "../open-ui";
@@ -157,6 +158,9 @@ export async function healthCheckCmd(args: Args): Promise<void> {
 
 export async function serveCmd(args: Args): Promise<void> {
   cleanupStaleUpdateArtifacts();
+  // Anonymous install ping (see src/install-ping.ts): fire-and-forget, throttled to at most once
+  // per 24h, opt out with REDESIGN_NO_PING=1. Never awaited — must never delay boot.
+  pingInstallOnBoot();
   // Boot the web UI + API in-process, the same server as `npm start`, but reachable from the one
   // `redesign` command an agent already knows. --port/--host override (read by http/serve.ts at
   // load, so set them BEFORE importing it).

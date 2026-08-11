@@ -1,15 +1,14 @@
 /**
  * GET /api/bootstrap, the single payload the web UI loads on boot.
- * POST /api/pulse, fire-and-forget product-analytics pulse (no-op until a pulse URL is set).
- * Ported from server.js (both routes + the inline recordPulse() helper).
+ * Ported from server.js.
+ *
+ * This used to also carry POST /api/pulse, a dormant event-pulse route that posted to an
+ * operator-supplied REDESIGN_PULSE_URL no collector has ever existed for. Retired in favor of
+ * the real anonymous install ping in src/install-ping.ts (see cli/lifecycle.ts's serveCmd and
+ * github-updater.ts), which needs no client-driven route at all.
  */
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
-import { requireSameOrigin } from "../origin-guard";
-import { ROOT, readJSON, writeJSON } from "../../util";
 import { listInputs, listReferences } from "../../inputResolver";
 import {
   keySnapshot,
@@ -21,39 +20,6 @@ import * as store from "../../store";
 import { runStoreOptions } from "../runQueue";
 import { spendToDate } from "../../runner";
 import { PROVIDER_DEFAULTS } from "../../config/shared";
-
-// Fire-and-forget product pulse, a no-op until REDESIGN_PULSE_URL (or the shared
-// CONNECTIONS_PULSE_URL) is set. Kept inline; no dedicated module (mirrors server.js).
-const PULSE_STATE = path.join(ROOT, "output", ".reimagine-state.json");
-
-interface PulseState {
-  pulseInstallId?: string;
-  analyticsInstallId?: string;
-  [key: string]: unknown;
-}
-
-async function recordPulse(event: string, properties?: unknown): Promise<{ ok: boolean; enabled: boolean }> {
-  const url = (process.env.REDESIGN_PULSE_URL || process.env.CONNECTIONS_PULSE_URL || "").trim();
-  if (!url) return { ok: true, enabled: false };
-  const state = readJSON<PulseState>(PULSE_STATE, {});
-  if (!state.pulseInstallId) {
-    state.pulseInstallId = state.analyticsInstallId || crypto.randomUUID();
-    delete state.analyticsInstallId;
-    fs.mkdirSync(path.dirname(PULSE_STATE), { recursive: true });
-    writeJSON(PULSE_STATE, state);
-  }
-  const token = (process.env.REDESIGN_PULSE_TOKEN || process.env.CONNECTIONS_PULSE_TOKEN || "").trim();
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ source: "connections", app: "redesign", installId: state.pulseInstallId, event, properties, ts: new Date().toISOString() }),
-    });
-    return { ok: res.ok, enabled: true };
-  } catch {
-    return { ok: false, enabled: true };
-  }
-}
 
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/bootstrap", (c) => {
@@ -75,12 +41,4 @@ export function register(app: Hono, _deps: Deps): void {
       providerDefaults: PROVIDER_DEFAULTS,
     });
   });
-
-  app.post("/api/pulse", requireSameOrigin(), async (c) => {
-    const body = ((await c.req.json().catch(() => ({}))) || {}) as { event?: string; properties?: unknown };
-    const result = await recordPulse(String(body.event || ""), body.properties);
-    return c.json(result, result.ok ? 200 : 400);
-  });
 }
-
-export { recordPulse };
