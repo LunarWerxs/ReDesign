@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.6.1] - 2026-08-10
+
+### Added
+
+- **A Windows download that can show a system-tray icon.** The new
+  `redesign-windows-x64-with-tray.zip` bundles the same executable with the `misc\` tray toolkit.
+  RēDesign draws no tray icon itself, a small separate launcher does, so a release download could not
+  have one however its settings were set, and the script that sets it up was reachable only from a
+  clone. Grab that zip, run `misc\Create-Shortcut.ps1` once, and launch from the shortcut. The
+  plain zip is unchanged: it is the automatic updater's transport and stays a single file.
+
+### Fixed
+
+- **The tray icon survives an Explorer restart.** When the Windows shell restarts it destroys every
+  tray icon and expects each app to add its own back. The launcher never listened for that, so the
+  icon vanished for the rest of the session while the app kept running normally, and relaunching
+  the shortcut only reopened the UI.
+- **A tray icon that fails to appear at startup now retries instead of giving up.** The launcher
+  assumed its first attempt had worked; if it had not (most often because the taskbar did not exist
+  yet, on a launcher started at logon), nothing ever tried again.
+
 ## [1.6.0] - 2026-08-09
 
 ### Security
