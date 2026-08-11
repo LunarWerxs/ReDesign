@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.6.2] - 2026-08-10
+
+### Added
+
+- **Anonymous install ping**, via the same Studio endpoint the update check already calls
+  (`studio.connections.icu/v1/app/redesign/latest`, which returns GitHub's `releases/latest`
+  JSON verbatim). Packaged builds get it for free on every update check, decorated with a random
+  install id and the app version; a new boot-time ping covers from-source-never-touches-that-URL
+  and headless runs that never open the web UI, throttled to once per 24h and never fired from a
+  source checkout or dev/test/CI. Every failure is swallowed; nothing about the run (files,
+  screenshots, API keys) is sent. Documented in README's Privacy section, opt out with
+  `REDESIGN_NO_PING=1`.
+
+### Removed
+
+- **The dormant `REDESIGN_PULSE_URL` pulse mechanism** (`POST /api/pulse`, its
+  `bootstrap.ts` `recordPulse` helper, and every call site in `auto-update.ts`/`updates.ts`/
+  `app-lifecycle.ts`), deleted outright. No collector ever existed for it; the install ping above
+  replaces it.
+
 ## [1.6.1] - 2026-08-10
 
 ### Added
