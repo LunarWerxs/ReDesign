@@ -39,7 +39,7 @@
     "status": "bun run src/index.ts status",
     "stop": "bun run src/index.ts stop",
     "mcp": "bun run src/index.ts mcp",
-    "test": "bun test tests",
+    "test": "bun test tests --timeout 20000",
     "typecheck": "tsc --noEmit && bun run check:libtypes",
     "check:libtypes": "bun run scripts/check-lib-types.mjs",
     "lint": "biome lint --error-on-warnings .",

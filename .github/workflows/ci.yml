@@ -36,7 +36,12 @@ jobs:
       # running it three times just to see the same output is wasted matrix minutes.
       - if: runner.os == 'Linux'
         run: bun run lint
-      - run: bun test tests
+      # Via the script, not a bare `bun test tests`, so CI and a local run share one command and one
+      # timeout. Bun's default is 5s per test/hook, which several tests here sit uncomfortably close
+      # to: the updater-engine cases spend 2-3s each driving real git, and the tray hook shells out
+      # to PowerShell. Fine on a dev box, not on a cold windows-latest runner, which went red on
+      # exactly that. Same 20s the sibling repos use.
+      - run: bun run test
         env:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
 

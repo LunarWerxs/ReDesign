@@ -58,6 +58,13 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
   // absolute path, so a committed copy would point at whatever machine last built it
   // (and fail this check in CI). It is git-ignored, never committed. Regenerate it
   // fresh here so these assertions validate THIS checkout's launcher chain.
+  //
+  // The explicit timeout is not decoration. Bun defaults a hook to 5s, and this one pays for a
+  // cold PowerShell start plus COM (WScript.Shell) on whatever machine is running it: ~0.35s on a
+  // warm dev box, but past 5s on a GitHub windows-latest runner, where it failed the whole daemon
+  // job with "a beforeEach/afterEach hook timed out for this test" at 5057ms. Nothing here is slow
+  // by design, so the budget is generous rather than tuned; the point is that a cold runner is
+  // allowed to be an order of magnitude slower than a dev box without going red.
   beforeAll(() => {
     try {
       cp.execFileSync(
@@ -68,7 +75,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     } catch (_) {
       // If generation fails, the existence assertion below surfaces it.
     }
-  });
+  }, 60_000);
 
   it('a "RēDesign" shortcut exists in the project root', () => {
     expect(fs.existsSync(lnkPath)).toBe(true);
