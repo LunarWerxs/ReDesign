@@ -37,6 +37,17 @@ import cp from "node:child_process";
 
 const describeWin32 = process.platform === "win32" ? describe : describe.skip;
 
+// Every case below that actually launches something (the .lnk regeneration hook, -SelfTest, the
+// cscript echo-probe, the COM shortcut resolve, the icon load) pays for a cold PowerShell or
+// cscript start plus COM. Measured at 0.33-0.41s each on a warm dev box; a cold, loaded
+// windows-latest runner has been clocked around 10x that on this exact class, which lands them on
+// bun's 5s default's doorstep. The beforeAll below went over it on 2026-08-12 (5057ms) and held the
+// whole daemon job red; the other four were one slow runner behind it. One stated allowance,
+// deliberately generous rather than tuned, because nothing here is slow BY DESIGN and the only
+// thing being bounded is a genuine hang. scripts/checks/spawn-test-without-timeout.mjs enforces
+// that this stays stated.
+const SPAWNS_POWERSHELL = 60_000;
+
 describeWin32("tray launcher: root shortcut → environment + tray icon", () => {
   const repoRoot = path.join(import.meta.dir, "..");
   const lnkPath = path.join(repoRoot, "RēDesign.lnk");
@@ -59,12 +70,9 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
   // (and fail this check in CI). It is git-ignored, never committed. Regenerate it
   // fresh here so these assertions validate THIS checkout's launcher chain.
   //
-  // The explicit timeout is not decoration. Bun defaults a hook to 5s, and this one pays for a
-  // cold PowerShell start plus COM (WScript.Shell) on whatever machine is running it: ~0.35s on a
-  // warm dev box, but past 5s on a GitHub windows-latest runner, where it failed the whole daemon
-  // job with "a beforeEach/afterEach hook timed out for this test" at 5057ms. Nothing here is slow
-  // by design, so the budget is generous rather than tuned; the point is that a cold runner is
-  // allowed to be an order of magnitude slower than a dev box without going red.
+  // The allowance matters more here than anywhere else in the file: bun blames a hook timeout on an
+  // unnamed test ("a beforeEach/afterEach hook timed out for this test"), so when this one went over
+  // on windows-latest the red run did not even say what had timed out.
   beforeAll(() => {
     try {
       cp.execFileSync(
@@ -75,7 +83,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     } catch (_) {
       // If generation fails, the existence assertion below surfaces it.
     }
-  }, 60_000);
+  }, SPAWNS_POWERSHELL);
 
   it('a "RēDesign" shortcut exists in the project root', () => {
     expect(fs.existsSync(lnkPath)).toBe(true);
@@ -417,7 +425,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     }
     expect(failed).toBe(false);
     expect(out).toContain("REDESIGN_TRAY_SELFTEST_OK");
-  });
+  }, SPAWNS_POWERSHELL);
 
   // Proves the SHARED Tray-Launch.vbs's auto-discovery actually resolves to ReDesign's
   // adapter on THIS checkout, without really launching it (no daemon/tray side effects).
@@ -454,7 +462,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     } finally {
       fs.rmSync(probeDir, { recursive: true, force: true });
     }
-  });
+  }, SPAWNS_POWERSHELL);
 
   it("resolves the .lnk for real and confirms it points at THIS repo", () => {
     if (!fs.existsSync(lnkPath)) return;
@@ -495,7 +503,7 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(fs.existsSync(path.join(path.dirname(link.TargetPath!), (link.Arguments || "").trim()))).toBe(true);
     expect(samePath(link.WorkingDirectory, repoRoot)).toBe(true);
     expect(samePath((link.IconLocation || "").replace(/,\d+$/, ""), icoPath)).toBe(true);
-  });
+  }, SPAWNS_POWERSHELL);
 
   it("the tray icon file loads as a real icon", () => {
     if (!fs.existsSync(lnkPath) || !fs.existsSync(icoPath)) return;
@@ -509,5 +517,5 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
       iconOk = false;
     }
     expect(iconOk).toBe(true);
-  });
+  }, SPAWNS_POWERSHELL);
 });

@@ -36,12 +36,15 @@ jobs:
       # running it three times just to see the same output is wasted matrix minutes.
       - if: runner.os == 'Linux'
         run: bun run lint
-      # Via the script, not a bare `bun test tests`, so CI and a local run share one command and one
-      # timeout. Bun's default is 5s per test/hook, which several tests here sit uncomfortably close
-      # to: the updater-engine cases spend 2-3s each driving real git, and the tray hook shells out
-      # to PowerShell. Fine on a dev box, not on a cold windows-latest runner, which went red on
-      # exactly that. Same 20s the sibling repos use.
-      - run: bun run test
+      # Repo guardrail (ported from AgentHydra's architect): fails if a test OR a lifecycle hook
+      # reaches a subprocess while inheriting bun's 5s default timeout. Such a case measures the
+      # runner, not its own assertions, and a cold windows-latest box runs this class ~10x slower
+      # than a dev machine. This repo lost its Windows leg to exactly that on 2026-08-12: the
+      # tray-launcher beforeAll regenerates a .lnk through PowerShell + COM, 0.35s locally, 5057ms
+      # there. Linux only: the rule reads source, so running it three times says the same thing.
+      - if: runner.os == 'Linux'
+        run: bun run check:spawntimeout
+      - run: bun test tests
         env:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
 
