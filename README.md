@@ -92,9 +92,17 @@ machine. Set `REDESIGN_NO_PING=1` to turn it off entirely.
 
 ```sh
 bun test tests
+bun run check:spawntimeout   # repo guardrail, also a CI step
 ```
 
 Fully offline. No keys, no spend.
+
+`check:spawntimeout` fails a test, or a lifecycle hook, that reaches a subprocess while inheriting
+bun's 5s default. State one: `test(name, fn, 20_000)`, or `beforeAll(fn, 20_000)` for a hook, where
+the timeout is the second argument. Such a case times the machine rather than its own assertions,
+and a cold Windows CI runner runs that class roughly 10x slower than a dev box. The tray-launcher
+suite is the local example: five cases at 0.33-0.41s each here, one of which crossed 5s on
+windows-latest and held the whole daemon job red until it was given an allowance.
 
 ## License
 
