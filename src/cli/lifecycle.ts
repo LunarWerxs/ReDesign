@@ -195,16 +195,37 @@ export async function serveCmd(args: Args): Promise<void> {
   setAutoUpdateHooks({
     relaunch: () => {
       try {
-        // process.argv[0] is the node executable path; process.execPath is the documented,
-        // always-defined equivalent, used here only as the guard's fallback (never expected to
-        // actually differ at runtime).
-        const execPath = process.argv[0] ?? process.execPath;
-        const child = spawn(execPath, process.argv.slice(1), {
+        // process.execPath + the REAL args, never process.argv[0..1]. That pair is only the node
+        // executable + script in a source checkout; inside a `bun build --compile` binary it is the
+        // placeholder pair ["bun", "B:/~BUN/root/redesign.exe"] — argv[0] is the literal string
+        // "bun" (not a path) and argv[1] is a virtual path that exists only inside the running
+        // binary. Respawning it fails with `Module not found "B:/~BUN/root/redesign.exe"` where Bun
+        // happens to be installed, and cannot resolve "bun" at all on the machines a compiled
+        // release exists FOR. spawn() still resolves and returns a child (which then dies), so the
+        // catch below never fires and we shut down 800ms later expecting a successor that is
+        // already gone — an applied update leaving ZERO daemons.
+        const isCompiled =
+          (globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ === true;
+        const scriptPath = process.argv[1];
+        const relaunchArgs =
+          isCompiled || !scriptPath ? process.argv.slice(2) : [scriptPath, ...process.argv.slice(2)];
+        const child = spawn(process.execPath, relaunchArgs, {
           cwd: process.cwd(),
           detached: true,
           stdio: "ignore",
           windowsHide: true,
-          env: { ...process.env, REDESIGN_RELAUNCH: "1" },
+          env: {
+            ...process.env,
+            REDESIGN_RELAUNCH: "1",
+            // The port we are actually SERVING on, not the one we preferred. serve.ts reads PORT
+            // for its REDESIGN_RELAUNCH=1 branch, which binds it with NO findFreePort probe — so on
+            // a daemon that hopped (foreign process on the preferred port), handing over the
+            // preferred port aims the successor's bindWithRetry at a port nobody is releasing: it
+            // retries, fails, and the update takes the daemon down for good. With the bound port it
+            // rebinds the socket the predecessor is in the middle of freeing, which is exactly what
+            // that branch was written to do, and the open tab's SSE reconnects instead of dying.
+            PORT: String(server.port),
+          },
         });
         child.unref();
       } catch (e) {
