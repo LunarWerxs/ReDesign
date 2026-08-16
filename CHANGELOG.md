@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.6.6] - 2026-08-15
+
+### Fixed
+
+- **Quitting from the tray icon while an update is installing no longer leaves you with no app at
+  all.** Applying an update starts the replacement daemon and shuts the old one down 800ms later.
+  For that fraction of a second the replacement was a CHILD of the daemon on its way out, and the
+  tray's Quit does not stop one process, it force-kills a whole process tree, so a Quit landing in
+  that window killed both. Neither `detached: true` nor `.unref()` removes a child from its
+  parent's tree on Windows, which is exactly why the shared launch helper exists; the relaunch
+  simply never used it. Measured directly: with the old spawn the replacement dies to a
+  tray-style tree-kill, with the new one it survives.
+- **The relaunch now survives Windows throwing away the environment.** That launch helper hands
+  the process off to Windows' own process-creation service, which does not pass on environment
+  variables, and the port and the "you are the replacement" signal were both environment
+  variables. Left as they were, the replacement would have bound a fresh port instead of taking
+  over its predecessor's, stranding whatever tab you had open. Both now travel as command-line
+  arguments, which that service does deliver, with the environment kept as a fallback for macOS
+  and Linux.
+
 ## [1.6.5] - 2026-08-15
 
 ### Fixed
