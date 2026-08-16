@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.6.5] - 2026-08-15
+
+### Fixed
+
+- **An applied update no longer takes RēDesign down.** On a downloaded release build, installing an
+  update stopped the daemon and started nothing in its place. The relaunch built its successor's
+  command from `process.argv[0..1]`, which is the runtime and the script in a source checkout but,
+  inside a compiled single-file executable, is a placeholder pair pointing at a virtual path that
+  exists only inside the running binary. Respawning it fails immediately, and on the machines a
+  compiled release exists for (no runtime installed, which is the entire pitch) the command cannot
+  resolve at all. Nothing caught it, because the failure is in the child: the spawn call itself
+  succeeds, so the guard that exists precisely to never shut down without a successor saw one and
+  stepped aside. The update was always written to disk correctly, so an install on an older build
+  recovers the moment you start it again, and this is the last time it will need to.
+- **An update no longer strands the daemon on a port nobody is releasing.** The successor was handed
+  the port this daemon *preferred*, not the one it was actually serving on, and those diverge for
+  good the first time anything else holds the preferred port. The relaunch branch binds that port
+  directly, with no free-port probe, precisely so it can take over its predecessor's socket; aimed
+  at a port a foreign process is sitting on, it simply retried until it gave up, so the update took
+  the daemon down permanently rather than handing it over. It now receives the bound port, which is
+  the socket actually being freed.
+
 ## [1.6.4] - 2026-08-11
 
 ### Fixed
