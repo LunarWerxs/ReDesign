@@ -6,6 +6,8 @@
  * entry (src/cli/main.ts) stays a thin dispatcher.
  */
 import { spawn } from "node:child_process";
+import { buildDetachedSpawn } from "../detached-spawn.mjs";
+import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { setAutoUpdateHooks, startAutoUpdate } from "../auto-update";
 import { loadModels, loadPrompts, resolveModels } from "../config";
 import { healthCheckModel } from "../healthCheck";
@@ -166,6 +168,13 @@ export async function serveCmd(args: Args): Promise<void> {
   // load, so set them BEFORE importing it).
   if (args.port) process.env.PORT = String(args.port);
   if (args.host) process.env.HOST = String(args.host);
+  // The auto-update successor is signalled BOTH by --relaunch and by REDESIGN_RELAUNCH=1. The flag
+  // is the load-bearing half: the relaunch is handed to WMI Win32_Process.Create on win32 (see the
+  // relaunch hook below), which takes a command LINE and does NOT inherit the caller's environment
+  // block, so an env-only signal reaches the transient powershell.exe and never the successor
+  // daemon. Set here, before the single-instance guard reads it and before http/serve.ts is
+  // imported (it reads both PORT and REDESIGN_RELAUNCH at module load).
+  if (args.relaunch) process.env.REDESIGN_RELAUNCH = "1";
 
   // Single-instance guard: if a RedDesign daemon is already serving (found via the runtime
   // pointer, or by probing the preferred port directly), don't start a second one, it would
@@ -182,8 +191,11 @@ export async function serveCmd(args: Args): Promise<void> {
   }
   const { startServer, shutdown } = await import("../http/serve");
   const server = await startServer();
+  // Where we ACTUALLY landed — serve.ts may have hopped past a held port. Typed optional by
+  // Bun.serve, so fall back to the same preference serve.ts itself computes.
+  const boundPort = server.port ?? (Number.parseInt(process.env.PORT ?? "", 10) || 5178);
   if (args.openUi) {
-    const url = `http://127.0.0.1:${server.port}/`;
+    const url = `http://127.0.0.1:${boundPort}/`;
     if (!openUi(url)) console.error(C.yellow(`Could not open a browser automatically. Open ${url} manually.`));
   }
 
@@ -206,12 +218,24 @@ export async function serveCmd(args: Args): Promise<void> {
         // already gone — an applied update leaving ZERO daemons.
         const isCompiled =
           (globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ === true;
-        const scriptPath = process.argv[1];
-        const relaunchArgs =
-          isCompiled || !scriptPath ? process.argv.slice(2) : [scriptPath, ...process.argv.slice(2)];
-        const child = spawn(process.execPath, relaunchArgs, {
+        const relaunchArgv = buildRelaunchArgv(process.argv, {
+          execPath: process.execPath,
+          isCompiled,
+          boundPort,
+          // `serve` is IMPLICIT on a double-clicked release build (main.ts falls back to it when
+          // argv is empty). Appending flags to that empty list would put a flag in the command
+          // slot and the successor would dispatch on "--relaunch" instead of serving.
+          command: "serve",
+        });
+        // Through buildDetachedSpawn, not a plain spawn. `detached: true` is NOT a process-tree
+        // escape on Windows — the shared primitive's own header says so, and that is why it
+        // exists. Left as a plain spawn the successor stays inside THIS process's tree for the
+        // whole ~800ms handoff, so a tray Quit (`taskkill /T /F`) landing in that window kills the
+        // outgoing daemon AND its replacement, leaving the user with none.
+        const plan = buildDetachedSpawn(process.platform, relaunchArgv);
+        const child = spawn(plan.argv[0] as string, plan.argv.slice(1), {
           cwd: process.cwd(),
-          detached: true,
+          detached: plan.detached,
           stdio: "ignore",
           windowsHide: true,
           env: {
@@ -224,7 +248,7 @@ export async function serveCmd(args: Args): Promise<void> {
             // retries, fails, and the update takes the daemon down for good. With the bound port it
             // rebinds the socket the predecessor is in the middle of freeing, which is exactly what
             // that branch was written to do, and the open tab's SSE reconnects instead of dying.
-            PORT: String(server.port),
+            PORT: String(boundPort),
           },
         });
         child.unref();
