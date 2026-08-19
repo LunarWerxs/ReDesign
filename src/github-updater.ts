@@ -30,6 +30,17 @@ const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 // alongside it. See src/install-ping.ts for the shared id/OS plumbing and the from-source
 // boot-time ping this doesn't cover.
 const LATEST_API = PING_URL;
+/**
+ * Resilience fallback, used only when the Studio proxy fails (see latestRelease). GitHub's own
+ * releases/latest is the right backstop precisely because it is the one URL here a rename
+ * cannot orphan: GitHub redirects both owner and repo renames.
+ *
+ * Why this exists (YTSort, 2026-08): a shipped artifact whose only update URL later stopped
+ * resolving left every install silently polling a dead link for six months, with no signal to
+ * the users or the maintainer. One hardcoded endpoint and no second opinion is that same
+ * failure waiting to happen.
+ */
+const GITHUB_LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const VERSION = pkg.version;
 
 export interface ReleaseAsset {
@@ -99,17 +110,58 @@ function baseStatus(overrides: Partial<UpdateStatus>): UpdateStatus {
   };
 }
 
+/**
+ * Ask GitHub directly after the Studio proxy failed. Carries no install id and no version/os
+ * telemetry: a plain unauthenticated read, well inside GitHub's anonymous rate limit.
+ *
+ * If this fails too, the ORIGINAL failure is reported. The primary endpoint is the one an
+ * operator needs to hear about; leading with "GitHub said 403" would send them chasing the
+ * backstop instead of the thing that actually broke.
+ */
+async function githubFallbackRelease(
+  common: Record<string, string>,
+  primaryError: unknown,
+  primaryStatus: number | undefined,
+): Promise<Release> {
+  let fallback: Response;
+  try {
+    fallback = await fetch(GITHUB_LATEST_API, {
+      headers: common,
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    throw primaryError ?? error;
+  }
+  if (!fallback.ok) {
+    if (primaryError) throw primaryError;
+    throw new Error(
+      `release check returned HTTP ${primaryStatus} (GitHub fallback: HTTP ${fallback.status})`,
+    );
+  }
+  return (await fallback.json()) as Release;
+}
+
 async function latestRelease(): Promise<Release> {
   const qs = new URLSearchParams({ v: VERSION, os: coarseOsTag() });
-  const response = await fetch(`${LATEST_API}?${qs.toString()}`, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": `${SERVICE}/${VERSION}`,
-      "X-Install-Id": getInstallId(),
-    },
-  });
-  if (!response.ok) throw new Error(`GitHub Releases API returned HTTP ${response.status}`);
-  return (await response.json()) as Release;
+  const common = {
+    accept: "application/vnd.github+json",
+    "user-agent": `${SERVICE}/${VERSION}`,
+  };
+  let response: Response | null = null;
+  let primaryError: unknown = null;
+  try {
+    response = await fetch(`${LATEST_API}?${qs.toString()}`, {
+      headers: { ...common, "X-Install-Id": getInstallId() },
+      // Without a deadline the most likely failure — a network that accepts the connection and
+      // then goes quiet — would hang here forever and never reach the fallback below, making
+      // the fallback useless in exactly the case it exists for. Matches the sibling apps.
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    primaryError = error;
+  }
+  if (response?.ok) return (await response.json()) as Release;
+  return await githubFallbackRelease(common, primaryError, response?.status);
 }
 
 let cached: { status: UpdateStatus; at: number } | null = null;
