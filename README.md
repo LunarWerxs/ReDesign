@@ -8,7 +8,7 @@
 [![Built with Bun](https://img.shields.io/badge/built%20with-Bun-14151a?logo=bun&logoColor=white)](https://bun.sh)
 [![Site](https://img.shields.io/badge/site-redes1gn.github.io-a855f7)](https://redes1gn.github.io/)
 
-Feed it a screenshot of any screen. It fires that screenshot at a bunch of AI models at once and hands back a grid of real, self-contained HTML redesigns, each one sitting next to the original so you can actually judge it. No more pasting the same image into ten chat tabs and eyeballing the results one at a time.
+RēDesign is a self-hosted screenshot-to-redesign tool that fires one UI screenshot at several AI models in parallel and returns a gallery of self-contained HTML redesigns placed next to the original, so you can compare real design directions at once instead of pasting the same image into one chat tab after another.
 
 It runs on your own machine and talks only to the model APIs you give it keys for. An optional "Sync with Connections" toggle can carry your theme across devices; your API keys never leave your machine.
 
@@ -22,7 +22,7 @@ Here are six of the redesigns a single run produced from one sample dashboard, c
 
 ![Six real redesigns of the same sample dashboard, from dark editorial to stripped-back minimalist](.github/media/wall.png)
 
-## Try it
+## Quick start
 
 On Windows, download `redesign-windows-x64.exe` from
 [Releases](https://github.com/LunarWerxs/ReDesign/releases) and run it directly. It is an
@@ -47,7 +47,7 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 
 ## Why it is nice
 
-- **Every model at once.** Claude, GPT, Gemini, DeepSeek, and Qwen out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
+- **Every model at once.** Claude, GPT, Gemini, DeepSeek, Qwen, and Meta AI out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
 - **Many takes per model, one run.** Ask a single model for three variants and another for one, all in the same fan-out. A bake-off is more useful when you can see a model's range, not just one roll of the dice.
 - **A stack of prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
 - **A viewer worth using.** Start from an all-runs thumbnail gallery, search it, filter by model or preset, set the column count, and preview at phone through desktop widths. Stars and hidden-output choices survive a refresh, and the original always sits first so you have something to compare against. Take a whole run away as a zip when you want to review it offline.
@@ -104,8 +104,34 @@ and a cold Windows CI runner runs that class roughly 10x slower than a dev box. 
 suite is the local example: five cases at 0.33-0.41s each here, one of which crossed 5s on
 windows-latest and held the whole daemon job red until it was given an allowance.
 
+## FAQ
+
+**Is RēDesign free?**
+Yes. RēDesign itself is free and open source under the MIT license, so you can run it, modify it, and do what you want with it. The only cost is whatever you spend calling the AI provider APIs you bring your own keys for. A per-run cost meter and an estimate before you hit Run keep that visible.
+
+**Does it work offline?**
+RēDesign's control panel, queue, and viewer all run locally on your machine. Generating a redesign needs internet access to reach whichever AI provider APIs you've configured, since that's where the models run; there's no bundled local model. Its test suite, though, runs fully offline with no keys and no spend.
+
+**What are the system requirements?**
+To run the packaged app, just Windows (the plain exe or the tray build). To run from source on Windows, macOS, or Linux, you need Bun 1.2 or newer; the back end's only runtime dependency is Bun and Hono, so there's little else to install.
+
+**How is it different from v0 by Vercel?**
+v0 is Vercel's hosted AI app builder: you describe or upload a design and it generates and deploys an app on Vercel's own infrastructure. RēDesign instead runs on your machine, sends one screenshot to several AI models from different providers at once, and returns a gallery of independent HTML redesigns to compare side by side rather than one generated app.
+
+**How is it different from screenshot-to-code?**
+screenshot-to-code is a similar open source, self-hostable project (MIT) that turns a screenshot into HTML, React, or Vue code using OpenAI, Anthropic, Gemini, or Replicate, generating variants one at a time. RēDesign runs many models, and several variants per model, together in one parallel batch, with a queue, cost meter, and gallery viewer for comparing a whole run at once.
+
+**Is my data sent anywhere?**
+RēDesign pings LunarWerx's Studio endpoint (the same one its update check uses) with the app version, a coarse OS tag, and a random install id, so LunarWerx knows roughly how many people run it. It never sends your account, files, screenshots, or API keys, and you can disable the ping entirely with `REDESIGN_NO_PING=1`.
+
+**Where do my API keys live?**
+Your API keys live only in a `.env` file beside the app, written owner-only (`0600`) so other users on the machine can't read it. They're sent only to the provider you configured them for, never written into a saved run's output or key-health state, and stripped out of provider error text before it's stored or shown.
+
+**Can I drive it from the command line or with an AI agent?**
+Yes. Everything in the UI has a command-line twin (`bun run src/index.ts run`, `models`, `keys`, and more), so you can queue and manage runs entirely by script. There's also a built-in MCP server (`bun run src/index.ts mcp`) that lets an AI agent drive RēDesign the same way a human would from the control panel.
+
 ## License
 
 MIT. Do what you want with it. See [LICENSE](LICENSE).
 
-Made by LunarWerx. Live site: [redes1gn.github.io](https://redes1gn.github.io/).
+Made by [LunarWerx Studios](https://lunarwerx.com), who also build [RepoYeti](https://repoyeti.com), [SageThumbs](https://sagethumbs.lunarwerx.com), and [QuickDictate](https://quickdictate.lunarwerx.com). Live site: [redes1gn.github.io](https://redes1gn.github.io/).
