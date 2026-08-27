@@ -7,7 +7,7 @@ import { reactiveOmit } from "@vueuse/core"
 import { ListboxFilter, useForwardProps } from "reka-ui"
 import { cn } from "@/lib/utils"
 import { InputGroup, InputGroupAddon } from '@/components/ui/input-group'
-import { useCommand } from "."
+import { useCommand } from "./command-context"
 
 defineOptions({
   inheritAttrs: false,
