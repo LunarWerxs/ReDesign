@@ -324,6 +324,30 @@ function buildNextPrices(
  * `thresholdPct` (default 10%). Does not throw on a malformed catalog --
  * returns an empty list and lets the caller decide whether to skip.
  */
+// Scans the models.dev catalog for the first usable cost entry whose bare model id matches one
+// of `candidates`. Pulled out of crossCheckModelsDev so this nested-loop search scores against
+// its own small function instead of inflating the caller's complexity.
+function findBestModelsDevMatch(
+  candidates: Set<string>,
+  modelsDev: ModelsDevCatalog,
+  bareOf: (id: string) => string,
+): { provider: string; modelId: string; input: number; output: number } | null {
+  for (const [providerId, providerData] of Object.entries(modelsDev)) {
+    const models = providerData?.models;
+    if (!models) continue;
+    for (const [theirModelId, theirModelData] of Object.entries(models)) {
+      if (!candidates.has(bareOf(theirModelId))) continue;
+      const cost = theirModelData?.cost;
+      if (!cost || typeof cost.input !== "number" || typeof cost.output !== "number") continue;
+      if (cost.input <= 0 || cost.output <= 0) continue;
+      // Prefer the first usable match; models.dev has many near-duplicate provider mirrors
+      // (vercel, zenmux, etc.) that mostly agree anyway.
+      return { provider: providerId, modelId: theirModelId, input: cost.input, output: cost.output };
+    }
+  }
+  return null;
+}
+
 function crossCheckModelsDev(
   modelIds: string[],
   chainPrices: Record<string, ModelPrice>,
@@ -357,23 +381,7 @@ function crossCheckModelsDev(
       candidates.add(bareOf(map.openrouterKey));
     }
 
-    let bestMatch: { provider: string; modelId: string; input: number; output: number } | null = null;
-    for (const [providerId, providerData] of Object.entries(modelsDev)) {
-      const models = providerData?.models;
-      if (!models) continue;
-      for (const [theirModelId, theirModelData] of Object.entries(models)) {
-        if (!candidates.has(bareOf(theirModelId))) continue;
-        const cost = theirModelData?.cost;
-        if (!cost || typeof cost.input !== "number" || typeof cost.output !== "number") continue;
-        if (cost.input <= 0 || cost.output <= 0) continue;
-        // Prefer the first usable match; models.dev has many near-duplicate
-        // provider mirrors (vercel, zenmux, etc.) that mostly agree anyway.
-        bestMatch = { provider: providerId, modelId: theirModelId, input: cost.input, output: cost.output };
-        break;
-      }
-      if (bestMatch) break;
-    }
-
+    const bestMatch = findBestModelsDevMatch(candidates, modelsDev, bareOf);
     if (!bestMatch) continue;
 
     const inputDiff = Math.abs(bestMatch.input - ours.inputPerMtok) / ours.inputPerMtok;

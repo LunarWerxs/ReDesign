@@ -301,6 +301,53 @@ function failure(message: string): UpdateApplyResult {
   };
 }
 
+// Downloads the release asset, authenticates it against the published checksum, unpacks it, and
+// verifies the extracted binary reports the expected version. Pulled out of applyUpdate so this
+// chain of guard clauses scores against this function instead of applyUpdate's; returns the
+// staged candidate path on success, or the failure result to return verbatim on any check.
+async function downloadAndStageUpdate(
+  asset: ReleaseAsset,
+  release: Release,
+  remoteVersion: string,
+  staging: string,
+  bundledName: string,
+): Promise<{ ok: true; candidate: string; output: string[] } | { ok: false; result: UpdateApplyResult }> {
+  const output: string[] = [];
+  rmSync(staging, { recursive: true, force: true });
+  mkdirSync(staging, { recursive: true });
+  const archive = join(staging, asset.name);
+  output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
+  const response = await fetch(asset.browser_download_url, {
+    headers: { accept: "application/octet-stream", "user-agent": `${SERVICE}/${VERSION}` },
+    redirect: "follow",
+  });
+  if (!response.ok) return { ok: false, result: failure(`download failed (HTTP ${response.status})`) };
+  await Bun.write(archive, response);
+
+  // Authenticate the download BEFORE unpacking it and long before verifyVersion() executes it.
+  // Auto-update is on by default and unattended, so this check is what keeps a hijacked release
+  // from becoming silent code execution on every install.
+  const expected = await expectedSha256(release, asset.name);
+  if (!expected) {
+    return { ok: false, result: failure(`no published checksum for ${asset.name}; refusing to install v${remoteVersion}`) };
+  }
+  const actual = await sha256File(archive);
+  if (actual !== expected) {
+    output.push(`checksum mismatch: expected ${expected}, got ${actual}`);
+    return { ok: false, result: failure(`${asset.name} failed its checksum; refusing to install v${remoteVersion}`) };
+  }
+  output.push("checksum verified");
+
+  await extract(archive, staging);
+
+  const candidate = join(staging, bundledName);
+  if (!existsSync(candidate)) return { ok: false, result: failure(`the update archive has no ${bundledName}`) };
+  if (!(await verifyVersion(candidate, remoteVersion))) {
+    return { ok: false, result: failure("the downloaded executable failed its version self-check") };
+  }
+  return { ok: true, candidate, output };
+}
+
 export async function applyUpdate(): Promise<UpdateApplyResult> {
   const status = await checkForUpdate({ fresh: true });
   if (!status.ok) return failure(status.reason ?? "update check failed");
@@ -313,49 +360,19 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
     release = await latestRelease();
     asset = assetForPlatform(release.assets ?? []);
   } catch {}
-  if (!asset) return failure(`no ${releaseTarget()} archive is attached to v${remoteVersion}`);
+  if (!asset || !release) return failure(`no ${releaseTarget()} archive is attached to v${remoteVersion}`);
 
   const executable = process.execPath;
   const installDir = dirname(executable);
   const staging = join(installDir, ".update-staging");
   const oldExecutable = join(installDir, `${basename(executable)}.old-${status.checkedAt}`);
   const bundledName = process.platform === "win32" ? "redesign.exe" : "redesign";
-  const output: string[] = [];
   let movedAside = false;
 
   try {
-    rmSync(staging, { recursive: true, force: true });
-    mkdirSync(staging, { recursive: true });
-    const archive = join(staging, asset.name);
-    output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
-    const response = await fetch(asset.browser_download_url, {
-      headers: { accept: "application/octet-stream", "user-agent": `${SERVICE}/${VERSION}` },
-      redirect: "follow",
-    });
-    if (!response.ok) return failure(`download failed (HTTP ${response.status})`);
-    await Bun.write(archive, response);
-
-    // Authenticate the download BEFORE unpacking it and long before verifyVersion() executes it.
-    // Auto-update is on by default and unattended, so this check is what keeps a hijacked release
-    // from becoming silent code execution on every install.
-    const expected = await expectedSha256(release, asset.name);
-    if (!expected) {
-      return failure(`no published checksum for ${asset.name}; refusing to install v${remoteVersion}`);
-    }
-    const actual = await sha256File(archive);
-    if (actual !== expected) {
-      output.push(`checksum mismatch: expected ${expected}, got ${actual}`);
-      return failure(`${asset.name} failed its checksum; refusing to install v${remoteVersion}`);
-    }
-    output.push("checksum verified");
-
-    await extract(archive, staging);
-
-    const candidate = join(staging, bundledName);
-    if (!existsSync(candidate)) return failure(`the update archive has no ${bundledName}`);
-    if (!(await verifyVersion(candidate, remoteVersion))) {
-      return failure("the downloaded executable failed its version self-check");
-    }
+    const staged = await downloadAndStageUpdate(asset, release, remoteVersion, staging, bundledName);
+    if (!staged.ok) return staged.result;
+    const { candidate, output } = staged;
 
     renameSync(executable, oldExecutable);
     movedAside = true;

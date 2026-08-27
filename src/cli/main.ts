@@ -6,6 +6,7 @@
 import pkg from "../../package.json";
 import { runStdioMcp } from "../mcp/stdio";
 import { C } from "../util";
+import type { Args } from "./args";
 import { parseArgs } from "./args";
 import {
   healthCheckCmd,
@@ -20,6 +21,28 @@ import {
 } from "./lifecycle";
 import { runCmd } from "./run";
 
+// One handler per verb, keyed by the command name (aliases repeat the same handler). A lookup
+// table instead of a switch so adding/removing a verb never touches dispatch control flow.
+const COMMANDS: Record<string, (args: Args) => void | Promise<void>> = {
+  "--version": () => console.log(pkg.version),
+  version: () => console.log(pkg.version),
+  inputs: () => inputsCmd(),
+  models: () => modelsCmd(),
+  prompts: () => promptsCmd(),
+  references: () => referencesCmd(),
+  refs: () => referencesCmd(),
+  keys: (args) => keysCmd(args),
+  "health-check": (args) => healthCheckCmd(args),
+  run: (args) => runCmd(args),
+  serve: (args) => serveCmd(args),
+  start: (args) => serveCmd(args),
+  status: (args) => statusCmd(args),
+  stop: () => stopCmd(),
+  // Run the stdio MCP server (for AI agents). It proxies to the running server, so start that
+  // first with `redesign serve`. Only writes JSON-RPC to stdout.
+  mcp: () => runStdioMcp(),
+};
+
 export async function main(argv: string[]): Promise<void> {
   const releaseDoubleClick =
     argv.length === 0 &&
@@ -28,63 +51,12 @@ export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv.slice(1));
   if (releaseDoubleClick) args.openUi = process.env.REDESIGN_NO_OPEN !== "1";
 
-  switch (cmd) {
-    case "--version":
-    case "version":
-      console.log(pkg.version);
-      break;
-
-    case "inputs":
-      inputsCmd();
-      break;
-
-    case "models":
-      modelsCmd();
-      break;
-
-    case "prompts":
-      promptsCmd();
-      break;
-
-    case "references":
-    case "refs":
-      referencesCmd();
-      break;
-
-    case "keys":
-      keysCmd(args);
-      break;
-
-    case "health-check":
-      await healthCheckCmd(args);
-      break;
-
-    case "run":
-      await runCmd(args);
-      break;
-
-    case "serve":
-    case "start":
-      await serveCmd(args);
-      break;
-
-    case "status":
-      await statusCmd(args);
-      break;
-
-    case "stop":
-      await stopCmd();
-      break;
-
-    case "mcp":
-      // Run the stdio MCP server (for AI agents). It proxies to the running server, so start that
-      // first with `redesign serve`. Only writes JSON-RPC to stdout.
-      await runStdioMcp();
-      break;
-    default:
-      printHelp();
-      break;
+  const handler = COMMANDS[cmd];
+  if (!handler) {
+    printHelp();
+    return;
   }
+  await handler(args);
 }
 
 function printHelp(): void {

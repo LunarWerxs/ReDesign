@@ -68,6 +68,22 @@ function readBrandStyleGuide(args: Args): string | undefined {
   return typeof inline === "string" && inline.trim() ? inline : undefined;
 }
 
+// Logs one progress event from runReimagine. Pulled out of runCmd (rather than an inline
+// closure) so its branches score against this small function instead of runCmd's.
+function logRunProgress(event: Record<string, unknown>): void {
+  const ev = event as unknown as RunProgressEvent;
+  if (ev.type === "start") {
+    console.log(C.dim(`  ${ev.total} jobs queued → run ${ev.runId}\n`));
+  } else if (ev.type === "job" && ev.job && (ev.job.status === "ok" || ev.job.status === "error")) {
+    const ok = ev.job.status === "ok";
+    console.log(
+      `  ${ok ? C.green("✓") : C.red("✗")} ${ev.job.inputId.padEnd(24)} ${ev.job.modelId.padEnd(16)} ` +
+        `${ev.job.promptId.padEnd(16)} ${C.dim(`${ev.job.ms || 0}ms ${ev.job.keyMask || ""}`)}` +
+        `${ok ? "" : C.red(`  ${(ev.job.error || "").slice(0, 70)}`)}`,
+    );
+  }
+}
+
 export async function runCmd(args: Args): Promise<void> {
   const opts = {
     inputs: asSelection(args.input || args.inputs) ?? "all",
@@ -94,18 +110,7 @@ export async function runCmd(args: Args): Promise<void> {
   );
   const manifest: Manifest = await runReimagine({
     ...opts,
-    onProgress: (event: Record<string, unknown>) => {
-      const ev = event as unknown as RunProgressEvent;
-      if (ev.type === "start") console.log(C.dim(`  ${ev.total} jobs queued → run ${ev.runId}\n`));
-      else if (ev.type === "job" && ev.job && (ev.job.status === "ok" || ev.job.status === "error")) {
-        const ok = ev.job.status === "ok";
-        console.log(
-          `  ${ok ? C.green("✓") : C.red("✗")} ${ev.job.inputId.padEnd(24)} ${ev.job.modelId.padEnd(16)} ` +
-            `${ev.job.promptId.padEnd(16)} ${C.dim(`${ev.job.ms || 0}ms ${ev.job.keyMask || ""}`)}` +
-            `${ok ? "" : C.red(`  ${(ev.job.error || "").slice(0, 70)}`)}`,
-        );
-      }
-    },
+    onProgress: logRunProgress,
   });
   const c = manifest.counts ?? { total: 0, done: 0, ok: 0, error: 0, skipped: 0 };
   console.log(

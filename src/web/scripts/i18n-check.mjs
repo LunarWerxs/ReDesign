@@ -138,6 +138,18 @@ const flagExprLiterals = (expr, file, line) => {
     }
   }
 };
+// Flags hardcoded prose in an ELEMENT node's static translatable attrs. Pulled out of walkNode
+// so this loop's branches score against this small function instead of walkNode's.
+const flagProseAttrs = (node, file) => {
+  for (const prop of node.props || []) {
+    if (prop.type === 6 && PROSE_ATTRS.has(prop.name)) {
+      const v = prop.value?.content ?? "";
+      if (hasLetter(v) && !TEXT_ALLOWLIST.has(v.trim())) {
+        errors.push(`HARDCODED     ${rel(file)}:${prop.loc?.start?.line ?? 0} → ${prop.name}="${v}"`);
+      }
+    }
+  }
+};
 const walkNode = (node, file, parentTag) => {
   if (!node) return;
   switch (node.type) {
@@ -148,14 +160,7 @@ const walkNode = (node, file, parentTag) => {
       flagExprLiterals(node.content?.content ?? "", file, node.loc?.start?.line ?? 0);
       return;
     case 1: // ELEMENT
-      for (const prop of node.props || []) {
-        if (prop.type === 6 && PROSE_ATTRS.has(prop.name)) {
-          const v = prop.value?.content ?? "";
-          if (hasLetter(v) && !TEXT_ALLOWLIST.has(v.trim())) {
-            errors.push(`HARDCODED     ${rel(file)}:${prop.loc?.start?.line ?? 0} → ${prop.name}="${v}"`);
-          }
-        }
-      }
+      flagProseAttrs(node, file);
       walkChildren(node.children, file, node.tag);
       return;
     case 9: // IF
