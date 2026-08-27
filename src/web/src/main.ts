@@ -5,6 +5,7 @@ import './assets/index.css';
 import App from './App.vue';
 import router from './router';
 import { i18n } from './i18n';
+import { startSignInNudgeSession } from './lib/sign-in-nudge';
 
 // Recover from stale-chunk errors. When the daemon ships a new build, its hashed chunk names
 // change; a tab still running the old build then lazy-imports a chunk that no longer exists on
@@ -29,6 +30,11 @@ window.addEventListener('vite:preloadError', (event) => {
 // grow long after that, so the restored offset ends up pointing mid-page at content that wasn't
 // there when it was recorded. Route-level scrolling is handled in router/index.ts.
 if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+// Counts one session for the Connections sign-in prompt. Here, not in the control store, because
+// that store is lazy: an owner who never opens the control panel would never accrue a session and
+// so could never pass the prompt's gate. Counting only - nothing is shown from this call.
+startSignInNudgeSession({ appId: 'redesign', appName: 'ReDesign' });
 
 const app = createApp(App);
 app.use(createPinia());

@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue';
 import { api } from '@/lib/api';
+import { bindSignInNudgeStatus, nudgeOnSettingsChange } from '@/lib/sign-in-nudge';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import type { SyncStatus } from '@/types';
 
@@ -118,9 +119,25 @@ export function createSyncActions() {
   watch(themeMode, () => {
     if (applyingRemote) return;
     const s = syncStatus.value;
+    // NOT connected is the interesting case for the sign-in prompt, and it is exactly the branch
+    // the push below discards. Someone who just changed an appearance setting is who "these follow
+    // you to your other machines" is a true sentence for, and this is the same instant we WOULD
+    // have pushed it. The engine says no to almost every one of these; see lib/sign-in-nudge.
+    //
+    // `s.ok === true` first, and not only to satisfy the union: an ERRORED status means we do not
+    // KNOW whether they are connected, and asking somebody to sign in when they may already have
+    // is the one mistake this prompt cannot take back. Unknown means stay quiet.
+    if (s?.ok === true && !s.connected) nudgeOnSettingsChange();
     if (!s || !s.ok || !s.enabled || !s.connected) return;
     void pushAppearance();
   });
+
+  // Point the prompt at the live connection state. Only the STATUS binds here - the session count
+  // starts at app boot (main.ts), because this store is lazy and an owner who never opens the
+  // control panel would otherwise never accrue a session and never pass the prompt's gate.
+  // An unreadable status resolves to "signed in", which suppresses the prompt. That is the
+  // deliberate direction: this engine's every ambiguity is resolved toward asking less.
+  bindSignInNudgeStatus(() => (syncStatus.value?.ok === true ? syncStatus.value.connected : true));
 
   return {
     syncStatus,

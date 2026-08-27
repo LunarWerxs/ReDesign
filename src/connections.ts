@@ -30,6 +30,7 @@ import {
   type SettingsSyncStatus,
   type TokenSet,
 } from "@cnct/connect";
+import { applySyncedPrefs, readSyncedPrefs } from "./app-settings";
 import { seal, unseal, wrapTokenStore } from "./dpapi-seal.mjs";
 import { ROOT } from "./util";
 
@@ -113,7 +114,8 @@ function connect(): ConnectClient {
     // Wrap the store so the persisted TokenSet (the durable refresh token) is DPAPI-sealed at
     // rest on Windows; the transient PKCE record and non-Windows hosts pass through unchanged.
     store: wrapTokenStore(stateStore, TOKEN_KEY),
-    fetch: ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args)) as typeof fetch,
+    fetch: ((...args: Parameters<typeof fetch>) =>
+      globalThis.fetch(...args)) as typeof fetch,
   });
   return connectClient;
 }
@@ -123,7 +125,8 @@ function initConnections(): void {
   if (loaded) return;
   loaded = true;
   try {
-    if (fs.existsSync(STATE_FILE)) state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    if (fs.existsSync(STATE_FILE))
+      state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
   } catch (_) {
     state = {};
   }
@@ -132,7 +135,11 @@ function initConnections(): void {
   // upgrade — no re-login. expiresAt 0 forces a refresh on first use (rotation persists back
   // through the store adapter above).
   if (state.refreshToken && !state.sdk?.[TOKEN_KEY]) {
-    const seed: TokenSet = { accessToken: "", refreshToken: state.refreshToken, expiresAt: 0 };
+    const seed: TokenSet = {
+      accessToken: "",
+      refreshToken: state.refreshToken,
+      expiresAt: 0,
+    };
     state.sdk ??= {};
     state.sdk[TOKEN_KEY] = seal(JSON.stringify(seed)); // seal the seeded token at rest (Windows)
     delete state.refreshToken;
@@ -157,11 +164,18 @@ function hasConnection(): boolean {
 /** Build the authorize URL for a sign-in that redirects back to `${origin}/oauth/callback`.
  *  The live origin rides the SDK's per-attempt redirectUri override. */
 async function buildAuthorizeUrl(origin: string): Promise<string> {
-  return connect().signIn({ redirect: false, redirectUri: `${origin}/oauth/callback` });
+  return connect().signIn({
+    redirect: false,
+    redirectUri: `${origin}/oauth/callback`,
+  });
 }
 
 /** Complete the OIDC callback: exchange the code, persist the session, capture identity. */
-async function handleCallback(origin: string, code: string, stateTok: string): Promise<boolean> {
+async function handleCallback(
+  origin: string,
+  code: string,
+  stateTok: string,
+): Promise<boolean> {
   try {
     const callbackUrl = `${origin}/oauth/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(stateTok)}`;
     const user = await connect().handleCallback(callbackUrl);
@@ -225,20 +239,31 @@ let settingsSync: SettingsSync | null = null;
 
 function recordEngineStatus(status: SettingsSyncStatus): void {
   if (status.version !== null) state.version = status.version;
-  if (status.lastSyncedAt !== null) state.lastSyncedAt = new Date(status.lastSyncedAt).toISOString();
+  if (status.lastSyncedAt !== null)
+    state.lastSyncedAt = new Date(status.lastSyncedAt).toISOString();
   if (status.version !== null || status.lastSyncedAt !== null) persist();
 }
 
 function syncEngine(): SettingsSync {
   settingsSync ??= createSettingsSync(connect().locker(), {
-    // Preserve the established top-level wire shape: { appearance: { theme } }.
-    keys: ["appearance"],
-    read: () => ({ appearance: state.appearance || {} }),
+    // The wire shape is { appearance: { theme }, prefs: { … } }. `appearance` is the browser's
+    // (theme) and predates this; `prefs` is the daemon's portable AppSettings, added 2026-08-25 —
+    // see SYNCED_PREF_KEYS in app-settings.ts for which ones travel and why the rest do not.
+    // A second top-level key rather than folding prefs into `appearance` keeps the established
+    // shape readable and keeps the two allowlists independently auditable.
+    keys: ["appearance", "prefs"],
+    read: () => ({
+      appearance: state.appearance || {},
+      prefs: readSyncedPrefs(),
+    }),
     write: (patch) => {
       if (patch.appearance && typeof patch.appearance === "object") {
         state.appearance = patch.appearance as Record<string, unknown>;
         persist();
       }
+      // Allowlist-filtered inside applySyncedPrefs, so a remote doc naming `autoUpdate` or
+      // `outputRetentionDays` cannot switch either of them on here.
+      applySyncedPrefs(patch.prefs);
     },
     onStatus: recordEngineStatus,
   });
@@ -269,9 +294,12 @@ async function pullNow(): Promise<{ version: number }> {
 }
 
 /** Turn sync on: pull the remote doc (adopting its appearance) or seed the store from local. */
-async function enable(appearance?: Record<string, unknown>): Promise<{ status: SyncStatus }> {
+async function enable(
+  appearance?: Record<string, unknown>,
+): Promise<{ status: SyncStatus }> {
   state.enabled = true;
-  if (appearance && typeof appearance === "object") state.appearance = appearance;
+  if (appearance && typeof appearance === "object")
+    state.appearance = appearance;
   persist();
   if (hasConnection()) {
     requireSuccess(await syncEngine().hydrate({ seedIfEmpty: true }));
@@ -305,8 +333,11 @@ async function disable(forget?: boolean): Promise<SyncStatus> {
 }
 
 /** The web changed its theme while synced. The engine coalesces changes for 800 ms. */
-async function updateAppearance(appearance?: Record<string, unknown>): Promise<void> {
-  if (appearance && typeof appearance === "object") state.appearance = appearance;
+async function updateAppearance(
+  appearance?: Record<string, unknown>,
+): Promise<void> {
+  if (appearance && typeof appearance === "object")
+    state.appearance = appearance;
   persist();
   if (state.enabled && hasConnection()) syncEngine().push();
 }

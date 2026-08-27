@@ -69,5 +69,98 @@ export function saveAppSettings(settings: AppSettings): void {
   writeJSON(SETTINGS_FILE, settings);
 }
 
+/**
+ * Drop the in-memory cache so the next `loadAppSettings()` re-reads the file.
+ *
+ * A test seam, and a narrow one: the cache means DELETING the settings file is not enough to get
+ * default behaviour back, which is exactly what `tests/app-settings.test.ts` assumed it did. That
+ * test passed only for as long as no other test file had ever loaded settings first — a second
+ * one arriving was all it took, and the failure looks like the new file's fault rather than the
+ * assumption's. Nothing in the app calls this; the daemon has one settings owner and one process.
+ */
+export function resetAppSettingsCache(): void {
+  cached = null;
+}
+
+// ── what travels to a Connections account ────────────────────────────────────────
+//
+// Added 2026-08-25. Until then `connections.ts` synced ONLY the browser's theme, on the stated
+// grounds that "Reimagine's only portable per-user preference is its APPEARANCE". That was true
+// when it was written and stopped being true the moment this file existed: six daemon preferences
+// accumulated here, none of them secret, none of them machine-specific, and not one of them
+// followed the user to a second machine.
+
+/** Preferences that DO travel: portable statements of what the owner wants, with no side effect
+ *  the moment they land. */
+export const SYNCED_PREF_KEYS = [
+  "updateNotify", // surfaces an offer; installs nothing on its own
+  "autoUpdateIntervalSecs", // a cadence, and only meaningful where checking was opted into
+  "portableMode", // chromeless window vs a browser tab
+  "hideTrayIcon", // notification-area icon on or off
+] as const satisfies readonly (keyof AppSettings)[];
+
+/** Preferences that deliberately do NOT travel, with the reason each one doesn't. */
+export const NEVER_SYNCED_PREF_KEYS = [
+  // Unattended: pulls, reinstalls, rebuilds and RESTARTS the daemon with nobody watching. A
+  // machine someone just signed in on must not start doing that because another one was told to.
+  "autoUpdate",
+  // Unattended AND destructive: it deletes finished runs older than N days at boot. Its own
+  // comment above says switching that on for someone is not something to do for them, and
+  // arriving over the wire is the most for-them way it could possibly be switched on.
+  "outputRetentionDays",
+] as const satisfies readonly (keyof AppSettings)[];
+
+/**
+ * Compile-time proof that the two lists partition `AppSettings`.
+ *
+ * A new preference that belongs to neither fails this line, and the error names it. That check is
+ * the actual fix here — widening the list once only helps until the next preference is added, and
+ * "not synced" being the silent default is what stranded these six in the first place.
+ */
+type UnclassifiedPrefKey = Exclude<
+  keyof AppSettings,
+  (typeof SYNCED_PREF_KEYS)[number] | (typeof NEVER_SYNCED_PREF_KEYS)[number]
+>;
+const _everyPrefIsClassified: UnclassifiedPrefKey extends never
+  ? true
+  : [
+      "these AppSettings keys sync neither way — add each to SYNCED_PREF_KEYS or NEVER_SYNCED_PREF_KEYS",
+      UnclassifiedPrefKey,
+    ] = true;
+void _everyPrefIsClassified;
+
+/** The synced subset of the current settings, as the flat object that goes on the wire. */
+export function readSyncedPrefs(): Record<string, unknown> {
+  const settings = loadAppSettings() as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of SYNCED_PREF_KEYS) {
+    if (settings[key] !== undefined) out[key] = settings[key];
+  }
+  return out;
+}
+
+/**
+ * Apply an incoming prefs blob, keeping only allowlisted keys. Returns whether anything changed.
+ *
+ * Filtering on the way IN as well as out is the half that matters for safety: a doc written by a
+ * newer build — or tampered with — must not be able to switch on unattended self-updating or
+ * timed deletion of the owner's runs just because it names those keys.
+ */
+export function applySyncedPrefs(prefs: unknown): boolean {
+  if (!prefs || typeof prefs !== "object") return false;
+  const incoming = prefs as Record<string, unknown>;
+  const settings = loadAppSettings();
+  const target = settings as Record<string, unknown>;
+  let changed = false;
+  for (const key of SYNCED_PREF_KEYS) {
+    const value = incoming[key];
+    if (value === undefined || Object.is(value, target[key])) continue;
+    target[key] = value;
+    changed = true;
+  }
+  if (changed) saveAppSettings(settings);
+  return changed;
+}
+
 export { AUTO_UPDATE_INTERVAL_DEFAULT_S };
 export { SETTINGS_FILE };
