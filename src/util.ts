@@ -2,13 +2,34 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+// Find repo root by walking up from startDir until we find a marker (package.json, bun.lock, or .git).
+// This is more robust than hop-counting (..) which breaks silently if the file moves.
+function findRepoRoot(startDir: string): string {
+  let current = startDir;
+  const MARKERS = ["package.json", "bun.lock", ".git"];
+
+  while (true) {
+    for (const marker of MARKERS) {
+      if (fs.existsSync(path.join(current, marker))) {
+        return current;
+      }
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      throw new Error(`Could not find repo root from ${startDir}`);
+    }
+    current = parent;
+  }
+}
+
 // ROOT = the app's base dir. In dev (`bun run src/index.ts`) this file is src/util.ts, so ROOT is the
 // repo root. When packaged as a single compiled binary (`bun --compile`, see scripts/build.ts),
 // import.meta.dir is a VIRTUAL bundle path, so the real files the app reads at runtime (src/config,
 // src/web/dist, .env, output/, input/, reference/) live NEXT TO the executable instead. Detect the
 // compiled case by the absence of package.json at the dev-resolved root, and fall back to the
 // executable's directory. Dev behaviour is unchanged (the dev root always has package.json).
-const DEV_ROOT = path.resolve(import.meta.dir, "..");
+const DEV_ROOT = findRepoRoot(import.meta.dir);
 const IS_PACKAGED = !fs.existsSync(path.join(DEV_ROOT, "package.json"));
 const ROOT = IS_PACKAGED ? path.dirname(process.execPath) : DEV_ROOT;
 const APP_CONFIG_DIR = process.env.REDESIGN_HOME?.trim() || path.join(homedir(), ".redesign");
