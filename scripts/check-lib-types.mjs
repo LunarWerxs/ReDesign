@@ -76,6 +76,47 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*/;
  * excluded. Handles the kit's grammar (`export function`, `export const`) and the standard forms
  * around it (class/enum/let/var/default, and a named `export { a as b, type T }` clause).
  */
+/** Parse a named `export { a as b, type T }` clause. `rest` starts at the `{`; `line` is the
+ *  whole trimmed source line, used for the (best-effort) forward join when the `}` is missing.
+ *  Returns the declared value names, or an `unsupported` reason if the clause can't be closed. */
+function parseNamedClause(rest, line) {
+  let clause = rest;
+  if (!clause.includes("}")) clause += ` ${line}`; // best-effort; flagged below if still open
+  if (clause.indexOf("}") === -1) {
+    return { values: new Set(), unsupported: "multi-line `export { ... }` clause is not analyzable" };
+  }
+  const inner = clause.slice(clause.indexOf("{") + 1, clause.indexOf("}"));
+  const values = new Set();
+  for (const specRaw of inner.split(",")) {
+    const spec = specRaw.trim();
+    if (!spec || spec.startsWith("type ") || spec === "type") continue; // inline type export
+    const asMatch = spec.match(/\bas\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
+    const name = asMatch ? asMatch[1] : (spec.match(IDENT)?.[0] ?? null);
+    if (name) values.add(name);
+  }
+  return { values, unsupported: null };
+}
+
+/** Parse a value declaration (function/class/enum/const/let/var) at the start of `rest`. Returns
+ *  the declared names, or null if `rest` isn't one of these forms. */
+function parseValueDeclaration(rest) {
+  // Strip the keyword, then the name is the leading identifier (before any `<generic>` or `(`).
+  const kw = rest.match(/^(function\*?|class|enum|const|let|var|abstract\s+class)\s+/);
+  if (!kw) return null;
+  const values = new Set();
+  const after = rest.slice(kw[0].length).trimStart();
+  const name = after.match(IDENT)?.[0];
+  if (name) values.add(name);
+  // `export const a: T, b: T` — capture further top-level declarators for const/let/var.
+  if (/^(const|let|var)\b/.test(kw[1])) {
+    for (const part of after.split(",").slice(1)) {
+      const n = part.trim().match(IDENT)?.[0];
+      if (n) values.add(n);
+    }
+  }
+  return values;
+}
+
 function declaredValueExports(file) {
   const text = stripComments(readFileSync(file, "utf8"));
   const values = new Set();
@@ -102,37 +143,14 @@ function declaredValueExports(file) {
       continue;
     }
     if (rest.startsWith("{")) {
-      // Named clause. Kit uses single-line clauses; join forward defensively if a `}` is missing.
-      let clause = rest;
-      if (!clause.includes("}")) clause += ` ${line}`; // best-effort; flagged below if still open
-      const inner = clause.slice(clause.indexOf("{") + 1, clause.indexOf("}"));
-      if (clause.indexOf("}") === -1) {
-        unsupported.push("multi-line `export { ... }` clause is not analyzable");
-        continue;
-      }
-      for (const specRaw of inner.split(",")) {
-        const spec = specRaw.trim();
-        if (!spec || spec.startsWith("type ") || spec === "type") continue; // inline type export
-        const asMatch = spec.match(/\bas\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
-        const name = asMatch ? asMatch[1] : (spec.match(IDENT)?.[0] ?? null);
-        if (name) values.add(name);
-      }
+      const clause = parseNamedClause(rest, line);
+      if (clause.unsupported) unsupported.push(clause.unsupported);
+      else for (const v of clause.values) values.add(v);
       continue;
     }
-    // Value declaration: function / class / enum / const / let / var. Strip the keyword, then the
-    // name is the leading identifier (before any `<generic>` or `(`).
-    const kw = rest.match(/^(function\*?|class|enum|const|let|var|abstract\s+class)\s+/);
-    if (kw) {
-      const after = rest.slice(kw[0].length).trimStart();
-      const name = after.match(IDENT)?.[0];
-      if (name) values.add(name);
-      // `export const a: T, b: T` — capture further top-level declarators for const/let/var.
-      if (/^(const|let|var)\b/.test(kw[1])) {
-        for (const part of after.split(",").slice(1)) {
-          const n = part.trim().match(IDENT)?.[0];
-          if (n) values.add(n);
-        }
-      }
+    const declared = parseValueDeclaration(rest);
+    if (declared) {
+      for (const v of declared) values.add(v);
       continue;
     }
     unsupported.push(`unrecognized export form: \`${line.slice(0, 60)}\``);

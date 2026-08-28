@@ -102,37 +102,89 @@ interface ModelInput {
   temperature?: string | number;
 }
 
-function normalizeModelInput(input: ModelInput = {}, existing: Model | null = null, models: Model[] = []): Model {
-  const base: Partial<Model> = existing ? { ...existing } : {};
+function resolveProvider(input: ModelInput, base: Partial<Model>): string {
   const provider = String(input.provider || base.provider || "").trim().toLowerCase();
   if (!MODEL_PROVIDERS.has(provider)) throw statusError("provider is required", 400);
+  return provider;
+}
 
+function resolveLabel(input: ModelInput, base: Partial<Model>): string {
   const label = String(input.label || base.label || "").trim();
   if (!label) throw statusError("label is required", 400);
+  return label;
+}
 
+function resolveModelIdField(input: ModelInput, base: Partial<Model>, existing: Model | null, models: Model[], label: string): string {
   const id = existing
     ? (base.id as string)
     : input.id
       ? normalizeModelId(input.id)
       : uniqueSlugId(models, label, null, "model");
   if (!id) throw statusError("model id is required", 400);
+  return id;
+}
 
+function resolveApiModel(input: ModelInput, base: Partial<Model>): string {
   const apiModel = String(input.apiModel || base.apiModel || "").trim();
   if (!apiModel) throw statusError("api model is required", 400);
+  return apiModel;
+}
 
+function resolveKeyEnv(input: ModelInput, base: Partial<Model>, provider: string): string {
   const keyEnv = String(input.keyEnv || base.keyEnv || providerDefault(provider, "keyEnv") || "")
     .trim()
     .toUpperCase();
   if (!/^[A-Z_][A-Z0-9_]*$/.test(keyEnv)) throw statusError("key env must be a valid environment variable name", 400);
+  return keyEnv;
+}
 
+function resolveBaseUrl(input: ModelInput, base: Partial<Model>, provider: string): string {
   const baseUrl = String(input.baseUrl || base.baseUrl || providerDefault(provider, "baseUrl") || "").trim();
   if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) throw statusError("base url must start with http:// or https://", 400);
+  return baseUrl;
+}
 
+function resolveMaxTokens(input: ModelInput, base: Partial<Model>): number {
   const maxTokensRaw = input.maxTokens != null && input.maxTokens !== "" ? input.maxTokens : base.maxTokens;
   const maxTokens = parseInt(String(maxTokensRaw), 10);
   if (!Number.isFinite(maxTokens) || maxTokens < 1) throw statusError("max tokens must be a positive number", 400);
+  return maxTokens;
+}
 
-  const next: Model = {
+function resolveColor(input: ModelInput, base: Partial<Model>, provider: string): string | undefined {
+  const color = String(input.color || base.color || providerDefault(provider, "color") || "").trim();
+  if (!color) return undefined;
+  if (!/^#[0-9a-f]{6}$/i.test(color)) throw statusError("color must be a 6-digit hex value", 400);
+  return color;
+}
+
+function resolveTokenParam(input: ModelInput, base: Partial<Model>, provider: string): Model["tokenParam"] {
+  if (!OPENAI_FAMILY.has(provider)) return undefined;
+  const tokenParam = String(input.tokenParam || base.tokenParam || "").trim();
+  return tokenParam === "max_completion_tokens" ? "max_completion_tokens" : "max_tokens";
+}
+
+function resolveTemperature(input: ModelInput, base: Partial<Model>, supportsTemperature: boolean): number | undefined {
+  if (!supportsTemperature) return undefined;
+  const rawTemp = input.temperature != null && input.temperature !== "" ? input.temperature : base.temperature;
+  if (rawTemp == null || rawTemp === "") return undefined;
+  const temperature = Number(rawTemp);
+  if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw statusError("temperature must be between 0 and 2", 400);
+  return temperature;
+}
+
+function normalizeModelInput(input: ModelInput = {}, existing: Model | null = null, models: Model[] = []): Model {
+  const base: Partial<Model> = existing ? { ...existing } : {};
+  const provider = resolveProvider(input, base);
+  const label = resolveLabel(input, base);
+  const id = resolveModelIdField(input, base, existing, models, label);
+  const apiModel = resolveApiModel(input, base);
+  const keyEnv = resolveKeyEnv(input, base, provider);
+  const baseUrl = resolveBaseUrl(input, base, provider);
+  const maxTokens = resolveMaxTokens(input, base);
+  const supportsTemperature = input.supportsTemperature == null ? base.supportsTemperature !== false : !!input.supportsTemperature;
+
+  return {
     ...base,
     id,
     label,
@@ -142,40 +194,13 @@ function normalizeModelInput(input: ModelInput = {}, existing: Model | null = nu
     baseUrl,
     vision: input.vision == null ? base.vision !== false : !!input.vision,
     maxTokens,
-    supportsTemperature: input.supportsTemperature == null ? base.supportsTemperature !== false : !!input.supportsTemperature,
+    supportsTemperature,
     enabled: input.enabled == null ? base.enabled !== false : !!input.enabled,
     starred: input.starred == null ? base.starred === true : !!input.starred,
+    color: resolveColor(input, base, provider),
+    tokenParam: resolveTokenParam(input, base, provider),
+    temperature: resolveTemperature(input, base, supportsTemperature),
   };
-
-  const color = String(input.color || base.color || providerDefault(provider, "color") || "").trim();
-  if (color) {
-    if (!/^#[0-9a-f]{6}$/i.test(color)) throw statusError("color must be a 6-digit hex value", 400);
-    next.color = color;
-  } else {
-    next.color = undefined;
-  }
-
-  const tokenParam = String(input.tokenParam || base.tokenParam || "").trim();
-  if (OPENAI_FAMILY.has(provider)) {
-    next.tokenParam = tokenParam === "max_completion_tokens" ? "max_completion_tokens" : "max_tokens";
-  } else {
-    next.tokenParam = undefined;
-  }
-
-  if (next.supportsTemperature) {
-    const rawTemp = input.temperature != null && input.temperature !== "" ? input.temperature : base.temperature;
-    if (rawTemp != null && rawTemp !== "") {
-      const temperature = Number(rawTemp);
-      if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) throw statusError("temperature must be between 0 and 2", 400);
-      next.temperature = temperature;
-    } else {
-      next.temperature = undefined;
-    }
-  } else {
-    next.temperature = undefined;
-  }
-
-  return next;
 }
 
 function saveModel(input: ModelInput = {}): Model {
