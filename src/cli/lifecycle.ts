@@ -6,15 +6,15 @@
  * entry (src/cli/main.ts) stays a thin dispatcher.
  */
 import { spawn } from "node:child_process";
-import { buildDetachedSpawn } from "../detached-spawn.mjs";
-import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { setAutoUpdateHooks, startAutoUpdate } from "../auto-update";
 import { loadModels, loadPrompts, resolveModels } from "../config";
+import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { healthCheckModel } from "../healthCheck";
-import { pingInstallOnBoot } from "../install-ping";
 import { listInputs, listReferences } from "../inputResolver";
+import { pingInstallOnBoot } from "../install-ping";
 import { findLiveInstance } from "../instance";
 import { openUi } from "../open-ui";
+import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { getKeyManager } from "../runner";
 import { cleanupStaleUpdateArtifacts } from "../updater";
 import { C } from "../util";
@@ -232,7 +232,8 @@ export async function serveCmd(args: Args): Promise<void> {
         // exists. Left as a plain spawn the successor stays inside THIS process's tree for the
         // whole ~800ms handoff, so a tray Quit (`taskkill /T /F`) landing in that window kills the
         // outgoing daemon AND its replacement, leaving the user with none.
-        const plan = buildDetachedSpawn(process.platform, relaunchArgv);
+        // hideWindow: the successor is a CONSOLE program - without ShowWindow=0 every auto-update relaunch pops a visible console hosting the daemon (kit fix 2026-08-30).
+        const plan = buildDetachedSpawn(process.platform, relaunchArgv, { hideWindow: true });
         const child = spawn(plan.argv[0] as string, plan.argv.slice(1), {
           cwd: process.cwd(),
           detached: plan.detached,
