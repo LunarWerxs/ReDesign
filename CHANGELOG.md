@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased]
+
+### Internal
+
+- **The two image drop zones are one component.** `InputDropzone` (screenshots) and the drop target
+  inside `ReferenceBlock` carried a line-for-line copy of the same click / Enter-Space / drag / drop
+  / hidden-file-input wiring, and had already drifted: the reference folder chip was a `<code>`
+  while the screenshot one was still a `<span class="font-mono">` with an `i18n-ignore` marker it no
+  longer needed. Both now render `ImageDropTarget.vue`, which owns `dragOver` and the file input;
+  `uploading` stays with the parents because both also upload from paths the element never sees
+  (PasteMenu, and InputDropzone's document-level paste listener). Only the duplicated part merged.
+  `ReferenceBlock` is a whole panel (switch, tiles, note), not a second dropzone. 118 lines out of
+  the two parents for 26 back, and one new test file covering the now-shared wiring.
+- **The hidden file input needs `@click.stop`, and browsers hide why.** The tile is itself a click
+  target that calls that input's `click()`, so the synthetic click bubbled straight back to the tile
+  and reopened the picker, unbounded. Real browsers mask it with the HTML spec's "click in progress"
+  flag, so it never showed in the app; happy-dom has no such flag and blew the stack the first time
+  a test exercised the keyboard path.
+- A literal directory name is a `<code>`, not a `<span class="font-mono">`. `i18n-check.mjs`'s
+  `SKIP_TEXT_TAGS` already exempts `<code>`, so each chip drops the `i18n-ignore` marker it used to
+  carry, and preflight gives `<code>` the mono family at `font-size: 1em`, so nothing renders
+  differently. Verified in-browser: identical computed family, size, weight and line-height.
+- `i18n-check.mjs` no longer carries a `new Function` eval. The English catalog is transpiled to a
+  throwaway `.mjs` and loaded with a real dynamic `import()`, a truer rehearsal of how the app
+  imports it, and a script that gates `npm run build` has no business evaluating source by hand.
+- `stores/control/store.ts` (539 lines) split into `types` / `paths` / `summary` / `stale` /
+  `manifests` / `retention`, leaving a re-export barrel. The public surface is byte-identical, so no
+  consumer changed.
+
 ## [1.6.6] - 2026-08-15
 
 ### Fixed
