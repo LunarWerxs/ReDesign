@@ -76,10 +76,13 @@ function onPaste(e: ClipboardEvent) {
     <div class="flex items-center gap-2">
       <Switch id="ref-toggle" v-model="store.referenceOn" />
       <Label for="ref-toggle">{{ t('reference.useReferenceImage') }}</Label>
+      <!-- The three `reference/` chips below are <code>, not <span class="font-mono">: it is a
+           literal directory name, which is what <code> is for, and i18n-check.mjs's SKIP_TEXT_TAGS
+           already exempts <code>, so each one drops the i18n-ignore marker it used to need.
+           Preflight gives <code> the mono family at font-size:1em, so nothing renders differently. -->
       <span class="text-xs text-muted-foreground"
         >, {{ t('reference.styleDirectionFrom') }}
-        <!-- i18n-ignore -->
-        <span class="font-mono">reference/</span></span
+        <code class="font-mono">reference/</code></span
       >
     </div>
 
@@ -129,8 +132,7 @@ function onPaste(e: ClipboardEvent) {
             </div>
             <div class="text-xs text-muted-foreground">
               {{ t('reference.clickToBrowseHint') }}
-              <!-- i18n-ignore -->
-              <span class="font-mono">reference/</span> {{ t('reference.andSelected') }}
+              <code class="font-mono">reference/</code> {{ t('reference.andSelected') }}
             </div>
           </div>
 
@@ -172,8 +174,7 @@ function onPaste(e: ClipboardEvent) {
           </template>
           <p v-else class="text-xs text-muted-foreground">
             {{ t('reference.noImagesIn') }}
-            <!-- i18n-ignore -->
-            <span class="font-mono">reference/</span>.
+            <code class="font-mono">reference/</code>.
           </p>
           <div class="grid gap-1.5">
             <Label class="text-xs text-muted-foreground">{{ t('reference.noteLabel') }}</Label>
