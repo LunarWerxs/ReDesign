@@ -20,9 +20,10 @@
  * Templates are parsed with @vue/compiler-sfc (real AST), so the hardcoded-string
  * scan is accurate. Kit-synced dirs (components/ui, shell) are exempt library code.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative, extname, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse } from "@vue/compiler-sfc";
 import ts from "typescript";
 
@@ -48,15 +49,28 @@ const errors = [];
 const warnings = [];
 const rel = (p) => relative(WEB, p).replace(/\\/g, "/");
 
-// ── load + flatten en.ts (via the TS compiler API, then eval as CommonJS) ──────────
-function loadEn() {
+// ── load + flatten en.ts (via the TS compiler API, then a real ESM import) ─────────
+// The transpiled catalog is written to a throwaway .mjs and loaded with dynamic
+// import() rather than evaluated in-process. en.ts is this repo's own file, so this
+// was never a trust boundary — but a script that gates `npm run build` has no
+// business carrying a `new Function` eval, and a real module load is also a more
+// faithful rehearsal of how the app itself imports the catalog.
+async function loadEn() {
   const src = readFileSync(EN, "utf8");
   const js = ts.transpileModule(src, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 },
   }).outputText;
-  const mod = { exports: {} };
-  new Function("module", "exports", js)(mod, mod.exports);
-  return mod.exports.default ?? mod.exports;
+  const dir = mkdtempSync(join(tmpdir(), "redesign-i18n-"));
+  const file = join(dir, "en.mjs");
+  try {
+    writeFileSync(file, js);
+    // pathToFileURL, not the bare path: Windows absolute paths ("D:\…") are not
+    // valid import specifiers, so a raw join() here would throw ERR_UNSUPPORTED_ESM_URL_SCHEME.
+    const mod = await import(pathToFileURL(file).href);
+    return mod.default ?? mod;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 const flatten = (obj, prefix = "", out = {}) => {
   for (const [k, v] of Object.entries(obj)) {
@@ -66,7 +80,7 @@ const flatten = (obj, prefix = "", out = {}) => {
   }
   return out;
 };
-const enKeys = new Set(Object.keys(flatten(loadEn())));
+const enKeys = new Set(Object.keys(flatten(await loadEn())));
 
 // ── walk source files ─────────────────────────────────────────────────────────────
 const walkDir = (dir, files = []) => {
