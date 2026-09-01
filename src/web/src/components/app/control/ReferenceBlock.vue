@@ -52,11 +52,12 @@ function onPaste(e: ClipboardEvent) {
     <div class="flex items-center gap-2">
       <Switch id="ref-toggle" v-model="store.referenceOn" />
       <Label for="ref-toggle">{{ t('reference.useReferenceImage') }}</Label>
-      <!-- The `reference/` chips are <code>, not <span class="font-mono">: it is a literal
-           directory name, which is what <code> is for, and i18n-check.mjs's SKIP_TEXT_TAGS
-           already exempts <code>, so each one drops the i18n-ignore marker it used to need.
-           Preflight gives <code> the mono family at font-size:1em, so nothing renders differently.
-           The third chip now lives in ImageDropTarget, which renders it for both zones. -->
+      <!-- Repo-wide convention, and the `reference/` chips are where it started: a technical
+           literal shown in mono is a <code>, never a <span class="font-mono">. i18n-check.mjs's
+           SKIP_TEXT_TAGS already exempts <code>, so each chip drops the i18n-ignore marker it
+           used to need, and preflight gives <code> the mono family at font-size:1em, so nothing
+           renders differently. The third chip now lives in ImageDropTarget, which renders it for
+           both image zones; the key-health masks follow the same rule. -->
       <span class="text-xs text-muted-foreground"
         >, {{ t('reference.styleDirectionFrom') }}
         <code class="font-mono">reference/</code></span

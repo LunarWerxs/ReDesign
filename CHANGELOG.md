@@ -18,10 +18,12 @@
   and reopened the picker, unbounded. Real browsers mask it with the HTML spec's "click in progress"
   flag, so it never showed in the app; happy-dom has no such flag and blew the stack the first time
   a test exercised the keyboard path.
-- A literal directory name is a `<code>`, not a `<span class="font-mono">`. `i18n-check.mjs`'s
+- A technical literal shown in mono is a `<code>`, not a `<span class="font-mono">`. `i18n-check.mjs`'s
   `SKIP_TEXT_TAGS` already exempts `<code>`, so each chip drops the `i18n-ignore` marker it used to
   carry, and preflight gives `<code>` the mono family at `font-size: 1em`, so nothing renders
-  differently. Verified in-browser: identical computed family, size, weight and line-height.
+  differently. Verified in-browser: identical computed family, size, weight and line-height. The
+  two masked API keys in the key-health sheet now follow the same rule, so the app has one
+  convention for mono text rather than two. No `<span class="font-mono">` remains.
 - `i18n-check.mjs` no longer carries a `new Function` eval. The English catalog is transpiled to a
   throwaway `.mjs` and loaded with a real dynamic `import()`, a truer rehearsal of how the app
   imports it, and a script that gates `npm run build` has no business evaluating source by hand.

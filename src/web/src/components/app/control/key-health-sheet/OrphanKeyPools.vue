@@ -109,7 +109,7 @@ function poolName(p: KeyPool) {
             </TooltipTrigger>
             <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
           </Tooltip>
-          <span class="font-mono">{{ k.mask }}</span>
+          <code class="font-mono">{{ k.mask }}</code>
           <span class="text-muted-foreground" :title="t('keyHealth.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
           <!-- i18n-ignore -->
           <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyHealth.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
