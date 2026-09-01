@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, useTemplateRef } from 'vue';
-import { Loader2Icon } from '@lucide/vue';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -9,14 +8,13 @@ import { useControlStore } from '@/stores/control';
 import { clipboardImageFiles } from '@/composables/useImageUpload';
 import { referenceUrl } from '@/lib/api';
 import { t } from '@/i18n';
+import ImageDropTarget from './ImageDropTarget.vue';
 import InputTile from './InputTile.vue';
 import PasteMenu from './PasteMenu.vue';
 
 const store = useControlStore();
 
-const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 const pasteMenu = useTemplateRef<InstanceType<typeof PasteMenu>>('pasteMenu');
-const dragOver = ref(false);
 const uploading = ref(false);
 
 // Every TICKED reference goes to the models, uncapped (there is no "max images" stepper any
@@ -34,29 +32,7 @@ async function handle(files: FileList | File[] | null) {
     await store.uploadReferences(files);
   } finally {
     uploading.value = false;
-    dragOver.value = false;
   }
-}
-
-function onPick() {
-  const input = fileInput.value;
-  if (!input) return;
-  handle(input.files).finally(() => {
-    input.value = '';
-  });
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    fileInput.value?.click();
-  }
-}
-
-function onDrop(e: DragEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  handle(e.dataTransfer?.files ?? null);
 }
 
 function onPaste(e: ClipboardEvent) {
@@ -76,10 +52,11 @@ function onPaste(e: ClipboardEvent) {
     <div class="flex items-center gap-2">
       <Switch id="ref-toggle" v-model="store.referenceOn" />
       <Label for="ref-toggle">{{ t('reference.useReferenceImage') }}</Label>
-      <!-- The three `reference/` chips below are <code>, not <span class="font-mono">: it is a
-           literal directory name, which is what <code> is for, and i18n-check.mjs's SKIP_TEXT_TAGS
+      <!-- The `reference/` chips are <code>, not <span class="font-mono">: it is a literal
+           directory name, which is what <code> is for, and i18n-check.mjs's SKIP_TEXT_TAGS
            already exempts <code>, so each one drops the i18n-ignore marker it used to need.
-           Preflight gives <code> the mono family at font-size:1em, so nothing renders differently. -->
+           Preflight gives <code> the mono family at font-size:1em, so nothing renders differently.
+           The third chip now lives in ImageDropTarget, which renders it for both zones. -->
       <span class="text-xs text-muted-foreground"
         >, {{ t('reference.styleDirectionFrom') }}
         <code class="font-mono">reference/</code></span
@@ -102,39 +79,16 @@ function onPaste(e: ClipboardEvent) {
           @paste="onPaste"
           @contextmenu="pasteMenu?.openAt($event)"
         >
-          <div
-            role="button"
-            tabindex="0"
+          <ImageDropTarget
+            dense
             :aria-label="t('reference.addImages')"
-            class="grid min-h-[64px] cursor-pointer place-items-center gap-0.5 rounded-lg border border-dashed bg-muted/30 p-3 text-center transition-colors outline-none focus-visible:border-primary"
-            :class="[
-              dragOver ? 'border-primary bg-accent' : 'border-input hover:border-primary',
-              uploading ? 'pointer-events-none opacity-75' : '',
-            ]"
-            @click="fileInput?.click()"
-            @keydown="onKeydown"
-            @dragenter.prevent.stop="dragOver = true"
-            @dragover.prevent.stop="dragOver = true"
-            @dragleave="dragOver = false"
-            @drop="onDrop"
-          >
-            <input
-              ref="fileInput"
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
-              multiple
-              class="hidden"
-              @change="onPick"
-            />
-            <div class="flex items-center gap-2 text-sm font-medium">
-              <Loader2Icon v-if="uploading" class="size-4 animate-spin" />
-              {{ uploading ? t('reference.addingImage') : t('reference.pasteOrDropImages') }}
-            </div>
-            <div class="text-xs text-muted-foreground">
-              {{ t('reference.clickToBrowseHint') }}
-              <code class="font-mono">reference/</code> {{ t('reference.andSelected') }}
-            </div>
-          </div>
+            :uploading="uploading"
+            :label="uploading ? t('reference.addingImage') : t('reference.pasteOrDropImages')"
+            :hint="t('reference.clickToBrowseHint')"
+            folder="reference/"
+            :hint-suffix="t('reference.andSelected')"
+            @files="handle"
+          />
 
           <template v-if="store.references.length">
             <div class="flex items-center gap-2">

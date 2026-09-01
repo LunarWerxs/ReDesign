@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, useTemplateRef } from 'vue';
-import { Loader2Icon } from '@lucide/vue';
 import { useControlStore } from '@/stores/control';
 import { clipboardImageFiles, uploadableImageFiles } from '@/composables/useImageUpload';
 import { t } from '@/i18n';
+import ImageDropTarget from './ImageDropTarget.vue';
 import PasteMenu from './PasteMenu.vue';
 
 const store = useControlStore();
-const fileInput = useTemplateRef<HTMLInputElement>('fileInput');
 const pasteMenu = useTemplateRef<InstanceType<typeof PasteMenu>>('pasteMenu');
-const dragOver = ref(false);
 const uploading = ref(false);
 
 async function handle(files: FileList | File[] | null, source: string) {
@@ -18,29 +16,7 @@ async function handle(files: FileList | File[] | null, source: string) {
     await store.uploadFiles(files, source);
   } finally {
     uploading.value = false;
-    dragOver.value = false;
   }
-}
-
-function onPick() {
-  const input = fileInput.value;
-  if (!input) return;
-  handle(input.files, 'browse').finally(() => {
-    input.value = '';
-  });
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    fileInput.value?.click();
-  }
-}
-
-function onDrop(e: DragEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  handle(e.dataTransfer?.files ?? null, 'drop');
 }
 
 // Document-level paste + drop so screenshots can be dropped/pasted anywhere.
@@ -76,42 +52,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div
+  <!-- data-input-drop and the spacing fall through to ImageDropTarget's root, which is the
+       element onDocDrop looks for with closest(). -->
+  <ImageDropTarget
     data-input-drop
-    role="button"
-    tabindex="0"
+    class="mb-3"
     :aria-label="t('input.addScreenshots')"
-    class="mb-3 grid min-h-[86px] cursor-pointer place-items-center gap-0.5 rounded-lg border border-dashed bg-muted/30 p-4 text-center transition-colors outline-none focus-visible:border-primary"
-    :class="[
-      dragOver ? 'border-primary bg-accent' : 'border-input hover:border-primary',
-      uploading ? 'pointer-events-none opacity-75' : '',
-    ]"
-    @click="fileInput?.click()"
-    @keydown="onKeydown"
+    :uploading="uploading"
+    :label="uploading ? t('input.addingScreenshot') : t('input.pasteOrDropScreenshots')"
+    :hint="t('input.clickToBrowseHint')"
+    folder="input/"
+    :hint-suffix="t('input.andSelected')"
     @contextmenu="pasteMenu?.openAt($event)"
-    @dragenter.prevent.stop="dragOver = true"
-    @dragover.prevent.stop="dragOver = true"
-    @dragleave="dragOver = false"
-    @drop="onDrop"
-  >
-    <input
-      ref="fileInput"
-      type="file"
-      accept="image/png,image/jpeg,image/webp,image/gif,image/bmp"
-      multiple
-      class="hidden"
-      @change="onPick"
-    />
-    <div class="flex items-center gap-2 font-bold">
-      <Loader2Icon v-if="uploading" class="size-4 animate-spin" />
-      {{ uploading ? t('input.addingScreenshot') : t('input.pasteOrDropScreenshots') }}
-    </div>
-    <div class="text-xs text-muted-foreground">
-      {{ t('input.clickToBrowseHint') }}
-      <!-- i18n-ignore -->
-      <span class="font-mono">input/</span> {{ t('input.andSelected') }}
-    </div>
-  </div>
+    @files="handle"
+  />
 
   <PasteMenu ref="pasteMenu" @paste="(files) => handle(files, 'paste')" />
 </template>
