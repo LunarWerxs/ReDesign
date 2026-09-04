@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import fs from "node:fs";
 import * as store from "../src/store";
-import { normalizeUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost } from "../src/runner/cost";
+import { normalizeUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, runTraces, traceStatsByModel, recentTraces } from "../src/runner/cost";
 import { loadPricing, priceForModel, pricingLastUpdated } from "../src/config/pricing";
 
 const KNOWN_MODEL = "claude-opus-4-8"; // present in src/config/pricing.json
@@ -194,5 +194,138 @@ describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
     } finally {
       fs.rmSync(store.runDir(historyRunId), { recursive: true, force: true });
     }
+  });
+});
+
+describe("cost: runTraces flattens a manifest into per-generation trace rows", () => {
+  it("normalizes each job with usage/cost into a trace, keyed to the manifest's runId", () => {
+    const traces = runTraces({
+      runId: "run-1",
+      jobs: [
+        {
+          id: "j1",
+          modelId: KNOWN_MODEL,
+          provider: "anthropic",
+          status: "ok",
+          ms: 1234,
+          usage: { input_tokens: 1000, output_tokens: 2000 },
+          cost: costForUsage(KNOWN_MODEL, { input_tokens: 1000, output_tokens: 2000 }),
+          startedAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: "2026-01-01T00:00:02.000Z",
+        },
+      ],
+    });
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({
+      runId: "run-1",
+      jobId: "j1",
+      modelId: KNOWN_MODEL,
+      provider: "anthropic",
+      status: "ok",
+      latencyMs: 1234,
+      inputTokens: 1000,
+      outputTokens: 2000,
+      priced: true,
+    });
+    expect(traces[0]!.cost).toBeGreaterThan(0);
+  });
+
+  it("falls back to costForUsage when a job carries usage but no precomputed cost", () => {
+    const traces = runTraces({
+      runId: "run-2",
+      jobs: [{ id: "j1", modelId: KNOWN_MODEL, status: "ok", usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 } }],
+    });
+    const expected = costForUsage(KNOWN_MODEL, { input_tokens: 1_000_000, output_tokens: 1_000_000 });
+    expect(traces[0]!.cost).toBeCloseTo(expected.totalCost, 10);
+  });
+
+  it("still produces a trace row for a job with no usage yet (in-flight/pending)", () => {
+    const traces = runTraces({ runId: "run-3", jobs: [{ id: "j1", modelId: KNOWN_MODEL, status: "running" }] });
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({ status: "running", cost: 0, priced: false, latencyMs: null });
+  });
+
+  it("skips a job with no modelId and returns [] for a manifest with no jobs", () => {
+    expect(runTraces({ runId: "r", jobs: [{ id: "x", modelId: "" } as never] })).toHaveLength(0);
+    expect(runTraces({ runId: "r", jobs: [] })).toEqual([]);
+    expect(runTraces(null)).toEqual([]);
+    expect(runTraces(undefined)).toEqual([]);
+  });
+});
+
+describe("cost: traceStatsByModel groups traces by model", () => {
+  it("counts calls/errors, sums cost and tokens, and averages latency per model - would be wrong if this feature were removed and every job just fell into one bucket", () => {
+    const traces = runTraces({
+      runId: "run-x",
+      jobs: [
+        { id: "a", modelId: "model-a", status: "ok", ms: 1000, usage: { input_tokens: 100, output_tokens: 100 } },
+        { id: "b", modelId: "model-a", status: "ok", ms: 2000, usage: { input_tokens: 100, output_tokens: 100 } },
+        { id: "c", modelId: "model-a", status: "error", ms: 500, error: "boom" },
+        { id: "d", modelId: "model-b", status: "ok", ms: 4000, usage: { input_tokens: 50, output_tokens: 50 } },
+      ],
+    });
+    const stats = traceStatsByModel(traces);
+    expect(stats["model-a"]).toMatchObject({ calls: 3, errors: 1 });
+    expect(stats["model-a"]!.avgLatencyMs).toBeCloseTo((1000 + 2000 + 500) / 3, 5);
+    expect(stats["model-b"]).toMatchObject({ calls: 1, errors: 0, avgLatencyMs: 4000 });
+    // A model with no traces at all must not appear (proves this is a group-by, not a fixed roster).
+    expect(stats["model-c"]).toBeUndefined();
+  });
+
+  it("returns an empty object for an empty trace list", () => {
+    expect(traceStatsByModel([])).toEqual({});
+  });
+});
+
+describe("cost: recentTraces scans stored runs into a flat, newest-first trace list", () => {
+  const runId = `20990101-000004-tracetest-${process.pid}`;
+  const mockRunId = `20990101-000005-tracemock-${process.pid}`;
+  const traceModel = `trace-test-model-${process.pid}`;
+
+  afterAll(() => {
+    for (const id of [runId, mockRunId]) {
+      try {
+        fs.rmSync(store.runDir(id), { recursive: true, force: true });
+      } catch (_) {}
+    }
+  });
+
+  it("flattens jobs across stored runs, sorts newest-first, and rolls them up by model", () => {
+    store.writeManifest(runId, {
+      runId,
+      status: "done",
+      counts: { total: 2, done: 2, ok: 2, error: 0, skipped: 0 },
+      inputs: [],
+      prompts: [],
+      models: [],
+      jobs: [
+        { id: "j1", modelId: traceModel, status: "ok", ms: 100, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z" },
+        { id: "j2", modelId: traceModel, status: "ok", ms: 200, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: "2026-01-02T00:00:00.000Z", finishedAt: "2026-01-02T00:00:01.000Z" },
+      ],
+    } as store.Manifest);
+
+    const result = recentTraces({ activeRunIds: [] });
+    const mine = result.traces.filter((tr) => tr.modelId === traceModel);
+    expect(mine).toHaveLength(2);
+    // Newest finishedAt first.
+    expect(mine[0]!.jobId).toBe("j2");
+    expect(mine[1]!.jobId).toBe("j1");
+    expect(result.byModel[traceModel]).toMatchObject({ calls: 2, errors: 0 });
+  });
+
+  it("excludes mock runs from the trace list, same as spendToDate", () => {
+    store.writeManifest(mockRunId, {
+      runId: mockRunId,
+      status: "done",
+      mock: true,
+      counts: { total: 1, done: 1, ok: 1, error: 0, skipped: 0 },
+      inputs: [],
+      prompts: [],
+      models: [],
+      jobs: [{ id: "j1", modelId: traceModel, status: "ok", usage: { mock: true, input_tokens: 0, output_tokens: 500 } }],
+    } as store.Manifest);
+
+    const result = recentTraces({ activeRunIds: [] });
+    expect(result.traces.some((tr) => tr.runId === mockRunId)).toBe(false);
   });
 });

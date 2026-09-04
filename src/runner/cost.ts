@@ -298,7 +298,166 @@ function estimateRunCost(input: EstimateRunInput, options: store.ReadManifestOpt
   return { totalCost, totalCostLow, totalCostHigh, currency: "USD", anyEstimatePricing, anyUnpriced, anyFromDefault, byModel };
 }
 
-export { normalizeUsage, isMockUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS };
+// --- AI observability: per-generation traces --------------------------------------------------
+// The Run Cost Meter above (runCost/spendToDate) only ever produced a TOTAL: one dollar figure per
+// run or lifetime. Every fact a trace needs (latency, tokens, cost, error, which model) was already
+// sitting on each job the whole time (job-worker.ts writes job.ms, job.usage and job.cost as it
+// goes) - it was just never read back out as a list. This section is that read path: a normalized
+// per-job "trace" record plus a cross-run, group-by-model rollup, adapted from PostHog's
+// ai_observability product (per-generation trace: latency/tokens/cost, grouped by model).
+
+interface TraceJobLike {
+  id?: unknown;
+  modelId: string;
+  provider?: unknown;
+  promptId?: unknown;
+  status?: unknown;
+  usage?: unknown;
+  cost?: CostBreakdown | null;
+  ms?: unknown;
+  prepMs?: unknown;
+  error?: unknown;
+  startedAt?: unknown;
+  finishedAt?: unknown;
+}
+
+interface TraceManifestLike {
+  runId?: unknown;
+  jobs?: TraceJobLike[];
+}
+
+interface JobTrace {
+  runId: string;
+  jobId: string | null;
+  modelId: string;
+  provider: string | null;
+  promptId: string | null;
+  status: string;
+  latencyMs: number | null; // job.ms: the model call itself, excludes prepMs (screenshot captioning)
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  currency: string;
+  priced: boolean;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+function str(v: unknown): string | null {
+  return typeof v === "string" && v ? v : null;
+}
+
+/**
+ * Flatten one manifest's jobs into normalized per-generation traces. Reuses each job's own
+ * already-computed CostBreakdown (job.cost) when present rather than recomputing it, and falls
+ * back to costForUsage for a manifest saved before job.cost existed on disk. A job with no usage
+ * yet (still running/pending) still produces a trace row (status carries that instead), so a
+ * live run's in-flight jobs show up rather than silently disappearing from the list.
+ */
+function runTraces(manifest: TraceManifestLike | null | undefined): JobTrace[] {
+  const runId = str(manifest?.runId) || "";
+  const jobs = Array.isArray(manifest?.jobs) ? (manifest?.jobs as TraceJobLike[]) : [];
+  const traces: JobTrace[] = [];
+  for (const job of jobs) {
+    if (!job || typeof job.modelId !== "string" || !job.modelId) continue;
+    const { inputTokens, outputTokens } = normalizeUsage(job.usage);
+    const breakdown = job.cost ?? (job.usage && !isMockUsage(job.usage) ? costForUsage(job.modelId, job.usage) : null);
+    traces.push({
+      runId,
+      jobId: str(job.id),
+      modelId: job.modelId,
+      provider: str(job.provider),
+      promptId: str(job.promptId),
+      status: str(job.status) || "unknown",
+      latencyMs: typeof job.ms === "number" ? job.ms : null,
+      inputTokens,
+      outputTokens,
+      cost: breakdown?.totalCost ?? 0,
+      currency: breakdown?.currency || "USD",
+      priced: breakdown?.priced ?? false,
+      error: str(job.error),
+      startedAt: str(job.startedAt),
+      finishedAt: str(job.finishedAt),
+    });
+  }
+  return traces;
+}
+
+interface ModelTraceStats {
+  modelId: string;
+  calls: number; // traces with usage/cost data (terminal, non-mock)
+  errors: number;
+  avgLatencyMs: number | null;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+/** Group a list of traces by model into the summary a "by model" table needs. */
+function traceStatsByModel(traces: JobTrace[]): Record<string, ModelTraceStats> {
+  const out: Record<string, ModelTraceStats> = {};
+  const latencySum: Record<string, number> = {};
+  const latencyCount: Record<string, number> = {};
+  for (const trace of traces) {
+    if (!out[trace.modelId]) {
+      out[trace.modelId] = { modelId: trace.modelId, calls: 0, errors: 0, avgLatencyMs: null, totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 };
+    }
+    const entry = out[trace.modelId] as ModelTraceStats;
+    if (trace.status === "error") entry.errors++;
+    if (trace.status === "ok" || trace.status === "error") {
+      entry.calls++;
+      entry.totalCost += trace.cost;
+      entry.totalInputTokens += trace.inputTokens;
+      entry.totalOutputTokens += trace.outputTokens;
+      if (trace.latencyMs != null) {
+        latencySum[trace.modelId] = (latencySum[trace.modelId] || 0) + trace.latencyMs;
+        latencyCount[trace.modelId] = (latencyCount[trace.modelId] || 0) + 1;
+      }
+    }
+  }
+  for (const modelId of Object.keys(out)) {
+    const count = latencyCount[modelId];
+    const entry = out[modelId];
+    if (count && entry) entry.avgLatencyMs = (latencySum[modelId] || 0) / count;
+  }
+  return out;
+}
+
+const RECENT_RUNS_FOR_TRACES = 20;
+const MAX_TRACES_RETURNED = 300;
+
+interface RecentTracesResult {
+  traces: JobTrace[]; // most recent first, capped at MAX_TRACES_RETURNED
+  byModel: Record<string, ModelTraceStats>; // computed over every trace considered, not just the capped list
+  runsConsidered: number;
+}
+
+/**
+ * Per-generation traces across the most recent stored runs (default RECENT_RUNS_FOR_TRACES),
+ * newest first, plus a by-model rollup. This is the list a Run Cost Meter can never show: which
+ * specific calls were slow, which errored, and how that breaks down per model - not just a total.
+ */
+function recentTraces(options: store.ReadManifestOptions = {}, runLimit = RECENT_RUNS_FOR_TRACES): RecentTracesResult {
+  const runs = store.listRuns(options).slice(0, Math.max(0, runLimit));
+  const all: JobTrace[] = [];
+  for (const run of runs) {
+    if ((run as { mock?: boolean }).mock) continue; // mock runs spend nothing real; keep them out of the trace list too
+    const manifest = store.readManifest(run.runId, options);
+    if (!manifest) continue;
+    // store.Manifest's Job type is deliberately loose (a status plus an index signature, see
+    // store/types.ts) since store.ts doesn't own the runner's richer job shape - same cast
+    // averageUsageByModel above uses to read runner-written fields back off a stored manifest.
+    all.push(...runTraces(manifest as unknown as TraceManifestLike));
+  }
+  // Newest first: finishedAt when the job is done, startedAt otherwise, so still-running jobs
+  // (no finishedAt yet) sort by when they began rather than falling to the bottom.
+  all.sort((a, b) => (b.finishedAt || b.startedAt || "").localeCompare(a.finishedAt || a.startedAt || ""));
+  const byModel = traceStatsByModel(all);
+  return { traces: all.slice(0, MAX_TRACES_RETURNED), byModel, runsConsidered: runs.length };
+}
+
+export { normalizeUsage, isMockUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS, runTraces, traceStatsByModel, recentTraces };
 export type {
   NormalizedTokens,
   CostBreakdown,
@@ -309,4 +468,9 @@ export type {
   ModelAverageUsage,
   EstimateRunInput,
   EstimateRunResult,
+  JobTrace,
+  TraceJobLike,
+  TraceManifestLike,
+  ModelTraceStats,
+  RecentTracesResult,
 };
