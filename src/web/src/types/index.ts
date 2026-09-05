@@ -313,6 +313,41 @@ export interface EstimateRunCost {
   byModel: Record<string, { jobs: number; totalCost: number; fromHistory: boolean }>;
 }
 
+/** One per-generation AI-observability trace row (see src/runner/cost.ts runTraces()). */
+export interface JobTrace {
+  runId: string;
+  jobId: string | null;
+  modelId: string;
+  provider: string | null;
+  promptId: string | null;
+  status: string;
+  latencyMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  currency: string;
+  priced: boolean;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ModelTraceStats {
+  modelId: string;
+  calls: number;
+  errors: number;
+  avgLatencyMs: number | null;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+export interface RecentTraces {
+  traces: JobTrace[];
+  byModel: Record<string, ModelTraceStats>;
+  runsConsidered: number;
+}
+
 export interface ProviderDefault {
   baseUrl: string;
   keyEnv: string;

@@ -24,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { t } from '@/i18n';
 import ModelList from './key-health-sheet/ModelList.vue';
 import OrphanKeyPools from './key-health-sheet/OrphanKeyPools.vue';
+import TraceStats from './key-health-sheet/TraceStats.vue';
 import ModelKeyDialogs from './key-health-sheet/ModelKeyDialogs.vue';
 import ImportKeysDialog from './key-health-sheet/ImportKeysDialog.vue';
 import { providerOptions, providerLabel as providerLabelFor, OPENAI_FAMILY } from '@/lib/providers';
@@ -463,6 +464,7 @@ async function confirmDeleteKey() {
           <p v-if="pricingLastUpdatedLabel" class="mt-1.5 text-[11px] text-muted-foreground/70">
             {{ pricingLastUpdatedLabel }}
           </p>
+          <TraceStats v-if="open" />
         </section>
         </div>
   </Sidebar>

@@ -14,6 +14,7 @@ import type {
   PromptBuilderOption,
   PromptBuilderOptionSaveRequest,
   PromptSaveRequest,
+  RecentTraces,
   ReferenceUploadResponse,
   RunDeleteResponse,
   RunRequest,
@@ -162,4 +163,5 @@ export const api = {
   costs: () => request<SpendToDate>('/api/costs'),
   estimateRunCost: (body: { modelIds: string[]; jobCount: number; jobCountByModel?: Record<string, number> }) =>
     request<EstimateRunCost>('/api/costs/estimate', postJson(body)),
+  costsTraces: () => request<RecentTraces>('/api/costs/traces'),
 };

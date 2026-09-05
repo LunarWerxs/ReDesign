@@ -250,6 +250,11 @@ export default {
     unpriced: 'unpriced',
     spendToDate: 'Spend to date',
     pricesLastUpdated: 'Prices last updated {date}',
+    tracesToggle: 'Traces by model',
+    tracesEmpty: 'No completed generations yet',
+    tracesCalls: '{count} calls',
+    tracesErrors: '{count} errors',
+    tracesAvgLatency: '{ms} avg',
   },
   reference: {
     useReferenceImage: 'Use reference image',

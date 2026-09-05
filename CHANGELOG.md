@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Per-generation AI observability traces.** The Run Cost Meter always showed one dollar figure
+  (per-run or lifetime); `GET /api/costs/traces` now flattens the most recent runs' jobs into
+  normalized traces (latency, input/output tokens, cost, status, error) and rolls them up by
+  model (calls, error count, average latency, total cost). The key/model settings sheet shows the
+  by-model rollup under the existing spend line. Adapted from PostHog's `ai_observability` idea
+  (per-generation trace grouped by model) onto data RēDesign's job-worker already wrote to every
+  manifest (`src/runner/cost.ts`: `runTraces`, `traceStatsByModel`, `recentTraces`) - it was
+  computed and stored the whole time, just never read back as a list.
+
 ### Internal
 
 - **The two image drop zones are one component.** `InputDropzone` (screenshots) and the drop target
