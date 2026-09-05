@@ -50,7 +50,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
       keyManager: e2eKm,
       mock: true,
       inputs: { ids: ["__nonexistent-input-id__"] },
-      models: { ids: ["gemini-3.5-flash", "deepseek-v4-pro"] },
+      models: { ids: ["gemini-flash-latest", "deepseek-v4-pro"] },
       prompts: { presets: ["faithful-refresh"] },
       variants: 1,
       label: "selftest",
@@ -68,7 +68,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
       keyManager: e2eKm2,
       mock: true,
       inputs: { ids: [realInputs[0]!.id] },
-      models: { ids: ["gemini-3.5-flash", "deepseek-v4-pro", "claude-opus-4-8"] },
+      models: { ids: ["gemini-flash-latest", "deepseek-v4-pro", "claude-opus-4-8"] },
       prompts: { presets: ["faithful-refresh", "minimalist"] },
       variants: 1,
       label: "selftest",
@@ -143,7 +143,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
       keyManager: refKm,
       mock: true,
       inputs: { ids: [realInputs[0]!.id] },
-      models: { ids: ["gemini-3.5-flash", "deepseek-v4-pro"] },
+      models: { ids: ["gemini-flash-latest", "deepseek-v4-pro"] },
       prompts: { presets: ["material-3"] },
       reference: { images: ["__selftest_ref.png"], note: "match this palette" },
       variants: 1,
@@ -153,7 +153,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
       expect(mref.config.reference?.count).toBe(1);
       const metaOf = (j: ManifestJob) =>
         JSON.parse(fs.readFileSync(path.join(store.OUTPUT_DIR, (j.file || "").replace(/\.html$/, ".meta.json").split("/").join(path.sep)), "utf8"));
-      const visJob = mref.jobs.find((j) => j.modelId === "gemini-3.5-flash" && j.status === "ok");
+      const visJob = mref.jobs.find((j) => j.modelId === "gemini-flash-latest" && j.status === "ok");
       const txtJob = mref.jobs.find((j) => j.modelId === "deepseek-v4-pro" && j.status === "ok");
       if (visJob) {
         const mm = metaOf(visJob);
@@ -181,7 +181,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
       // A vision model only: grounding's whole point is to feed the caption to a model
       // that CAN see the image, so it stops dropping content. Text-only models are
       // grounded already; this proves the vision path specifically fires.
-      models: { ids: ["gemini-3.5-flash"] },
+      models: { ids: ["gemini-flash-latest"] },
       prompts: { presets: ["faithful-refresh"] },
       variants: 1,
       label: "groundtest",
@@ -189,7 +189,7 @@ describe("runner: end-to-end mock run with key rotation", () => {
     try {
       // The run advertises that it was grounded (so a bake-off can tell runs apart).
       expect(mg.config.grounded).toBe(true);
-      const visJob = mg.jobs.find((j) => j.modelId === "gemini-3.5-flash" && j.status === "ok");
+      const visJob = mg.jobs.find((j) => j.modelId === "gemini-flash-latest" && j.status === "ok");
       expect(visJob).toBeTruthy();
       // The vision job's note reflects grounding, and its sidecar meta carries the caption.
       expect(/grounded/i.test(visJob?.note || "")).toBe(true);

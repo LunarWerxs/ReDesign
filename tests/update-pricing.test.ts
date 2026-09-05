@@ -201,7 +201,7 @@ describe("update-pricing: resolvePrice (LiteLLM -> CloudPrice -> OpenRouter fall
 
   it("SOURCE_MAP covers exactly the 6 shipped models", () => {
     expect(Object.keys(SOURCE_MAP).sort()).toEqual(
-      ["claude-opus-4-8", "gpt-5.5", "gemini-3.5-flash", "gemini-3.1-pro", "deepseek-v4-pro", "qwen-3.5-plus"].sort(),
+      ["claude-opus-4-8", "gpt-5.5", "gemini-flash-latest", "gemini-pro-latest", "deepseek-v4-pro", "qwen-3.5-plus"].sort(),
     );
   });
 });
@@ -251,8 +251,8 @@ describe("update-pricing: buildNextPrices", () => {
     const litellm: LiteLLMCatalog = {
       "claude-opus-4-8": { input_cost_per_token: 0.000005, output_cost_per_token: 0.000025 },
       "gpt-5.5": { input_cost_per_token: 0.000005, output_cost_per_token: 0.00003 },
-      "gemini-3.5-flash": { input_cost_per_token: 0.0000015, output_cost_per_token: 0.000009 },
-      "gemini-3.1-pro-preview": { input_cost_per_token: 0.000002, output_cost_per_token: 0.000012 },
+      "gemini-3.8-flash": { input_cost_per_token: 0.0000015, output_cost_per_token: 0.000009 },
+      "gemini-3-pro-preview": { input_cost_per_token: 0.000002, output_cost_per_token: 0.000012 },
       "deepseek-v4-pro": { input_cost_per_token: 4.35e-7, output_cost_per_token: 8.7e-7 },
       "dashscope/qwen3.5-plus": {}, // LiteLLM: no flat cost fields
     };
@@ -262,14 +262,14 @@ describe("update-pricing: buildNextPrices", () => {
     const openrouter: OpenRouterCatalog = {
       data: [{ id: "qwen/qwen3.5-plus-02-15", pricing: { prompt: "0.00000026", completion: "0.00000156" } }],
     };
-    const modelIds = ["claude-opus-4-8", "gpt-5.5", "gemini-3.5-flash", "gemini-3.1-pro", "deepseek-v4-pro", "qwen-3.5-plus"];
+    const modelIds = ["claude-opus-4-8", "gpt-5.5", "gemini-flash-latest", "gemini-pro-latest", "deepseek-v4-pro", "qwen-3.5-plus"];
     const { prices, sourced, keptEstimate } = buildNextPrices({}, modelIds, litellm, cloudprice, openrouter);
     expect(sourced.sort()).toEqual([...modelIds].sort());
     expect(keptEstimate).toEqual([]);
     expect(prices["qwen-3.5-plus"]!.source).toBe("cloudprice");
     // Flash-class model must be far cheaper than opus-class, sanity per the task's ask.
-    expect(prices["gemini-3.5-flash"]!.inputPerMtok).toBeLessThan(prices["claude-opus-4-8"]!.inputPerMtok);
-    expect(prices["gemini-3.5-flash"]!.outputPerMtok).toBeLessThan(prices["claude-opus-4-8"]!.outputPerMtok);
+    expect(prices["gemini-flash-latest"]!.inputPerMtok).toBeLessThan(prices["claude-opus-4-8"]!.inputPerMtok);
+    expect(prices["gemini-flash-latest"]!.outputPerMtok).toBeLessThan(prices["claude-opus-4-8"]!.outputPerMtok);
     for (const modelId of modelIds) {
       expect(prices[modelId]!.inputPerMtok).toBeGreaterThan(0);
       expect(prices[modelId]!.outputPerMtok).toBeGreaterThan(0);

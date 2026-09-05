@@ -62,12 +62,19 @@ const MODELSDEV_URL = "https://models.dev/api.json";
 //                            {input_cost_per_token: 0.000005, output_cost_per_token: 0.000025}
 //   - gpt-5.5:               LiteLLM bare key "gpt-5.5"
 //                            {input_cost_per_token: 0.000005, output_cost_per_token: 0.00003}
-//   - gemini-3.5-flash:      LiteLLM bare key "gemini-3.5-flash"
-//                            {input_cost_per_token: 0.0000015, output_cost_per_token: 0.000009}
-//   - gemini-3.1-pro:        LiteLLM key "gemini-3.1-pro-preview" (matches models.json's
-//                            apiModel "gemini-3.1-pro-preview", NOT the bare "gemini-3.1-pro"
-//                            key -- that key isn't in the catalog)
-//                            {input_cost_per_token: 0.000002, output_cost_per_token: 0.000012}
+//   - gemini-flash-latest:   apiModel unpinned to Google's alias (owner policy 2026-09-03).
+//                            ⛔ THE CATALOG KEY BELOW IS NOT THE ALIAS. LiteLLM/CloudPrice/
+//                            OpenRouter price CONCRETE models, so the key has to name whatever
+//                            the alias currently resolves to: gemini-3.8-flash as of 2026-09-02.
+//                            Verified sourced (estimate:false) from LiteLLM on 2026-09-03 at
+//                            $0.75/$3.75 per Mtok.
+//                            ⚠ THIS KEY GOES STALE WHEN GOOGLE MOVES THE ALIAS, and the failure
+//                            is quiet: the run just reports this model as "kept as estimate:true"
+//                            instead of erroring. If you see that, re-point the key at the new
+//                            concrete model rather than assuming the price is unchanged.
+//   - gemini-pro-latest:     Same arrangement: alias in models.json, concrete model in the key.
+//                            Currently gemini-3-pro-preview; verified sourced from LiteLLM on
+//                            2026-09-03 at $2/$12 per Mtok. Same staleness caveat as above.
 //   - deepseek-v4-pro:       LiteLLM bare key "deepseek-v4-pro"
 //                            {input_cost_per_token: 4.35e-7, output_cost_per_token: 8.7e-7}
 //   - qwen-3.5-plus:         LiteLLM's only close match, "dashscope/qwen3.5-plus", has no flat
@@ -98,15 +105,15 @@ const SOURCE_MAP: Record<string, SourceMapEntry> = {
     cloudpriceKey: "gpt-5.5",
     openrouterKey: "openai/gpt-5.5",
   },
-  "gemini-3.5-flash": {
-    litellmKey: "gemini-3.5-flash",
-    cloudpriceKey: "gemini-3.5-flash",
-    openrouterKey: "google/gemini-3.5-flash",
+  "gemini-flash-latest": {
+    litellmKey: "gemini-3.8-flash",
+    cloudpriceKey: "gemini-3.8-flash",
+    openrouterKey: "google/gemini-3.8-flash",
   },
-  "gemini-3.1-pro": {
-    litellmKey: "gemini-3.1-pro-preview",
-    cloudpriceKey: "gemini-3.1-pro-preview",
-    openrouterKey: "google/gemini-3.1-pro-preview",
+  "gemini-pro-latest": {
+    litellmKey: "gemini-3-pro-preview",
+    cloudpriceKey: "gemini-3-pro-preview",
+    openrouterKey: "google/gemini-3-pro-preview",
   },
   "deepseek-v4-pro": {
     litellmKey: "deepseek-v4-pro",

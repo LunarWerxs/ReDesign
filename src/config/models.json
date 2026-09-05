@@ -74,10 +74,10 @@
       "color": "#5ec9a0"
     },
     {
-      "id": "gemini-3.5-flash",
-      "label": "Gemini 3.5 Flash",
+      "id": "gemini-flash-latest",
+      "label": "Gemini Flash (Latest)",
       "provider": "gemini",
-      "apiModel": "gemini-3.5-flash",
+      "apiModel": "gemini-flash-latest",
       "keyEnv": "GEMINI_FLASH_API_KEYS",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
       "vision": true,
@@ -88,10 +88,10 @@
       "color": "#ea4335"
     },
     {
-      "id": "gemini-3.1-pro",
-      "label": "Gemini 3.1 Pro",
+      "id": "gemini-pro-latest",
+      "label": "Gemini Pro (Latest)",
       "provider": "gemini",
-      "apiModel": "gemini-3.1-pro-preview",
+      "apiModel": "gemini-pro-latest",
       "keyEnv": "GEMINI_PRO_API_KEYS",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
       "vision": true,

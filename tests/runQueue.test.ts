@@ -58,7 +58,7 @@ describe("run queue: the release gate", () => {
       label,
       mock: true,
       inputs: { ids: [firstInput?.id] },
-      models: { ids: ["gemini-3.5-flash"] },
+      models: { ids: ["gemini-flash-latest"] },
       prompts: { presets: ["faithful-refresh"] },
       autoStart: false,
       ...over,

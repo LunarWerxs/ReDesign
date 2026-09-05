@@ -75,7 +75,7 @@ describe("MCP tool: batch_reimagine", () => {
   it("wait:false returns { runId, note } immediately without a status field", async () => {
     const result = (await tool("batch_reimagine").run({
       inputs: realInputs.length ? realInputs[0]!.id : "all",
-      models: "gemini-3.5-flash",
+      models: "gemini-flash-latest",
       prompts: "faithful-refresh",
       mock: true,
       label: "mcp-batch-nowait",
@@ -99,7 +99,7 @@ describe("MCP tool: batch_reimagine", () => {
     async () => {
       const digest = (await tool("batch_reimagine").run({
         inputs: realInputs[0]!.id,
-        models: "gemini-3.5-flash,deepseek-v4-pro",
+        models: "gemini-flash-latest,deepseek-v4-pro",
         prompts: "faithful-refresh",
         mock: true,
         wait: true,
@@ -142,7 +142,7 @@ describe("MCP tool: batch_reimagine", () => {
     // that a tiny timeout doesn't throw and still returns a well-shaped digest either way.
     const digest = (await tool("batch_reimagine").run({
       inputs: realInputs[0]!.id,
-      models: "gemini-3.5-flash",
+      models: "gemini-flash-latest",
       prompts: "faithful-refresh",
       mock: true,
       wait: true,
