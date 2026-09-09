@@ -7,6 +7,7 @@
 [![CI](https://github.com/LunarWerxs/ReDesign/actions/workflows/ci.yml/badge.svg)](https://github.com/LunarWerxs/ReDesign/actions/workflows/ci.yml)
 [![Built with Bun](https://img.shields.io/badge/built%20with-Bun-14151a?logo=bun&logoColor=white)](https://bun.sh)
 [![Site](https://img.shields.io/badge/site-redes1gn.github.io-a855f7)](https://redes1gn.github.io/)
+[![Discord](https://img.shields.io/badge/Discord-join_the_community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PsWpeNUzhk)
 
 RēDesign is a self-hosted screenshot-to-redesign tool that fires one UI screenshot at several AI models in parallel and returns a gallery of self-contained HTML redesigns placed next to the original, so you can compare real design directions at once instead of pasting the same image into one chat tab after another.
 
