@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { $ } from "bun";
 import pkg from "../package.json";
@@ -55,6 +55,13 @@ function importPath(fromFile: string, target: string): string {
   return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
+// The kit's tray host + this app's config/icon (see src/tray-bootstrap.mjs). Every kit app shipped
+// a compiled exe that could never show its tray icon until 2026-09-11 — the single-file binary
+// embedded the web assets and nothing from misc\, so no host could exist beside it and each app's
+// README simply wrote that down as a limitation. Filenames, not paths: materializeTrayToolkit()
+// looks these up by basename in the embedded map (mirrors trayToolkitFiles() in tray-bootstrap.mjs).
+const TRAY_TOOLKIT_FILES = ["lunarwerx-tray.exe", "ReDesign-Tray.json", "ReDesign.ico"];
+
 function writeReleaseEntrypoint(): string {
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
@@ -69,15 +76,41 @@ function writeReleaseEntrypoint(): string {
     `/${relative(webRoot, file).replaceAll("\\", "/")}`,
     `asset${index}`,
   ]);
+
+  // Tray toolkit, Windows-only (the host is a Win32 program; see src/tray-bootstrap.mjs). A build
+  // missing any of these three files would ship an app that can never show its icon, so that is a
+  // hard build failure rather than a silently trayless release.
+  const trayImports: string[] = [];
+  const trayEntries: Array<[string, string]> = [];
+  if (isWin) {
+    TRAY_TOOLKIT_FILES.forEach((name, index) => {
+      const file = join(ROOT, "misc", name);
+      if (!existsSync(file)) {
+        throw new Error(
+          `missing ${file}: a build without the tray toolkit ships an app that can never show its icon`,
+        );
+      }
+      trayImports.push(
+        `import assetTray${index} from ${JSON.stringify(importPath(entry, file))} with { type: "file" };`,
+      );
+      trayEntries.push([name, `assetTray${index}`]);
+    });
+  }
+
   writeFileSync(
     entry,
     `${imports.join("\n")}
+${trayImports.join("\n")}
 
 (globalThis as { __REDESIGN_EMBEDDED_WEB__?: Readonly<Record<string, string>> })
   .__REDESIGN_EMBEDDED_WEB__ = Object.freeze({
 ${routes.map(([route, asset]) => `  ${JSON.stringify(route)}: ${asset},`).join("\n")}
 });
-(globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ = true;
+${trayEntries.length === 0 ? "" : `(globalThis as { __REDESIGN_EMBEDDED_TRAY__?: Readonly<Record<string, string>> })
+  .__REDESIGN_EMBEDDED_TRAY__ = Object.freeze({
+${trayEntries.map(([name, asset]) => `  ${JSON.stringify(name)}: ${asset},`).join("\n")}
+});
+`}(globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ = true;
 await import(${JSON.stringify(importPath(entry, join(ROOT, "src", "index.ts")))});
 `,
   );

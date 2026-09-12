@@ -4,7 +4,8 @@
  * A single daemon-wide timer asks src/updater.ts whether a newer version is available and
  * applicable. Source checkouts fast-forward/rebuild; compiled releases download and verify the
  * compressed platform archive. When auto-apply is on, it then SELF-RELAUNCHES so the updated
- * code takes over. RēDesign has no separate tray supervisor process, but a plain `redesign serve`
+ * code takes over. A compiled build now has a separate tray host process (src/tray-bootstrap.mjs),
+ * but it doesn't drive this relaunch, so a plain `redesign serve`
  * foreground process still needs someone to spawn its successor before it exits, the concrete
  * relaunch (spawn a detached copy of our launch command, then gracefully shut down) is injected
  * from src/cli/lifecycle.ts, which owns the shutdown handle.

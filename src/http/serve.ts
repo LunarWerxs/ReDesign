@@ -20,7 +20,10 @@
  * setting process.env.PORT before this module's PORT/HOST consts are read. Also still runnable
  * directly (`bun src/http/serve.ts`) via the entry-module guard.
  */
-import { C } from "../util";
+import { dirname } from "node:path";
+import pkg from "../../package.json";
+import { materializeTrayToolkit, startTrayHostIfMissing } from "../tray-bootstrap.mjs";
+import { APP_CONFIG_DIR, C, IS_PACKAGED, ROOT } from "../util";
 import { loadModels } from "../config";
 import { getKeyManager } from "../runner";
 import * as store from "../store";
@@ -134,6 +137,38 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
     server = await bindWithRetry(app.fetch, port);
     boundPort = port;
   }
+
+  // Every kit app shipped a compiled exe that could never show its tray icon until 2026-09-11,
+  // and each app's README simply wrote that down as a limitation (see src/tray-bootstrap.mjs's
+  // header). Materialize the embedded toolkit (or reuse a misc\ sidecar in dev/an extracted zip)
+  // and start the tray host if nothing else already has.
+  const embeddedTray =
+    (globalThis as { __REDESIGN_EMBEDDED_TRAY__?: Readonly<Record<string, string>> })
+      .__REDESIGN_EMBEDDED_TRAY__ ?? null;
+  const compiled = IS_PACKAGED;
+  const appRoot = compiled ? dirname(process.execPath) : ROOT;
+  const tray = await materializeTrayToolkit({
+    appRoot,
+    compiled,
+    stateDir: APP_CONFIG_DIR,
+    version: pkg.version,
+    exePath: process.execPath,
+    configFile: "ReDesign-Tray.json",
+    iconFile: "ReDesign.ico",
+    embedded: embeddedTray,
+  });
+  if (tray.wrote.length) console.log(`[redesign] placed the tray toolkit in ${tray.dir} (${tray.wrote.join(", ")})`);
+  void startTrayHostIfMissing({
+    appRoot,
+    compiled,
+    configFile: "ReDesign-Tray.json",
+    hideTray: () => loadAppSettings().hideTrayIcon === true,
+    toolkitDir: tray.dir,
+  })
+    .then((r) => {
+      if (r.start) console.log(`[redesign] started the tray host (${r.exe}) - nothing else had`);
+    })
+    .catch((e) => console.error("[redesign] tray host start failed:", e));
 
   // extra: publish portableMode + hideTrayIcon so the tray/start.cmd launcher knows, on a cold
   // start (before it can ask the daemon anything), whether to open an app window instead of a

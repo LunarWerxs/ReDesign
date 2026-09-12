@@ -29,9 +29,23 @@ function findRepoRoot(startDir: string): string {
 // src/web/dist, .env, output/, input/, reference/) live NEXT TO the executable instead. Detect the
 // compiled case by the absence of package.json at the dev-resolved root, and fall back to the
 // executable's directory. Dev behaviour is unchanged (the dev root always has package.json).
-const DEV_ROOT = findRepoRoot(import.meta.dir);
-const IS_PACKAGED = !fs.existsSync(path.join(DEV_ROOT, "package.json"));
-const ROOT = IS_PACKAGED ? path.dirname(process.execPath) : DEV_ROOT;
+// ⛔ AND THE DETECTION HAS TO SURVIVE THE CASE IT DETECTS (found 2026-09-11). `findRepoRoot` THROWS
+// when it reaches the filesystem root without finding a marker, and inside a compiled binary
+// import.meta.dir is `B:\~BUN\root`, which has no markers above it - so the dev root could never be
+// resolved in exactly the situation this code exists to notice, and the throw happened before
+// IS_PACKAGED could be computed. It stayed invisible only because nothing in the compiled entry
+// referenced these consts, so the bundler dropped them; the first import of ROOT from a packaged
+// path (the tray bootstrap) turned the whole exe into "error: Could not find repo root from
+// B:\~BUN\root" at startup. A failure to find the dev root IS the packaged answer, not a crash.
+const DEV_ROOT = ((): string | null => {
+  try {
+    return findRepoRoot(import.meta.dir);
+  } catch {
+    return null;
+  }
+})();
+const IS_PACKAGED = DEV_ROOT === null || !fs.existsSync(path.join(DEV_ROOT, "package.json"));
+const ROOT = IS_PACKAGED ? path.dirname(process.execPath) : (DEV_ROOT as string);
 const APP_CONFIG_DIR = process.env.REDESIGN_HOME?.trim() || path.join(homedir(), ".redesign");
 const ENV_FILE = IS_PACKAGED ? path.join(APP_CONFIG_DIR, ".env") : path.join(ROOT, ".env");
 
