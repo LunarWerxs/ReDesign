@@ -1,6 +1,28 @@
 # Changelog
 
-## [Unreleased]
+## [1.6.7] - 2026-09-12
+
+### Fixed
+
+- **The single-file `redesign.exe` ships its tray icon.** It embedded every Vite asset and nothing
+  from `misc\`, so `misc\lunarwerx-tray.exe` could not exist beside it and the download most people
+  take could never show a tray icon, never offer Quit and never get the auto-restart supervisor.
+  The README said so, as though 340 KB of Win32 binary were a reason rather than an omission. The
+  host, its config and its icon now ride inside the binary and are written out to
+  `<APP_CONFIG_DIR>/tray/<version>` on first run, with the config's shipped `appRoot: ".."`
+  (correct only for the extracted zip) replaced by the absolute directory of the RUNNING exe and
+  `compiledExe` set to its real filename. The shared mechanism lives in the kit
+  (`src/tray-bootstrap.mjs`); AgentHydra, RepoYeti and DevWebUI shipped the identical hole, and the
+  same fix carries a probe that used to answer "a host is already running" when the host it saw
+  belonged to a sibling app.
+
+- **`src/util.ts` could not survive being packaged.** `findRepoRoot(import.meta.dir)` runs at module
+  scope and THROWS inside a compiled binary (import.meta.dir is `B:\~BUN\root`, with no marker above
+  it), so `IS_PACKAGED` could never be computed in exactly the case it exists to detect. It stayed
+  invisible only because nothing in the compiled entry referenced those consts and the bundler
+  dropped them; the first packaged import of `ROOT` turned the whole exe into "error: Could not find
+  repo root from B:\~BUN\root" at startup, before any of this app's own code ran. Failing to find a
+  dev root IS the packaged answer now.
 
 ### Added
 
