@@ -30,10 +30,12 @@ On Windows, download `redesign-windows-x64.exe` from
 icon-bearing GUI executable with the web app embedded and no console window. The plain ZIP beside it
 is the smaller automatic-update transport.
 
-Want a system-tray icon? Take `redesign-windows-x64-with-tray.zip` instead, run
-`misc\Create-Shortcut.ps1` once, and launch from the shortcut it creates. The icon is drawn by a
-small separate launcher (`misc\lunarwerx-tray.exe`), so running `redesign.exe` on its own never
-produces one.
+The system-tray icon comes with both downloads. It is drawn by a small separate launcher
+(`misc\lunarwerx-tray.exe`); the zip ships it beside the exe, and since 1.6.7 the single-file
+`redesign.exe` carries it inside the binary and writes it out beside its own state on first run, so
+either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.6.7 the bare exe
+had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still
+makes a shortcut that launches through the tray host directly.
 
 To run from source on any supported OS, you need [Bun](https://bun.sh) 1.2 or newer.
 
