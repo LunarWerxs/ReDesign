@@ -9,7 +9,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
   const tmpState = path.join(os.tmpdir(), `reimagine-test-${process.pid}.json`);
 
   afterAll(() => {
-    for (const suffix of ["", ".2", ".3", ".4", ".5", ".6", ".e2e", ".e2e2", ".rot", ".ref"]) {
+    for (const suffix of ["", ".2", ".3", ".4", ".5", ".6", ".7", ".e2e", ".e2e2", ".rot", ".ref"]) {
       try { fs.unlinkSync(tmpState + suffix); } catch (_) {}
     }
   });
@@ -23,7 +23,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     for (let i = 0; i < 6; i++) {
       const a = km.acquire("ANTHROPIC_API_KEYS");
       picks.push(a.keyId as string);
-      km.report("ANTHROPIC_API_KEYS", a.keyId as string, { errorClass: CLASS.OK });
+      km.report("ANTHROPIC_API_KEYS", a.keyId as string, { errorClass: CLASS.OK, leaseId: a.leaseId });
     }
     expect(new Set(picks).size).toBe(3);
     expect(picks[0]).toBe(picks[3]);
@@ -34,15 +34,18 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     km.registerPool("ANTHROPIC_API_KEYS");
     for (let i = 0; i < 6; i++) {
       const a = km.acquire("ANTHROPIC_API_KEYS");
-      km.report("ANTHROPIC_API_KEYS", a.keyId as string, { errorClass: CLASS.OK });
+      km.report("ANTHROPIC_API_KEYS", a.keyId as string, { errorClass: CLASS.OK, leaseId: a.leaseId });
     }
 
     const a1 = km.acquire("ANTHROPIC_API_KEYS");
-    km.report("ANTHROPIC_API_KEYS", a1.keyId as string, { errorClass: CLASS.AUTH, message: "401" });
+    km.report("ANTHROPIC_API_KEYS", a1.keyId as string, { errorClass: CLASS.AUTH, message: "401", leaseId: a1.leaseId });
     const after: string[] = [];
     for (let i = 0; i < 6; i++) {
       const a = km.acquire("ANTHROPIC_API_KEYS");
-      if (a.available) after.push(a.keyId as string);
+      if (a.available) {
+        after.push(a.keyId as string);
+        km.release("ANTHROPIC_API_KEYS", a.keyId, a.leaseId);
+      }
     }
     expect(after.includes(a1.keyId as string)).toBe(false);
     expect(new Set(after).size).toBe(2);
@@ -63,7 +66,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     km2.registerPool("OPENAI_API_KEYS"); // 2 keys
     for (let i = 0; i < 2; i++) {
       const a = km2.acquire("OPENAI_API_KEYS");
-      km2.report("OPENAI_API_KEYS", a.keyId as string, { errorClass: CLASS.RATE_LIMIT });
+      km2.report("OPENAI_API_KEYS", a.keyId as string, { errorClass: CLASS.RATE_LIMIT, leaseId: a.leaseId });
     }
     const none = km2.acquire("OPENAI_API_KEYS");
     expect(none.available).toBe(false);
@@ -75,7 +78,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     const km3 = new KeyManager({ stateFile: `${tmpState}.3` });
     km3.registerPool("DEEPSEEK_API_KEYS");
     const ad = km3.acquire("DEEPSEEK_API_KEYS");
-    km3.report("DEEPSEEK_API_KEYS", ad.keyId as string, { errorClass: CLASS.RATE_LIMIT, retryAfterMs: 2000 });
+    km3.report("DEEPSEEK_API_KEYS", ad.keyId as string, { errorClass: CLASS.RATE_LIMIT, retryAfterMs: 2000, leaseId: ad.leaseId });
     const cd = km3.snapshot().pools[0]!.entries.find((e) => e.id === ad.keyId)!.cooldownRemainingSec;
     expect(cd).toBeGreaterThanOrEqual(1);
     expect(cd).toBeLessThanOrEqual(3);
@@ -85,7 +88,7 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     const km4 = new KeyManager({ stateFile: `${tmpState}.4` });
     km4.registerPool("OPENAI_API_KEYS");
     const ab = km4.acquire("OPENAI_API_KEYS");
-    km4.report("OPENAI_API_KEYS", ab.keyId as string, { errorClass: CLASS.BAD_REQUEST, message: "400" });
+    km4.report("OPENAI_API_KEYS", ab.keyId as string, { errorClass: CLASS.BAD_REQUEST, message: "400", leaseId: ab.leaseId });
     expect(km4.acquire("OPENAI_API_KEYS").available).toBe(true);
   });
 
@@ -93,12 +96,12 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
     const km5 = new KeyManager({ stateFile: `${tmpState}.5` });
     km5.registerPool("DEEPSEEK_API_KEYS");
     const aAuth = km5.acquire("DEEPSEEK_API_KEYS");
-    km5.report("DEEPSEEK_API_KEYS", aAuth.keyId as string, { errorClass: CLASS.AUTH, retryAfterMs: 2000, message: "401" });
+    km5.report("DEEPSEEK_API_KEYS", aAuth.keyId as string, { errorClass: CLASS.AUTH, retryAfterMs: 2000, message: "401", leaseId: aAuth.leaseId });
     const authCd = km5.snapshot().pools[0]!.entries.find((e) => e.id === aAuth.keyId)!.cooldownRemainingSec;
     expect(authCd).toBeGreaterThan(3600);
 
     const aBal = km5.acquire("DEEPSEEK_API_KEYS");
-    km5.report("DEEPSEEK_API_KEYS", aBal.keyId as string, { errorClass: CLASS.NO_BALANCE, retryAfterMs: 2000, message: "402" });
+    km5.report("DEEPSEEK_API_KEYS", aBal.keyId as string, { errorClass: CLASS.NO_BALANCE, retryAfterMs: 2000, message: "402", leaseId: aBal.leaseId });
     const balCd = km5.snapshot().pools[0]!.entries.find((e) => e.id === aBal.keyId)!.cooldownRemainingSec;
     expect(balCd).toBeGreaterThan(1800);
   });
@@ -117,5 +120,23 @@ describe("keyManager: rotation, cooldown, classification, persistence", () => {
       .entries.find((e) => e.id === sharedId)!;
     expect(proShared.status).toBe("dead");
     expect(proShared.availableNow).toBe(false);
+  });
+
+  it("a resource permission failure leaves the credential available in every pool", () => {
+    process.env.GEMINI_FLASH_API_KEYS = "AIza-shared-xyz,AIza-flash-only";
+    process.env.GEMINI_PRO_API_KEYS = "AIza-shared-xyz,AIza-pro-only";
+    const km7 = new KeyManager({ stateFile: `${tmpState}.7` });
+    km7.registerPool("GEMINI_FLASH_API_KEYS");
+    km7.registerPool("GEMINI_PRO_API_KEYS");
+    const sharedId = keyId("AIza-shared-xyz");
+
+    km7.report("GEMINI_FLASH_API_KEYS", sharedId, { errorClass: CLASS.PERMISSION, message: "403 model permission" });
+
+    const flashShared = km7.snapshot().pools.find((p) => p.pool === "GEMINI_FLASH_API_KEYS")!.entries.find((e) => e.id === sharedId)!;
+    const proShared = km7.snapshot().pools.find((p) => p.pool === "GEMINI_PRO_API_KEYS")!.entries.find((e) => e.id === sharedId)!;
+    expect(flashShared.status).toBe("untested");
+    expect(flashShared.availableNow).toBe(true);
+    expect(proShared.status).toBe("untested");
+    expect(proShared.availableNow).toBe(true);
   });
 });

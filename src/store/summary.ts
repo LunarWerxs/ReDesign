@@ -18,7 +18,8 @@ interface RunSummaryCacheEntry {
 // like a simple LRU without a dedicated data structure).
 const RUN_SUMMARY_CACHE_MAX = 500;
 const runSummaryCache = new Map<string, RunSummaryCacheEntry>();
-function cacheRunSummary(mp: string, entry: RunSummaryCacheEntry): void {
+function cacheRunSummary(mp: string, entry: RunSummaryCacheEntry, { ifRoom = false }: { ifRoom?: boolean } = {}): void {
+  if (ifRoom && !runSummaryCache.has(mp) && runSummaryCache.size >= RUN_SUMMARY_CACHE_MAX) return;
   runSummaryCache.delete(mp);
   runSummaryCache.set(mp, entry);
   while (runSummaryCache.size > RUN_SUMMARY_CACHE_MAX) {

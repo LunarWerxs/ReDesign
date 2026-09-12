@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { ChevronDownIcon, PlayIcon, SquareIcon, Loader2Icon, ListPlusIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +76,22 @@ const estimateTitle = computed(() => {
       :title="estimateTitle"
     >
       {{ t('cost.estimateLabel') }}: {{ estimateText }}
+    </span>
+    <label class="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {{ t('runControls.costCeiling') }}
+      <Input
+        v-model="store.maxCostUsd"
+        type="number"
+        min="0"
+        step="0.01"
+        inputmode="decimal"
+        class="h-7 w-24"
+        :placeholder="t('runControls.costCeilingPlaceholder')"
+        :aria-label="t('runControls.costCeiling')"
+      />
+    </label>
+    <span class="basis-full text-right text-[11px] text-muted-foreground">
+      {{ t('runControls.costCeilingHint') }}
     </span>
     <Button v-if="store.running" variant="destructive" :title="t('runControls.stopRun')" @click="store.cancelRun()">
       <SquareIcon class="size-4" /> {{ t('runControls.cancel') }}

@@ -114,6 +114,8 @@ export function createControlState() {
   // map only ever holds entries > 1 (see setModelQty). Replaces the old single
   // global "variants" number: each selected model can be generated N times.
   const modelQty = useStorage<Record<string, number>>('redesign.model-qty', {});
+  // An empty input means no ceiling; $0 remains an explicit valid limit.
+  const maxCostUsd = useStorage('redesign.max-cost-usd', '');
   // NOTE: there is deliberately no `maxImages` here any more (removed 2026-07-21). Every image
   // the user ticks is sent; a silent cap was dropping selections without saying so.
   const customOn = useStorage('redesign.custom-on', false);
@@ -294,6 +296,7 @@ export function createControlState() {
     selectionSeeded,
     mock,
     modelQty,
+    maxCostUsd,
     customOn,
     custom,
     advancedOpen,

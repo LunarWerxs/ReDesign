@@ -10,8 +10,9 @@ import { nextTick } from "vue";
 import type { Manifest, RunSummary } from "@/types";
 
 const apiMock = {
-  runs: vi.fn(async (): Promise<RunSummary[]> => []),
+  runs: vi.fn(async () => ({ runs: [] as RunSummary[] })),
   run: vi.fn(async (_id: string): Promise<Manifest> => manifest("unknown", "done")),
+  preflightRun: vi.fn(async () => ({ preflightId: 'prepared-1', jobCount: 1, assetBytes: 1, estimatedCostUsd: 0.01, unknownPricing: false, expiresAt: new Date(Date.now() + 60_000).toISOString() })),
   startRun: vi.fn(async () => ({ runId: "new-run" })),
   startQueue: vi.fn(async () => ({ started: 1, held: 0 })),
   reorderQueue: vi.fn(async (order: string[]) => ({ order })),
@@ -100,7 +101,9 @@ beforeEach(() => {
   localStorage.clear();
   FakeEventSource.open.clear();
   vi.clearAllMocks();
-  apiMock.runs.mockResolvedValue([]);
+  apiMock.runs.mockReset();
+  apiMock.runs.mockResolvedValue({ runs: [] });
+  apiMock.preflightRun.mockResolvedValue({ preflightId: 'prepared-1', jobCount: 1, assetBytes: 1, estimatedCostUsd: 0.01, unknownPricing: false, expiresAt: new Date(Date.now() + 60_000).toISOString() });
   apiMock.startRun.mockResolvedValue({ runId: "new-run" });
   apiMock.startQueue.mockResolvedValue({ started: 1, held: 0 });
 });
@@ -150,9 +153,21 @@ describe("addToQueue", () => {
     ready(state);
     await actions.addToQueue();
 
-    expect(apiMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(apiMock.preflightRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(apiMock.startRun).toHaveBeenCalledWith({ preflightId: 'prepared-1', autoStart: false });
     expect(apiMock.startQueue).not.toHaveBeenCalled();
     expect(state.heldRuns.value.map((r) => r.runId)).toEqual(["new-run"]);
+  });
+
+  it('sends an optional non-negative cost ceiling to authoritative preflight only', async () => {
+    const { state, actions } = harness();
+    ready(state);
+    state.maxCostUsd.value = '1.25';
+
+    await actions.addToQueue();
+
+    expect(apiMock.preflightRun).toHaveBeenCalledWith(expect.objectContaining({ maxCostUsd: 1.25 }));
+    expect(apiMock.startRun).toHaveBeenCalledWith({ preflightId: 'prepared-1', autoStart: false });
   });
 });
 
@@ -177,6 +192,20 @@ describe("runQueue", () => {
     const { actions } = harness();
     await actions.runQueue();
     expect(apiMock.startQueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('adoptHeldRun', () => {
+  it('makes an exact repeat releasable after Control was already initialized', async () => {
+    const { state, actions } = harness();
+    // This is the Control -> Viewer -> Control path: no second bootstrap will discover it.
+    apiMock.runs.mockResolvedValue({ runs: [summary('repeat-1', 'queued', { queueHeld: true, queuePosition: 1 })] });
+
+    await actions.adoptHeldRun('repeat-1');
+
+    expect(state.heldRuns.value.map((run) => run.runId)).toEqual(['repeat-1']);
+    expect(state.queueRunning.value).toBe(false);
+    expect(streaming('repeat-1')).toBe(true);
   });
 });
 
@@ -207,7 +236,7 @@ describe("reorderQueue (drag-to-reorder)", () => {
     apiMock.startRun.mockResolvedValueOnce({ runId: "q1" });
     await actions.addToQueue();
     apiMock.reorderQueue.mockRejectedValueOnce(new Error("nope"));
-    apiMock.runs.mockResolvedValueOnce([]);
+    apiMock.runs.mockResolvedValueOnce({ runs: [] });
 
     await actions.reorderQueue(["q1"]);
 
@@ -253,6 +282,20 @@ describe("runNow (the split Run button)", () => {
     expect(apiMock.startRun).not.toHaveBeenCalled(); // no extra batch submitted
     expect(apiMock.startQueue).toHaveBeenCalledTimes(1); // the parked one runs
   });
+
+  it('does not release an existing held queue when current selection preflight is rejected', async () => {
+    const { state, actions } = harness();
+    ready(state);
+    await actions.addToQueue();
+    ready(state);
+    apiMock.preflightRun.mockRejectedValueOnce(new Error('cost ceiling exceeded'));
+    apiMock.startQueue.mockClear();
+
+    await actions.runNow();
+
+    expect(apiMock.startQueue).not.toHaveBeenCalled();
+    expect(state.heldRuns.value).toHaveLength(1);
+  });
 });
 
 describe("addToQueue(autoStart)", () => {
@@ -264,7 +307,7 @@ describe("addToQueue(autoStart)", () => {
     apiMock.startRun.mockResolvedValueOnce({ runId: "live1" });
     await actions.addToQueue(true);
 
-    expect(apiMock.startRun).toHaveBeenCalledWith(expect.objectContaining({ autoStart: true }));
+    expect(apiMock.startRun).toHaveBeenCalledWith({ preflightId: 'prepared-1', autoStart: true });
     expect(state.heldRuns.value).toHaveLength(0);
   });
 

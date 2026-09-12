@@ -2,9 +2,9 @@
 // batch's jobs while respecting both a total concurrency cap and a per-key-pool
 // cap (so one provider's key pool can't starve/flood the others).
 
-import type { InputItem } from "../inputResolver";
 import type { Model } from "../config/models";
 import type { ResolvedPrompt } from "../config/prompts";
+import type { InputItem } from "../inputResolver";
 
 interface Job {
   id: string;
@@ -49,13 +49,17 @@ interface BuildJobsOptions {
 // `variants` default; clamped 1..10 defensively (reimagine.ts already clamps).
 function buildJobs({ inputItems, models, prompts, variants, variantsByModel }: BuildJobsOptions): Job[] {
   const jobs: Job[] = [];
+  const ids = new Set<string>();
   for (const input of inputItems) {
     for (const model of models) {
       const copies = Math.max(1, Math.min(10, variantsByModel?.[model.id] ?? variants));
       for (const prompt of prompts) {
         for (let v = 1; v <= copies; v++) {
+          const id = `${input.id}__${model.id}__${prompt.id}__v${v}`;
+          if (ids.has(id)) throw new Error(`duplicate job id: ${id}`);
+          ids.add(id);
           jobs.push({
-            id: `${input.id}__${model.id}__${prompt.id}__v${v}`,
+            id,
             inputId: input.id,
             inputName: input.name,
             inputType: input.type,
@@ -165,5 +169,5 @@ async function runJobsByPool<J>(jobs: J[], { totalConcurrency, poolLimits, keyFo
   });
 }
 
+export type { BuildJobsOptions, Job, JobResult, KeyManagerLike, RunJobsByPoolOptions };
 export { buildJobs, buildPoolLimits, runJobsByPool };
-export type { Job, BuildJobsOptions, RunJobsByPoolOptions, JobResult, KeyManagerLike };

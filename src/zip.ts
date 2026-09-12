@@ -11,10 +11,11 @@
  *     files; buildZip throws rather than silently producing a corrupt archive if that is exceeded)
  *   - no directory entries, no permissions, no comments, no encryption
  *   - names are stored UTF-8 with the language-encoding flag set
- *   - the whole archive is built in memory, which is the right trade for run-sized payloads
+ *   - HTTP exports stream file contents; buildZip remains a buffered compatibility helper
  */
-import { deflateRaw } from "node:zlib";
+
 import { promisify } from "node:util";
+import { deflateRaw } from "node:zlib";
 
 // Async, not deflateRawSync: this runs inside a request handler on Bun's single JS thread, and a
 // run can hold a hundred outputs. Compressing them synchronously in a loop stalls every SSE
@@ -52,6 +53,145 @@ export interface ZipEntry {
   name: string;
   data: Uint8Array;
   modified?: Date;
+}
+
+/** A ZIP entry whose contents are produced on demand instead of retained in memory. */
+export interface ZipStreamEntry {
+  /** Path inside the archive, forward slashes. */
+  name: string;
+  /** Size observed during preflight. It is checked again while reading in case the file grows. */
+  size?: number;
+  modified?: Date;
+  /** Open a fresh source when the archive reaches this entry. */
+  open(signal: AbortSignal): AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+}
+
+export type ZipInputEntry = ZipEntry | ZipStreamEntry;
+
+export interface ZipStreamOptions {
+  /** A practical export ceiling, independent of ZIP's 4 GB format ceiling. */
+  maxInputBytes?: number;
+  maxEntries?: number;
+  signal?: AbortSignal;
+}
+
+/**
+ * Write a ZIP incrementally. File entries use STORE records and data descriptors; only the
+ * small central directory is retained until the final trailer. This keeps a run download from
+ * retaining the source files, compressed files, and final archive at the same time.
+ */
+export function buildZipStream(entries: AsyncIterable<ZipInputEntry> | Iterable<ZipInputEntry>, opts: ZipStreamOptions = {}): ReadableStream<Uint8Array> {
+  const maxInputBytes = opts.maxInputBytes ?? 512 * 1024 * 1024;
+  const maxEntries = opts.maxEntries ?? MAX_ENTRIES - 1;
+  const encoder = new TextEncoder();
+  const cancellation = new AbortController();
+  const abort = () => cancellation.abort();
+  opts.signal?.addEventListener("abort", abort, { once: true });
+  if (opts.signal?.aborted) abort();
+  const iterator = (async function* () {
+    const centrals: Uint8Array[] = [];
+    let offset = 0;
+    let declaredInput = 0;
+    let observedInput = 0;
+    let count = 0;
+    for await (const entry of entries) {
+      if (cancellation.signal.aborted) throw new Error("export cancelled");
+      if (++count > maxEntries) throw new Error(`too many files for export (${count} > ${maxEntries})`);
+      const nameBytes = encoder.encode(entry.name);
+      if (!nameBytes.length || nameBytes.length > 0xffff) throw new Error("invalid zip entry name");
+      const { time, date } = dosDateTime(entry.modified ?? new Date());
+      if ("data" in entry) {
+        declaredInput += entry.data.length;
+        observedInput += entry.data.length;
+        if (declaredInput > maxInputBytes || observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+        const compressed = new Uint8Array(await deflate(entry.data));
+        if (cancellation.signal.aborted) throw new Error("export cancelled");
+        const payload = compressed.length < entry.data.length ? compressed : entry.data;
+        const method = payload === compressed ? 8 : 0;
+        const crc = crc32(entry.data);
+        const local = zipLocal(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length);
+        yield local; yield nameBytes; yield payload;
+        centrals.push(zipCentral(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length, offset), nameBytes);
+        offset += local.length + nameBytes.length + payload.length;
+      } else {
+        const knownSize = entry.size;
+        if (knownSize !== undefined && (!Number.isSafeInteger(knownSize) || knownSize < 0)) throw new Error("invalid zip entry size");
+        declaredInput += knownSize ?? 0;
+        if (declaredInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+        // Store streamed entries: unknown CRC and sizes require the PKZIP data-descriptor flag.
+        const local = zipLocal(nameBytes.length, 0x0808, 0, time, date, 0, 0, 0);
+        yield local; yield nameBytes;
+        let crc = 0xffffffff;
+        let size = 0;
+        for await (const chunk of entry.open(cancellation.signal)) {
+          if (cancellation.signal.aborted) throw new Error("export cancelled");
+          size += chunk.length;
+          observedInput += chunk.length;
+          if (size >= MAX_TOTAL_BYTES || observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+          crc = crc32Update(crc, chunk);
+          yield chunk;
+        }
+        crc = (crc ^ 0xffffffff) >>> 0;
+        const descriptor = new DataView(new ArrayBuffer(16));
+        descriptor.setUint32(0, 0x08074b50, true); descriptor.setUint32(4, crc, true);
+        descriptor.setUint32(8, size, true); descriptor.setUint32(12, size, true);
+        yield new Uint8Array(descriptor.buffer);
+        centrals.push(zipCentral(nameBytes.length, 0x0808, 0, time, date, crc, size, size, offset), nameBytes);
+        offset += local.length + nameBytes.length + size + 16;
+      }
+      if (offset >= MAX_TOTAL_BYTES) throw new Error("archive too large for a non-ZIP64 zip (4 GB limit)");
+    }
+    const centralSize = centrals.reduce((n, part) => n + part.length, 0);
+    for (const part of centrals) yield part;
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, count, true); end.setUint16(10, count, true);
+    end.setUint32(12, centralSize, true); end.setUint32(16, offset, true);
+    yield new Uint8Array(end.buffer);
+  })();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (cancellation.signal.aborted) throw new Error("export cancelled");
+        const next = await iterator.next();
+        if (next.done) {
+          opts.signal?.removeEventListener("abort", abort);
+          controller.close();
+        } else controller.enqueue(next.value);
+      } catch (err) {
+        cancellation.abort();
+        await iterator.return?.().catch(() => undefined);
+        opts.signal?.removeEventListener("abort", abort);
+        controller.error(err);
+      }
+    },
+    async cancel() {
+      cancellation.abort();
+      await iterator.return?.();
+      opts.signal?.removeEventListener("abort", abort);
+    },
+  });
+}
+
+function crc32Update(crc: number, buf: Uint8Array): number {
+  let c = crc;
+  for (let i = 0; i < buf.length; i++) c = (CRC_TABLE[(c ^ (buf[i] as number)) & 0xff] as number) ^ (c >>> 8);
+  return c >>> 0;
+}
+
+function zipLocal(nameLength: number, flags: number, method: number, time: number, date: number, crc: number, compressedSize: number, size: number): Uint8Array {
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, flags, true); local.setUint16(8, method, true);
+  local.setUint16(10, time, true); local.setUint16(12, date, true); local.setUint32(14, crc, true);
+  local.setUint32(18, compressedSize, true); local.setUint32(22, size, true); local.setUint16(26, nameLength, true); local.setUint16(28, 0, true);
+  return new Uint8Array(local.buffer);
+}
+
+function zipCentral(nameLength: number, flags: number, method: number, time: number, date: number, crc: number, compressedSize: number, size: number, offset: number): Uint8Array {
+  const central = new DataView(new ArrayBuffer(46));
+  central.setUint32(0, 0x02014b50, true); central.setUint16(4, 20, true); central.setUint16(6, 20, true); central.setUint16(8, flags, true); central.setUint16(10, method, true);
+  central.setUint16(12, time, true); central.setUint16(14, date, true); central.setUint32(16, crc, true); central.setUint32(20, compressedSize, true); central.setUint32(24, size, true);
+  central.setUint16(28, nameLength, true); central.setUint16(30, 0, true); central.setUint16(32, 0, true); central.setUint16(34, 0, true); central.setUint16(36, 0, true); central.setUint32(38, 0, true); central.setUint32(42, offset, true);
+  return new Uint8Array(central.buffer);
 }
 
 const MAX_ENTRIES = 0xffff;

@@ -46,6 +46,7 @@ async function onRetentionChange(value: unknown): Promise<void> {
 
 onMounted(() => {
   void store.loadOutputRetentionSetting();
+  void store.loadOutputStorage();
 });
 </script>
 

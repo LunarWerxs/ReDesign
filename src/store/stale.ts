@@ -6,9 +6,10 @@
  */
 import fs from "node:fs";
 import { writeJSON } from "../util";
-import { ACTIVE_RUN_STATUSES, TERMINAL_JOB_STATUSES } from "./types";
-import type { Counts, Job, Manifest, ReadManifestOptions } from "./types";
+import { isRunOwned } from "./ownership";
 import { cacheRunSummary, runSummaryCache, summarizeManifest } from "./summary";
+import type { Counts, Job, Manifest, ReadManifestOptions } from "./types";
+import { ACTIVE_RUN_STATUSES, TERMINAL_JOB_STATUSES } from "./types";
 
 function readDurationEnv(name: string, fallback: number): number {
   const v = parseInt(process.env[name] || "", 10);
@@ -30,6 +31,7 @@ interface NormalizedStaleOptions {
   staleAfterMs: number;
   nowMs: number;
   reason: string;
+  reconcile: boolean;
 }
 
 function normalizeStaleOptions(opts: ReadManifestOptions = {}): NormalizedStaleOptions {
@@ -39,6 +41,7 @@ function normalizeStaleOptions(opts: ReadManifestOptions = {}): NormalizedStaleO
     staleAfterMs: Number.isFinite(opts.staleAfterMs) && (opts.staleAfterMs as number) >= 0 ? (opts.staleAfterMs as number) : DEFAULT_STALE_RUN_MS,
     nowMs: Number.isFinite(nowMs) ? nowMs : Date.now(),
     reason: opts.reason || DEFAULT_STALE_RUN_MESSAGE,
+    reconcile: opts.reconcile === true,
   };
 }
 
@@ -106,6 +109,10 @@ function settleStaleManifest(manifest: Manifest, fallbackRunId: string, options:
 
 function shouldSettleStaleManifest(runId: unknown, manifest: Manifest | null, st: fs.Stats | undefined, opts: NormalizedStaleOptions): boolean {
   if (!manifest || !ACTIVE_RUN_STATUSES.has(manifest.status)) return false;
+  if (!opts.reconcile) return false;
+  // PARKED batches remain recoverable even after their former owner has exited.
+  if (manifest.queue?.held) return false;
+  if (isRunOwned(String(runId || manifest.runId || ""))) return false;
   if (opts.activeRunIds?.has(String(runId || manifest.runId || ""))) return false;
   const lastActivity = manifestActivityMs(manifest, st);
   return opts.staleAfterMs === 0 || !lastActivity || opts.nowMs - lastActivity >= opts.staleAfterMs;
@@ -134,11 +141,11 @@ function maybeSettleStaleManifest(fallbackRunId: string, mp: string, manifest: M
   return { manifest: settled, stale: true, stat: nextStat };
 }
 
+export type { NormalizedStaleOptions };
 export {
-  normalizeStaleOptions,
   manifestActivityMs,
+  maybeSettleStaleManifest,
+  normalizeStaleOptions,
   settleStaleManifest,
   shouldSettleStaleManifest,
-  maybeSettleStaleManifest,
 };
-export type { NormalizedStaleOptions };

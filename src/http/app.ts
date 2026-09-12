@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { mountWeb } from "./web";
-import { requireSameOrigin } from "./origin-guard";
+import { requireSameOrigin, requireLocalHost } from "./origin-guard";
 import { jsonBodyLimit } from "./body-limit";
 import type { Deps } from "./deps";
 import * as bootstrap from "./routes/bootstrap";
@@ -21,6 +21,8 @@ import * as prompts from "./routes/prompts";
 import * as models from "./routes/models";
 import * as keys from "./routes/keys";
 import * as runs from "./routes/runs";
+import * as runExport from "./routes/run-export";
+import * as runReviews from "./routes/run-reviews";
 import * as updates from "./routes/updates";
 import * as events from "./routes/events";
 import * as health from "./routes/health";
@@ -58,6 +60,9 @@ export function createApp(hooks: AppHooks = {}): Hono {
   setAutoUpdateIntervalSecs(settings.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
 
   const app = new Hono();
+  // Host is a boundary for ALL local data, even routes that allow cross-site navigation
+  // (OAuth) or have no API side effects (screenshots, generated output and SPA assets).
+  app.use("*", requireLocalHost());
 
   const deps: Deps = { requestShutdown: hooks.requestShutdown || (() => {}) };
 
@@ -89,6 +94,8 @@ export function createApp(hooks: AppHooks = {}): Hono {
   models.register(app, deps);
   keys.register(app, deps);
   runs.register(app, deps);
+  runExport.register(app, deps);
+  runReviews.register(app, deps);
   updates.register(app, deps);
   events.register(app, deps);
   health.register(app, deps);

@@ -16,7 +16,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { t } from '@/i18n';
 import type { AvailableModel } from '@/types';
 
@@ -33,28 +33,35 @@ const open = ref(false);
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref(false);
+const bindingRequired = ref(false);
 const options = ref<AvailableModel[]>([]);
+let loadVersion = 0;
 
 const providerOptions = computed(() => options.value.filter((m) => m.source === 'provider'));
 const catalogOptions = computed(() => options.value.filter((m) => m.source === 'catalog'));
 
 async function load() {
   if (!props.provider) return;
+  const version = ++loadVersion;
   loading.value = true;
   error.value = false;
+  bindingRequired.value = false;
   try {
     const res = await api.availableModels({
       provider: props.provider,
       baseUrl: props.baseUrl,
       keyEnv: props.keyEnv,
     });
+    if (version !== loadVersion) return;
     options.value = res.models || [];
     loaded.value = true;
-  } catch {
+  } catch (e) {
+    if (version !== loadVersion) return;
     error.value = true;
+    bindingRequired.value = e instanceof ApiError && e.code === 'catalog_binding_required';
     options.value = [];
   } finally {
-    loading.value = false;
+    if (version === loadVersion) loading.value = false;
   }
 }
 
@@ -63,7 +70,7 @@ async function load() {
 watch(open, (v) => {
   if (v) void load();
 });
-watch(() => [props.provider, props.baseUrl], () => {
+watch(() => [props.provider, props.baseUrl, props.keyEnv], () => {
   loaded.value = false;
   if (open.value) void load();
 });
@@ -98,7 +105,9 @@ function pick(id: string) {
             </div>
             <template v-else>
               <CommandEmpty>{{ t('keyModel.noModelsFound') }}</CommandEmpty>
-              <p v-if="error" class="px-3 py-2 text-xs text-muted-foreground">{{ t('keyModel.couldNotLoadModels') }}</p>
+              <p v-if="error" class="px-3 py-2 text-xs text-muted-foreground">
+                {{ bindingRequired ? t('keyModel.catalogBindingRequired') : t('keyModel.couldNotLoadModels') }}
+              </p>
               <CommandGroup v-if="providerOptions.length" :heading="t('keyModel.fromProviderAccount')">
                 <CommandItem
                   v-for="m in providerOptions"

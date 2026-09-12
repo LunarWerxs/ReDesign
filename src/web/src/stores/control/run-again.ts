@@ -44,9 +44,9 @@ export function createRunAgainActions(state: ControlState) {
     if (keptInputs.length !== wantedInputs.length) dropped.push(t('runAgain.droppedInputs'));
     state.selInputs.value = keptInputs;
 
-    // Models: the picker offers every model that still exists, runnable or not (a disabled one
-    // just can't actually generate), so "still exists" is checked the same way here.
-    const modelIds = new Set(state.models.value.map((m) => m.id));
+    // A historical model may still exist while disabled or out of keys. Carrying it through makes
+    // the prefill promise more work than the server can run, so use the picker/run predicate.
+    const modelIds = new Set(state.runnableModelIds.value);
     const wantedModels = config.modelIds || [];
     const keptModels = wantedModels.filter((id) => modelIds.has(id));
     if (keptModels.length !== wantedModels.length) dropped.push(t('runAgain.droppedModels'));
@@ -63,11 +63,12 @@ export function createRunAgainActions(state: ControlState) {
     }
     state.modelQty.value = nextQty;
 
-    // Prompts: config.promptIds carries the pseudo id "custom" alongside real preset ids for a
-    // one-off prompt (src/config/prompts.ts resolvePrompts) — its actual text lives on the
-    // manifest's own `prompts` array instead, tagged source: 'custom'.
+    // The generated one-off prompt can be named custom, custom-2, etc. Exclude only IDs which
+    // this manifest itself marks as source: custom; a saved preset may legitimately use any of
+    // those IDs and must remain selected.
     const promptIds = new Set(state.prompts.value.map((p) => p.id));
-    const wantedPromptIds = (config.promptIds || []).filter((id) => id !== 'custom');
+    const syntheticPromptIds = new Set((manifest.prompts || []).filter((p) => p.source === 'custom').map((p) => p.id));
+    const wantedPromptIds = (config.promptIds || []).filter((id) => !syntheticPromptIds.has(id));
     const keptPrompts = wantedPromptIds.filter((id) => promptIds.has(id));
     if (keptPrompts.length !== wantedPromptIds.length) dropped.push(t('runAgain.droppedPrompts'));
     state.selPrompts.value = keptPrompts;
@@ -91,6 +92,13 @@ export function createRunAgainActions(state: ControlState) {
     state.brandOn.value = !!config.brandStyleGuide;
     state.brandStyleGuide.value = config.brandStyleGuide || '';
     state.brandAttachments.value = [];
+
+    // Preserve an original optional ceiling exactly when it was recorded. A missing legacy
+    // value clears the field rather than silently applying this browser's unrelated old limit.
+    state.maxCostUsd.value =
+      typeof config.maxCostUsd === 'number' && Number.isFinite(config.maxCostUsd) && config.maxCostUsd >= 0
+        ? String(config.maxCostUsd)
+        : '';
 
     if (dropped.length) {
       toast(t('runAgain.prefilled'), { description: t('runAgain.droppedSummary', { items: dropped.join(', ') }) });

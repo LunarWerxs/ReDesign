@@ -3,7 +3,9 @@
 import { getKeyManager } from "./runner/helpers";
 import { buildJobs, buildPoolLimits, runJobsByPool } from "./runner/scheduling";
 import { runReimagine } from "./runner/reimagine";
-import { costForUsage, runCost, spendToDate, normalizeUsage, estimateRunCost, recentTraces } from "./runner/cost";
+import { costForUsage, runCost, spendToDate, cachedSpendToDate, normalizeUsage, estimateRunCost, recentTraces } from "./runner/cost";
+import { prepareRunSpec, readRunSpec, cloneRunSpec, summarizeRunSpec, RUN_LIMITS } from "./runner/run-spec";
 
-export { runReimagine, getKeyManager, buildJobs, buildPoolLimits, runJobsByPool, costForUsage, runCost, spendToDate, normalizeUsage, estimateRunCost, recentTraces };
+export { runReimagine, getKeyManager, buildJobs, buildPoolLimits, runJobsByPool, costForUsage, runCost, spendToDate, cachedSpendToDate, normalizeUsage, estimateRunCost, recentTraces, prepareRunSpec, readRunSpec, cloneRunSpec, summarizeRunSpec, RUN_LIMITS };
 export type { CostBreakdown, RunCostResult, SpendToDateResult, EstimateRunInput, EstimateRunResult, JobTrace, ModelTraceStats, RecentTracesResult } from "./runner/cost";
+export type { RunSpec } from "./runner/run-spec";

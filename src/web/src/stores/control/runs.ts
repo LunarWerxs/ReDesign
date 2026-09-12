@@ -197,7 +197,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
 
   async function refreshRuns() {
     try {
-      state.runs.value = await api.runs();
+      state.runs.value = (await api.runs()).runs;
     } catch {
       /* non-fatal */
     }
@@ -488,6 +488,18 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     }
   }
 
+  /** Register a held server-side clone immediately, even when Control has already bootstrapped. */
+  async function adoptHeldRun(runId: string): Promise<void> {
+    const hadActiveRun = state.activeRuns.value.length > 0;
+    state.trackRun(runId, { title: runId, status: 'queued', queueHeld: true, total: 0 });
+    subscribe(runId);
+    if (!hadActiveRun) focusRun(runId);
+    // The optimistic entry makes Run queue available without waiting for a network round trip;
+    // refresh/resume then fills the real queue position and reconciles any concurrent activity.
+    await refreshRuns();
+    await resumeRuns();
+  }
+
   /**
    * Build the run body from the current selection and submit it.
    *
@@ -539,6 +551,15 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       // now or fall in behind whatever's already generating.
       autoStart,
     };
+    const rawMaxCost = state.maxCostUsd.value.trim();
+    if (rawMaxCost) {
+      const maxCostUsd = Number(rawMaxCost);
+      if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) {
+        toast.error(t('runs.invalidCostCeiling'));
+        return false;
+      }
+      body.maxCostUsd = maxCostUsd;
+    }
     if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
     if (state.referenceOn.value && state.selReference.value.length) {
       body.reference = { images: [...state.selReference.value], note: state.refNote.value.trim() || null };
@@ -557,7 +578,8 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     const queuedBehind = state.activeRuns.value.length;
     state.submitting.value = true;
     try {
-      const { runId: id } = await api.startRun(body);
+      const preflight = await api.preflightRun(body);
+      const { runId: id } = await api.startRun({ preflightId: preflight.preflightId, autoStart });
       // `queueHeld` mirrors what we just told the server: a parked (autoStart:false) run is
       // held; an autoStart run is not. Seeded now rather than waited for so the run button's
       // state flips on this click, not a snapshot round-trip later.
@@ -594,7 +616,8 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       state.selModels.value.length > 0 &&
       (state.selPrompts.value.length > 0 || (state.customOn.value && !!state.custom.value.trim()));
     if (ready) {
-      await addToQueue(false);
+      const submitted = await addToQueue(false);
+      if (!submitted) return;
     } else if (!state.heldRuns.value.length) {
       await addToQueue(false); // nothing valid selected and nothing parked → surface what's missing
       return;
@@ -678,6 +701,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     cancelRun,
     focusRun,
     resumeRuns,
+    adoptHeldRun,
     refreshCostEstimate,
     scheduleCostEstimate,
   };

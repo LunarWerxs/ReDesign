@@ -20,6 +20,24 @@ interface Counts {
   skipped: number;
 }
 
+interface QueueState {
+  held?: boolean;
+  [key: string]: unknown;
+}
+
+interface RunOwnership {
+  pid: number;
+  token: string;
+  createdAt: string;
+  heartbeatAt: string;
+}
+
+interface RunOwnershipClaim {
+  owner: RunOwnership;
+  update(): void;
+  release(): void;
+}
+
 interface Manifest {
   runId: string;
   createdAt?: string;
@@ -35,9 +53,13 @@ interface Manifest {
     jobCount: number;
     anyEstimatePricing: boolean;
     anyUnpriced: boolean;
+    anyPartialUsage?: boolean;
+    anyCacheAccountingPartial?: boolean;
   };
+  /** Provider-call ledger: generation plus title/caption/health helper calls. */
+  providerCalls?: unknown[];
   error?: string | null;
-  queue?: unknown;
+  queue?: QueueState | null;
   stale?: {
     previousStatus: string;
     markedAt: string;
@@ -88,6 +110,8 @@ interface ReadManifestOptions {
   now?: Date | number;
   nowMs?: number;
   reason?: string;
+  /** Only an explicit reconciliation pass is allowed to rewrite a legacy unowned manifest. */
+  reconcile?: boolean;
 }
 
 interface PruneRunsResult {
@@ -110,5 +134,5 @@ function statusError(message: string, status: number): StatusError {
   return err;
 }
 
-export { statusError, ACTIVE_RUN_STATUSES, TERMINAL_JOB_STATUSES };
-export type { Job, Counts, Manifest, RunSummary, ReadManifestOptions, PruneRunsResult, StatusError };
+export type { Counts, Job, Manifest, PruneRunsResult, QueueState, ReadManifestOptions, RunOwnership, RunOwnershipClaim, RunSummary, StatusError };
+export { ACTIVE_RUN_STATUSES, statusError, TERMINAL_JOB_STATUSES };

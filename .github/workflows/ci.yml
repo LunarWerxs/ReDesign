@@ -10,6 +10,10 @@ on:
   # main and produced no run at all, leaving nothing to gate a release on.
   workflow_dispatch:
 
+  # Release calls this workflow at its tag SHA. Keeping checks here prevents release validation
+  # drifting from the ordinary PR/main contract.
+  workflow_call:
+
 jobs:
   daemon:
     name: daemon (test + typecheck)

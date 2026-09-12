@@ -1,8 +1,9 @@
-import { describe, it, expect, afterAll } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import fs from "node:fs";
+import path from "node:path";
 import { createApp } from "../src/http/app";
-import * as store from "../src/store";
 import type { Manifest } from "../src/store";
+import * as store from "../src/store";
 
 describe("store: stale run manifests", () => {
   const staleNow = new Date("2026-07-01T12:00:00Z");
@@ -30,7 +31,7 @@ describe("store: stale run manifests", () => {
 
   it("settles a stale running manifest into a terminal error and recounts unfinished jobs", () => {
     store.writeManifest(staleRunId, runningManifest(staleRunId) as Manifest);
-    const settled = store.readManifest(staleRunId, { staleAfterMs: 0, now: staleNow, reason: "test stale run" })!;
+    const settled = store.readManifest(staleRunId, { staleAfterMs: 0, now: staleNow, reason: "test stale run", reconcile: true })!;
     expect(settled.status).toBe("error");
     expect(settled.counts).toEqual({ total: 2, done: 2, ok: 1, error: 1, skipped: 0 });
     const unfinished = settled.jobs!.find((j) => j.id === "unfinished")!;
@@ -47,6 +48,99 @@ describe("store: stale run manifests", () => {
       activeRunIds: [activeRunId],
     })!;
     expect(active.status).toBe("running");
+  });
+
+  it("does not mutate an unowned legacy manifest during an ordinary read", () => {
+    const legacyRunId = `20990101-000002-legacy-${process.pid}`;
+    try {
+      store.writeManifest(legacyRunId, runningManifest(legacyRunId) as Manifest);
+      expect(store.readManifest(legacyRunId, { staleAfterMs: 0, now: staleNow })!.status).toBe("running");
+    } finally {
+      fs.rmSync(store.runDir(legacyRunId), { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a recoverable held queued manifest alone during reconciliation", () => {
+    const heldRunId = `20990101-000002-held-${process.pid}`;
+    try {
+      store.writeManifest(heldRunId, {
+        ...runningManifest(heldRunId),
+        status: "queued",
+        queue: { held: true },
+      } as Manifest);
+      expect(store.readManifest(heldRunId, { staleAfterMs: 0, now: staleNow, reconcile: true })!.status).toBe("queued");
+    } finally {
+      fs.rmSync(store.runDir(heldRunId), { recursive: true, force: true });
+    }
+  });
+});
+
+describe("store: per-run ownership", () => {
+  const runId = `20990101-000003-owner-${process.pid}`;
+
+  afterAll(() => {
+    fs.rmSync(store.runDir(runId), { recursive: true, force: true });
+  });
+
+  it("keeps a live owned run from being settled even with a zero stale window", () => {
+    store.writeManifest(runId, {
+      runId,
+      createdAt: "2026-06-01T00:00:00Z",
+      finishedAt: null,
+      status: "running",
+      jobs: [],
+    } as Manifest);
+    const claim = store.claimRunOwnership(runId);
+    try {
+      expect(store.isRunOwned(runId)).toBe(true);
+      expect(store.readManifest(runId, { staleAfterMs: 0, reconcile: true })!.status).toBe("running");
+    } finally {
+      claim.release();
+    }
+  });
+
+  it("reclaims a dead owner and reports a live collision as 409", () => {
+    const ownerFile = path.join(store.runDir(runId), ".owner.json");
+    fs.mkdirSync(store.runDir(runId), { recursive: true });
+    fs.writeFileSync(ownerFile, JSON.stringify({ pid: 2147483647, token: "dead-owner", createdAt: "2026-01-01T00:00:00.000Z", heartbeatAt: "2026-01-01T00:00:00.000Z" }));
+    expect(store.isRunOwned(runId)).toBe(false);
+
+    const first = store.claimRunOwnership(runId);
+    try {
+      store.claimRunOwnership(runId);
+      throw new Error("expected ownership collision");
+    } catch (error: unknown) {
+      expect((error as { status?: number }).status).toBe(409);
+    }
+    first.release();
+    expect(store.isRunOwned(runId)).toBe(false);
+  });
+
+  it("does not let a released predecessor remove a successor's token", () => {
+    const first = store.claimRunOwnership(runId);
+    const ownerFile = path.join(store.runDir(runId), ".owner.json");
+    fs.writeFileSync(ownerFile, JSON.stringify({
+      pid: process.pid,
+      token: "successor-token",
+      createdAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+    }));
+    first.release();
+    expect(store.isRunOwned(runId)).toBe(true);
+    fs.unlinkSync(ownerFile);
+  });
+
+  it("treats a live PID as owned even when its heartbeat is late", () => {
+    const ownerFile = path.join(store.runDir(runId), ".owner.json");
+    fs.mkdirSync(store.runDir(runId), { recursive: true });
+    fs.writeFileSync(ownerFile, JSON.stringify({
+      pid: process.pid,
+      token: "busy-process-token",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      heartbeatAt: "2026-01-01T00:00:00.000Z",
+    }));
+    expect(store.isRunOwned(runId)).toBe(true);
+    fs.unlinkSync(ownerFile);
   });
 });
 

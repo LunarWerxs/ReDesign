@@ -12,12 +12,13 @@ import { buildDetachedSpawn } from "../detached-spawn.mjs";
 import { healthCheckModel } from "../healthCheck";
 import { listInputs, listReferences } from "../inputResolver";
 import { pingInstallOnBoot } from "../install-ping";
-import { findLiveInstance } from "../instance";
+import { findLiveInstance, findLiveInstanceAt } from "../instance";
+import { acquireLaunchLock } from "../launch-lock";
 import { openUi } from "../open-ui";
 import { buildRelaunchArgv } from "../relaunch-argv.mjs";
 import { getKeyManager } from "../runner";
 import { cleanupStaleUpdateArtifacts } from "../updater";
-import { C } from "../util";
+import { APP_CONFIG_DIR, C } from "../util";
 import type { Args } from "./args";
 
 // The PREFERRED base (mirrors http/serve.ts: HOST default 127.0.0.1, PORT default 5178; 0.0.0.0
@@ -159,7 +160,6 @@ export async function healthCheckCmd(args: Args): Promise<void> {
 }
 
 export async function serveCmd(args: Args): Promise<void> {
-  cleanupStaleUpdateArtifacts();
   // Anonymous install ping (see src/install-ping.ts): fire-and-forget, throttled to at most once
   // per 24h, opt out with REDESIGN_NO_PING=1. Never awaited — must never delay boot.
   pingInstallOnBoot();
@@ -181,16 +181,42 @@ export async function serveCmd(args: Args): Promise<void> {
   // just hop to another port and the CLI/tray would disagree about which instance is "the" one.
   // REDESIGN_PORT_FIXED=1 and REDESIGN_RELAUNCH=1 (the auto-update successor, which is SUPPOSED
   // to take over the same port from its predecessor) are exempt from this guard.
+  let launchLock: ReturnType<typeof acquireLaunchLock> = null;
   if (process.env.REDESIGN_PORT_FIXED !== "1" && process.env.REDESIGN_RELAUNCH !== "1") {
-    const live = await findLiveInstance();
+    // Hold a cross-process gate while checking and binding. Without it, two launchers can both
+    // miss an unresponsive daemon and each decide to start a new port-hopping instance.
+    launchLock = acquireLaunchLock(APP_CONFIG_DIR);
+    if (!launchLock) {
+      const live = (await findLiveInstance(1_000, 3)) ?? (await findLiveInstanceAt(serverBase(), 1_000));
+      if (live) {
+        console.log(C.yellow(`RēDesign is already running → ${live.url}`));
+        if (args.openUi) openUi(live.url);
+      } else {
+        console.log(C.yellow("RēDesign is already starting. Wait a moment, then try again."));
+      }
+      return;
+    }
+    const live = (await findLiveInstance(1_000, 3)) ?? (await findLiveInstanceAt(serverBase(), 1_000));
     if (live) {
+      launchLock.release();
       console.log(C.yellow(`RēDesign is already running → ${live.url}`));
       if (args.openUi) openUi(live.url);
       return;
     }
   }
-  const { startServer, shutdown } = await import("../http/serve");
-  const server = await startServer();
+  // Cleanup is also guarded by the install transaction lock. It only runs after ordinary
+  // liveness has decided this process may continue, so a second launcher cannot delete an
+  // in-flight update's staging or rollback files before returning above.
+  cleanupStaleUpdateArtifacts();
+  let server: { port?: number };
+  let shutdown: () => void;
+  try {
+    const serve = await import("../http/serve");
+    shutdown = serve.shutdown;
+    server = await serve.startServer();
+  } finally {
+    launchLock?.release();
+  }
   // Where we ACTUALLY landed — serve.ts may have hopped past a held port. Typed optional by
   // Bun.serve, so fall back to the same preference serve.ts itself computes.
   const boundPort = server.port ?? (Number.parseInt(process.env.PORT ?? "", 10) || 5178);

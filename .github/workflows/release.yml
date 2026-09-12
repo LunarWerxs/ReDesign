@@ -35,23 +35,28 @@ jobs:
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
           package_ver="$(node -p "require('./package.json').version")"
-          if [ "$package_ver" != "$ver" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${package_ver}"
-            exit 1
-          fi
-          awk -v ver="$ver" '
-            index($0, "## [" ver "]") == 1 { grab = 1; next }
-            grab && /^## / { exit }
+           if [ "$package_ver" != "$ver" ]; then
+             echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${package_ver}"
+             exit 1
+           fi
+           awk -v ver="$ver" '
+             index($0, "## [" ver "]") == 1 { grab = 1; next }
+             grab && /^## / { exit }
             grab { print }
           ' CHANGELOG.md > RELEASE_NOTES.md
           if ! grep -q '[^[:space:]]' RELEASE_NOTES.md; then
             echo "::error::CHANGELOG.md has no release section for ${GITHUB_REF_NAME}"
-            exit 1
-          fi
+             exit 1
+           fi
+
+  checks:
+    name: required checks (tagged commit)
+    needs: validate
+    uses: ./.github/workflows/ci.yml
 
   build:
     name: build (${{ matrix.os }})
-    needs: validate
+    needs: [validate, checks]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

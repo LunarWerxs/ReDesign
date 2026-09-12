@@ -41,6 +41,7 @@ import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, runThumbnailUrl } from '@/lib/api';
 import { formatAgo } from '@/lib/relativeTime';
+import { useMinuteClock } from '@/composables/useMinuteClock';
 import { useViewerStore } from '@/stores/viewer';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
@@ -50,9 +51,7 @@ const store = useViewerStore();
 const controlStore = useControlStore();
 const router = useRouter();
 
-// Stamped once on setup: a reactive clock here would re-render every card on a timer for a
-// readout that only ever needs to be roughly right.
-const now = ref(Date.now());
+const now = useMinuteClock();
 
 // Hide FINISHED runs that produced nothing (total 0): a cancelled-before-it-started or empty test
 // run has no outputs to open and no image to show, so it's pure noise in a gallery. Active
@@ -434,6 +433,9 @@ watch(
           </span>
         </div>
       </div>
+    </div>
+    <div v-if="store.nextRunsCursor" class="mt-5 flex justify-center">
+      <Button variant="outline" size="sm" @click="store.loadMoreRuns()">{{ t('runGallery.loadMore') }}</Button>
     </div>
   </div>
 

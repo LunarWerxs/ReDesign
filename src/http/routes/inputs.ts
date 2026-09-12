@@ -18,6 +18,7 @@ export function register(app: Hono, _deps: Deps): void {
   app.get("/reference/*", (c) => serveFile(c, REFERENCE_DIR, new URL(c.req.url).pathname.slice("/reference/".length)));
 
   app.get("/api/inputs", (c) => c.json(listInputs()));
+  app.get("/api/inputs/limits", (c) => c.json({ bodyLimitBytes: UPLOAD_BODY_LIMIT_BYTES, imageLimitBytes: UPLOAD_IMAGE_LIMIT_BYTES }));
 
   app.post("/api/inputs/upload", requireSameOrigin(), jsonBodyLimit(UPLOAD_BODY_LIMIT_BYTES), async (c) => {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as { images?: UploadInput[]; image?: UploadInput };

@@ -6,6 +6,7 @@
 
 import { priceForModel, pricingLastUpdated } from "../config/pricing";
 import * as store from "../store";
+import type { ProviderUsageEntry } from "../provider-call";
 
 interface NormalizedTokens {
   inputTokens: number;
@@ -13,6 +14,7 @@ interface NormalizedTokens {
 }
 
 interface CostBreakdown extends NormalizedTokens {
+  cacheTokens: number;
   modelId: string;
   inputCost: number;
   outputCost: number;
@@ -20,6 +22,7 @@ interface CostBreakdown extends NormalizedTokens {
   currency: string;
   estimate: boolean; // true if the model's price entry is a guess (pricing.json `estimate:true`)
   priced: boolean; // false if no pricing entry exists for this model (cost is 0, not "free")
+  cacheAccountingPartial: boolean; // provider reported cache tokens but pricing has no cache rate
 }
 
 function num(v: unknown): number {
@@ -61,6 +64,13 @@ function normalizeUsage(usage: unknown): NormalizedTokens {
   return { inputTokens, outputTokens };
 }
 
+function cacheTokenCount(usage: unknown): number {
+  if (!usage || typeof usage !== "object") return 0;
+  const u = usage as Record<string, unknown>;
+  const details = u.prompt_tokens_details as Record<string, unknown> | null;
+  return num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens) + num(details?.cached_tokens);
+}
+
 /**
  * Price one job's usage against the model's pricing.json entry.
  * priced=false (and totalCost=0) when the model has no pricing entry at all, 
@@ -68,9 +78,10 @@ function normalizeUsage(usage: unknown): NormalizedTokens {
  */
 function costForUsage(modelId: string, usage: unknown): CostBreakdown {
   const { inputTokens, outputTokens } = normalizeUsage(usage);
+  const cacheTokens = cacheTokenCount(usage);
   const price = priceForModel(modelId);
   if (!price) {
-    return { modelId, inputTokens, outputTokens, inputCost: 0, outputCost: 0, totalCost: 0, currency: "USD", estimate: false, priced: false };
+    return { modelId, inputTokens, outputTokens, cacheTokens, inputCost: 0, outputCost: 0, totalCost: 0, currency: "USD", estimate: false, priced: false, cacheAccountingPartial: cacheTokens > 0 };
   }
   const inputCost = (inputTokens / 1_000_000) * price.inputPerMtok;
   const outputCost = (outputTokens / 1_000_000) * price.outputPerMtok;
@@ -78,23 +89,34 @@ function costForUsage(modelId: string, usage: unknown): CostBreakdown {
     modelId,
     inputTokens,
     outputTokens,
+    cacheTokens,
     inputCost,
     outputCost,
     totalCost: inputCost + outputCost,
     currency: price.currency || "USD",
     estimate: !!price.estimate,
     priced: true,
+    cacheAccountingPartial: cacheTokens > 0,
   };
 }
 
 interface RunCostJobLike {
-  modelId: string;
+  modelId?: string;
   usage?: unknown;
   status?: string;
 }
 
+/** A raw provider-call ledger row.  Helpers and failed/empty replies belong here too. */
+interface ProviderCallUsageLike {
+  modelId: string;
+  usage?: unknown;
+  partial?: unknown;
+  cost?: CostBreakdown | null;
+}
+
 interface RunCostManifestLike {
   jobs?: RunCostJobLike[];
+  providerCalls?: unknown[];
 }
 
 interface RunCostResult {
@@ -103,6 +125,8 @@ interface RunCostResult {
   jobCount: number; // jobs that actually carried usage and contributed to totalCost
   anyEstimatePricing: boolean; // true if any contributing model's price is a guess
   anyUnpriced: boolean; // true if any job's model has no pricing.json entry
+  anyPartialUsage?: boolean; // provider omitted usage; cost intentionally remains unknown
+  anyCacheAccountingPartial?: boolean;
   byModel: Record<string, { totalCost: number; inputTokens: number; outputTokens: number }>;
 }
 
@@ -113,16 +137,25 @@ function runCost(manifest: RunCostManifestLike | null | undefined): RunCostResul
   let jobCount = 0;
   let anyEstimatePricing = false;
   let anyUnpriced = false;
-  const manifestJobs = manifest?.jobs;
-  const jobs = Array.isArray(manifestJobs) ? manifestJobs : [];
+  // New manifests carry a call ledger, which includes helper calls and billable
+  // empty/error responses.  Do not also scan jobs or generation would double-count.
+  const calls = Array.isArray(manifest?.providerCalls) ? manifest?.providerCalls as ProviderCallUsageLike[] : null;
+  const jobs = calls || (Array.isArray(manifest?.jobs) ? manifest?.jobs : []);
+  let anyPartialUsage = false;
+  let anyCacheAccountingPartial = false;
 
   for (const job of jobs) {
-    if (!job?.usage || isMockUsage(job.usage)) continue;
-    const breakdown = costForUsage(job.modelId, job.usage);
+    if (!job?.modelId) continue;
+    if (!job?.usage || isMockUsage(job.usage)) {
+      if (calls && (job as ProviderCallUsageLike).partial) anyPartialUsage = true;
+      continue;
+    }
+    const breakdown = (calls ? (job as ProviderCallUsageLike).cost : null) ?? costForUsage(job.modelId, job.usage);
     jobCount++;
     totalCost += breakdown.totalCost;
     if (breakdown.estimate) anyEstimatePricing = true;
     if (!breakdown.priced) anyUnpriced = true;
+    if (breakdown.cacheAccountingPartial) anyCacheAccountingPartial = true;
     const entry = byModel[job.modelId] || { totalCost: 0, inputTokens: 0, outputTokens: 0 };
     entry.totalCost += breakdown.totalCost;
     entry.inputTokens += breakdown.inputTokens;
@@ -130,7 +163,17 @@ function runCost(manifest: RunCostManifestLike | null | undefined): RunCostResul
     byModel[job.modelId] = entry;
   }
 
-  return { totalCost, currency: "USD", jobCount, anyEstimatePricing, anyUnpriced, byModel };
+  return { totalCost, currency: "USD", jobCount, anyEstimatePricing, anyUnpriced, anyPartialUsage, anyCacheAccountingPartial, byModel };
+}
+
+/** Append one adapter outcome and recompute from the ledger only (never jobs). */
+function recordProviderUsage(manifest: store.Manifest, entry: ProviderUsageEntry): RunCostResult {
+  if (!Array.isArray(manifest.providerCalls)) manifest.providerCalls = [];
+  const cost = entry.usage && !isMockUsage(entry.usage) ? costForUsage(entry.modelId, entry.usage) : null;
+  manifest.providerCalls.push({ ...entry, cost });
+  const total = runCost(manifest as unknown as RunCostManifestLike);
+  manifest.cost = total;
+  return total;
 }
 
 interface SpendToDateResult {
@@ -171,6 +214,15 @@ function spendToDate(options: store.ReadManifestOptions = {}, prefetchedRuns?: s
   return { totalCost, currency: "USD", runCount, anyEstimatePricing, anyUnpriced, pricingLastUpdated: pricingLastUpdated() };
 }
 
+let spendCache: { at: number; value: SpendToDateResult } | null = null;
+/** A short-lived aggregate intentionally independent of the paged history endpoint. */
+function cachedSpendToDate(options: store.ReadManifestOptions = {}): SpendToDateResult {
+  if (spendCache && Date.now() - spendCache.at < 15_000) return spendCache.value;
+  const value = spendToDate(options);
+  spendCache = { at: Date.now(), value };
+  return value;
+}
+
 // Documented default assumption for the pre-run estimate when a model has no run
 // history yet: a mid-size vision job, one screenshot + the system contract in,
 // one full self-contained HTML document out. Deliberately conservative-but-real
@@ -197,21 +249,23 @@ interface ModelAverageUsage extends NormalizedTokens {
 function averageUsageByModel(modelIds: string[], options: store.ReadManifestOptions = {}): Record<string, ModelAverageUsage> {
   const wanted = new Set(modelIds);
   const sums = new Map<string, { inputTokens: number; outputTokens: number; count: number; outputMin: number; outputMax: number }>();
-  const runs = store.listRuns(options).slice(0, RECENT_RUNS_FOR_ESTIMATE);
+  const runs = store.listRunsPage({ limit: RECENT_RUNS_FOR_ESTIMATE, options }).runs;
 
   for (const run of runs) {
     const manifest = store.readManifest(run.runId, options);
     if (!manifest || !Array.isArray(manifest.jobs)) continue;
     for (const job of manifest.jobs as unknown as RunCostJobLike[]) {
-      if (job?.status !== "ok" || !job.usage || isMockUsage(job.usage) || !wanted.has(job.modelId)) continue;
+      if (job?.status !== "ok" || !job.modelId || !job.usage || isMockUsage(job.usage) || !wanted.has(job.modelId)) continue;
+      const modelId = job.modelId;
+      if (!modelId) continue;
       const { inputTokens, outputTokens } = normalizeUsage(job.usage);
-      const entry = sums.get(job.modelId) || { inputTokens: 0, outputTokens: 0, count: 0, outputMin: Number.POSITIVE_INFINITY, outputMax: 0 };
+      const entry = sums.get(modelId) || { inputTokens: 0, outputTokens: 0, count: 0, outputMin: Number.POSITIVE_INFINITY, outputMax: 0 };
       entry.inputTokens += inputTokens;
       entry.outputTokens += outputTokens;
       entry.outputMin = Math.min(entry.outputMin, outputTokens);
       entry.outputMax = Math.max(entry.outputMax, outputTokens);
       entry.count++;
-      sums.set(job.modelId, entry);
+      sums.set(modelId, entry);
     }
   }
 
@@ -324,6 +378,7 @@ interface TraceJobLike {
 interface TraceManifestLike {
   runId?: unknown;
   jobs?: TraceJobLike[];
+  providerCalls?: Array<ProviderCallUsageLike & { provider?: unknown; purpose?: unknown; status?: unknown; error?: unknown; startedAt?: unknown; at?: unknown; ms?: unknown }>;
 }
 
 interface JobTrace {
@@ -340,6 +395,7 @@ interface JobTrace {
   currency: string;
   priced: boolean;
   error: string | null;
+  purpose?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
 }
@@ -357,6 +413,13 @@ function str(v: unknown): string | null {
  */
 function runTraces(manifest: TraceManifestLike | null | undefined): JobTrace[] {
   const runId = str(manifest?.runId) || "";
+  if (Array.isArray(manifest?.providerCalls)) {
+    return manifest.providerCalls.map((call) => {
+      const normalized = normalizeUsage(call.usage);
+      const breakdown = call.cost ?? (call.usage && !isMockUsage(call.usage) ? costForUsage(call.modelId, call.usage) : null);
+      return { runId, jobId: null, modelId: call.modelId, provider: str(call.provider), promptId: null, purpose: str(call.purpose), status: str(call.status) || "ok", latencyMs: typeof call.ms === "number" ? call.ms : null, inputTokens: normalized.inputTokens, outputTokens: normalized.outputTokens, cost: breakdown?.totalCost ?? 0, currency: breakdown?.currency || "USD", priced: breakdown?.priced ?? false, error: str(call.error), startedAt: str(call.startedAt), finishedAt: str(call.at) };
+    });
+  }
   const jobs = Array.isArray(manifest?.jobs) ? (manifest?.jobs as TraceJobLike[]) : [];
   const traces: JobTrace[] = [];
   for (const job of jobs) {
@@ -377,6 +440,7 @@ function runTraces(manifest: TraceManifestLike | null | undefined): JobTrace[] {
       currency: breakdown?.currency || "USD",
       priced: breakdown?.priced ?? false,
       error: str(job.error),
+      purpose: null,
       startedAt: str(job.startedAt),
       finishedAt: str(job.finishedAt),
     });
@@ -439,7 +503,7 @@ interface RecentTracesResult {
  * specific calls were slow, which errored, and how that breaks down per model - not just a total.
  */
 function recentTraces(options: store.ReadManifestOptions = {}, runLimit = RECENT_RUNS_FOR_TRACES): RecentTracesResult {
-  const runs = store.listRuns(options).slice(0, Math.max(0, runLimit));
+  const runs = store.listRunsPage({ limit: Math.max(1, runLimit), options }).runs;
   const all: JobTrace[] = [];
   for (const run of runs) {
     if ((run as { mock?: boolean }).mock) continue; // mock runs spend nothing real; keep them out of the trace list too
@@ -457,13 +521,14 @@ function recentTraces(options: store.ReadManifestOptions = {}, runLimit = RECENT
   return { traces: all.slice(0, MAX_TRACES_RETURNED), byModel, runsConsidered: runs.length };
 }
 
-export { normalizeUsage, isMockUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS, runTraces, traceStatsByModel, recentTraces };
+export { normalizeUsage, isMockUsage, costForUsage, runCost, recordProviderUsage, spendToDate, cachedSpendToDate, averageUsageByModel, estimateRunCost, pricingLastUpdated, DEFAULT_AVG_TOKENS, runTraces, traceStatsByModel, recentTraces };
 export type {
   NormalizedTokens,
   CostBreakdown,
   RunCostResult,
   RunCostJobLike,
   RunCostManifestLike,
+  ProviderCallUsageLike,
   SpendToDateResult,
   ModelAverageUsage,
   EstimateRunInput,

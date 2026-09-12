@@ -5,7 +5,7 @@
 //   · signed in  → who you're signed in as, when it last synced, Sync now, Disconnect.
 // (loadSyncStatus in stores/control/sync.ts enables sync on the daemon as soon as it sees a
 // connected account, so there is nothing left for the owner to switch on afterwards.)
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import { CloudIcon, CheckIcon, ExternalLinkIcon, Loader2Icon, RefreshCwIcon, LogOutIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
@@ -14,12 +14,13 @@ import SettingsRow from '@/shell/SettingsRow.vue';
 import InfoHint from '@/shell/InfoHint.vue';
 import { useControlStore } from '@/stores/control';
 import { formatAgo } from '@/lib/relativeTime';
+import { useMinuteClock } from '@/composables/useMinuteClock';
 import { t } from '@/i18n';
 
 const store = useControlStore();
 
 const confirmDisconnect = ref(false);
-const now = ref(Date.now());
+const now = useMinuteClock();
 
 function signIn(): void {
   // Open the OAuth flow in a NEW tab so the current app state isn't lost (the new tab lands on
@@ -68,9 +69,6 @@ const syncedAgo = computed(() => {
 
 const syncError = computed(() => (store.syncStatus && !store.syncStatus.ok ? store.syncStatus : null));
 
-onMounted(() => {
-  now.value = Date.now();
-});
 </script>
 
 <template>

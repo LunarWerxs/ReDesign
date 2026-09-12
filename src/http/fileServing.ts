@@ -73,6 +73,16 @@ interface ServeFileOptions {
   measure?: boolean;
 }
 
+/** Dotfiles and their descendants are private app state, never public assets. Check the
+ * resolved path so URL-encoded dots/separators receive the same policy as literal names. */
+function resolvePublicFile(baseDir: string, relPath: unknown): string {
+  const { full, baseResolved } = resolveInside(baseDir, relPath);
+  if (path.relative(baseResolved, full).split(/[\\/]/).some((part) => part.startsWith("."))) {
+    throw statusError("Forbidden", 403);
+  }
+  return full;
+}
+
 /** Serve a file from a base dir, blocking path traversal outside that dir. `sandbox:true` adds a
  * CSP sandbox so model-generated HTML can't reach our origin/API even when opened directly in a
  * tab (the iframe also sandboxes it). Returns a Hono Response (never throws, errors are mapped
@@ -80,7 +90,7 @@ interface ServeFileOptions {
 async function serveFile(c: Context, baseDir: string, relPath: unknown, { download, sandbox, immutable, measure }: ServeFileOptions = {}): Promise<Response> {
   let full: string;
   try {
-    full = resolveInside(baseDir, relPath).full;
+    full = resolvePublicFile(baseDir, relPath);
   } catch (err) {
     const e = err as StatusError;
     return c.text(e.message || "Bad request", (e.status || 400) as ContentfulStatusCode);
@@ -219,7 +229,7 @@ function outputWrapperHtml(relPath: string): string {
 async function serveOutputWrapper(c: Context, relPath: unknown): Promise<Response> {
   let full: string;
   try {
-    full = resolveInside(store.OUTPUT_DIR, relPath).full;
+    full = resolvePublicFile(store.OUTPUT_DIR, relPath);
   } catch (err) {
     const e = err as StatusError;
     return c.text(e.message || "Bad request", (e.status || 400) as ContentfulStatusCode);

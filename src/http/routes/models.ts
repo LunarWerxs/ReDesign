@@ -5,21 +5,29 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
-import { saveModel, setModelStarred, deleteModel, restoreModel, reorderModels, type ModelInput } from "../../config";
+import { loadModels, saveModel, setModelStarred, deleteModel, restoreModel, reorderModels, type ModelInput } from "../../config";
 import { modelSettingsResponse } from "../../server/settings";
 import { getAvailableModels } from "../../modelCatalog";
 import { providerDefault } from "../../config/shared";
 
 export function register(app: Hono, _deps: Deps): void {
-  // GET, not a mutation, no requireSameOrigin, same as GET /api/keys. Free
-  // metadata lookup: never triggers a paid generation call.
-  app.get("/api/models/available", async (c) => {
+  // A live catalog lookup forwards a stored credential. Only default provider bindings or
+  // bindings explicitly saved in the model catalog may select its destination and key pool.
+  app.get("/api/models/available", requireSameOrigin(), async (c) => {
     const provider = String(c.req.query("provider") || "").trim().toLowerCase();
     const baseUrl = String(c.req.query("baseUrl") || "").trim();
     const keyEnv = String(c.req.query("keyEnv") || "").trim();
     if (!provider) return c.json({ error: "provider is required" }, 400);
     const resolvedBaseUrl = baseUrl || providerDefault(provider, "baseUrl");
     const resolvedKeyEnv = keyEnv || providerDefault(provider, "keyEnv");
+    const endpoint = (value: string) => value.replace(/\/+$/, "");
+    const isDefault = resolvedKeyEnv === providerDefault(provider, "keyEnv")
+      && !!resolvedBaseUrl && endpoint(resolvedBaseUrl) === endpoint(providerDefault(provider, "baseUrl"));
+    const isConfigured = loadModels().some((m) => m.provider === provider
+      && m.keyEnv === resolvedKeyEnv && endpoint(m.baseUrl) === endpoint(resolvedBaseUrl));
+    if (!isDefault && !isConfigured) {
+      return c.json({ code: "catalog_binding_required", error: "Catalog credentials must match a default provider or a saved model's provider, baseUrl and keyEnv" }, 400);
+    }
     const result = await getAvailableModels({ provider, baseUrl: resolvedBaseUrl, keyEnv: resolvedKeyEnv });
     return c.json(result);
   });

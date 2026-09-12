@@ -15,7 +15,8 @@ import PasteMenu from './PasteMenu.vue';
 const store = useControlStore();
 
 const pasteMenu = useTemplateRef<InstanceType<typeof PasteMenu>>('pasteMenu');
-const uploading = ref(false);
+const uploadsInFlight = ref(0);
+const uploading = computed(() => uploadsInFlight.value > 0);
 
 // Every TICKED reference goes to the models, uncapped (there is no "max images" stepper any
 // more), so the ticked/total count is the honest readout of what a run will actually send.
@@ -27,11 +28,11 @@ const allSelected = computed(
 );
 
 async function handle(files: FileList | File[] | null) {
-  uploading.value = true;
+  uploadsInFlight.value += 1;
   try {
     await store.uploadReferences(files);
   } finally {
-    uploading.value = false;
+    uploadsInFlight.value -= 1;
   }
 }
 
@@ -42,6 +43,10 @@ function onPaste(e: ClipboardEvent) {
   e.stopPropagation();
   const files = clipboardImageFiles(e.clipboardData);
   if (!files.length) return;
+  if (uploading.value) {
+    e.preventDefault();
+    return;
+  }
   e.preventDefault();
   handle(files);
 }

@@ -5,18 +5,24 @@ import { useControlStore } from "@/stores/control";
 import { useViewerStore } from "@/stores/viewer";
 import type { Job, JobStatus, Manifest, Model, RunEvent, RunStatus } from "@/types";
 
-const { deleteRunsMock, runMock, runsMock, recordFirstStarMock } = vi.hoisted(() => ({
+const { deleteRunsMock, repeatRunMock, runMock, runsMock, recordFirstStarMock, getRunReviewMock, saveRunReviewMock, toastErrorMock } = vi.hoisted(() => ({
   deleteRunsMock: vi.fn(),
+  repeatRunMock: vi.fn(),
   runMock: vi.fn(),
   runsMock: vi.fn(),
   recordFirstStarMock: vi.fn(),
+  getRunReviewMock: vi.fn(),
+  saveRunReviewMock: vi.fn(),
+  toastErrorMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: { deleteRuns: deleteRunsMock, run: runMock, runs: runsMock },
+  api: { deleteRuns: deleteRunsMock, repeatRun: repeatRunMock, run: runMock, runs: runsMock },
   eventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
 }));
 vi.mock("@/lib/starTally", () => ({ recordFirstStar: recordFirstStarMock }));
+vi.mock('@/lib/review-api', () => ({ getRunReview: getRunReviewMock, saveRunReview: saveRunReviewMock }));
+vi.mock('vue-sonner', () => ({ toast: Object.assign(vi.fn(), { error: toastErrorMock, success: vi.fn() }) }));
 
 const model = (id: string, label: string): Model => ({
   id,
@@ -55,6 +61,8 @@ beforeEach(() => {
   localStorage.clear();
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  getRunReviewMock.mockResolvedValue({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null });
+  saveRunReviewMock.mockResolvedValue({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null });
 });
 
 afterEach(() => {
@@ -78,6 +86,87 @@ describe("isLive", () => {
     store.manifest = manifest({ status });
 
     expect(store.isLive).toBe(expected);
+  });
+});
+
+describe('repeatOriginal', () => {
+  it('queues an immutable durable snapshot without starting it', async () => {
+    repeatRunMock.mockResolvedValue({ runId: 'repeat-1' });
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ specVersion: 1 });
+
+    await expect(store.repeatOriginal()).resolves.toBe('repeat-1');
+    expect(repeatRunMock).toHaveBeenCalledWith('run1', { autoStart: false });
+  });
+
+  it('does not repeat legacy or live manifests', async () => {
+    const store = useViewerStore();
+    store.manifest = manifest();
+    await expect(store.repeatOriginal()).resolves.toBeNull();
+    store.manifest = manifest({ specVersion: 1, status: 'running' });
+    await expect(store.repeatOriginal()).resolves.toBeNull();
+    expect(repeatRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('review synchronization', () => {
+  it('does not let a delayed hydrate overwrite an edit made after the run loaded', async () => {
+    let resolveReview!: (review: import('@/lib/review-api').RunReview) => void;
+    getRunReviewMock.mockImplementationOnce(() => new Promise((resolve) => { resolveReview = resolve; }));
+    runMock.mockResolvedValueOnce(manifest({ jobs: [job('j1')] }));
+    const store = useViewerStore();
+
+    const loading = store.load('run1');
+    await loading;
+    store.setReviewNote('j1', 'local note');
+    resolveReview({ shortlist: [], hidden: [], notes: { j1: 'remote note' }, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.review.notes.j1).toBe('local note');
+  });
+
+  it('serializes complete review writes and only applies the newest response', async () => {
+    let resolveFirst!: (review: import('@/lib/review-api').RunReview) => void;
+    saveRunReviewMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue({ shortlist: [], hidden: ['j1'], notes: { j1: 'latest' }, keep: true, updatedAt: '2026-01-01T00:00:01.000Z' });
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ jobs: [job('j1')] });
+
+    store.toggleItemHidden('j1');
+    store.setReviewNote('j1', 'latest');
+    store.setReviewKeep(true);
+    await vi.waitFor(() => expect(saveRunReviewMock).toHaveBeenCalledTimes(1));
+    resolveFirst({ shortlist: [], hidden: ['j1'], notes: {}, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    await vi.waitFor(() => expect(saveRunReviewMock).toHaveBeenCalledTimes(3));
+
+    expect(saveRunReviewMock.mock.calls[2]?.[1]).toEqual({ shortlist: [], hidden: ['j1'], notes: { j1: 'latest' }, keep: true });
+    await vi.waitFor(() => expect(store.review.notes.j1).toBe('latest'));
+    expect(store.review.keep).toBe(true);
+  });
+
+  it('honors a deliberately empty remote sidecar instead of resurrecting local stars', async () => {
+    localStorage.setItem('redesign.viewer.starred-items', JSON.stringify(['run1:j1']));
+    getRunReviewMock.mockResolvedValueOnce({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    runMock.mockResolvedValueOnce(manifest({ jobs: [job('j1')] }));
+    const store = useViewerStore();
+
+    await store.load('run1');
+    await vi.waitFor(() => expect(store.isItemStarred('j1')).toBe(false));
+  });
+
+  it('catches a failed save and tells the owner the review was not durable', async () => {
+    saveRunReviewMock.mockRejectedValueOnce(new Error('offline'));
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ jobs: [job('j1')] });
+
+    store.setReviewNote('j1', 'keep trying');
+
+    await vi.waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(expect.any(String), expect.anything()));
   });
 });
 
@@ -395,7 +484,7 @@ describe("load", () => {
 
 describe("loadRuns", () => {
   it("stores the fetched runs", async () => {
-    runsMock.mockResolvedValue([{ runId: "run1", status: "done" as RunStatus }]);
+    runsMock.mockResolvedValue({ runs: [{ runId: "run1", status: "done" as RunStatus }], nextCursor: null });
     const store = useViewerStore();
 
     await store.loadRuns();

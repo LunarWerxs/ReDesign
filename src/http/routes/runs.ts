@@ -9,16 +9,17 @@
  * subscriber lookup here).
  */
 import fs from "node:fs";
-import type { Env, Context, Hono } from "hono";
+import type { Context, Env, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { loadModels } from "../../config";
+import * as store from "../../store";
+import { ensureRunThumbnail } from "../../thumbnail";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
-import * as store from "../../store";
-import { resolveInside } from "../../util";
-import { buildZip, type ZipEntry } from "../../zip";
-import { ensureRunThumbnail } from "../../thumbnail";
-import { loadModels } from "../../config";
-import { activeRuns, runStoreOptions, ORPHANED_RUN_MESSAGE, enqueueRun, releaseQueue, reorderQueue, heldRunCount, cancelRun, normalizeRunDeleteIds, deleteRuns, type SseClient } from "../runQueue";
+import { validateRunRequest } from "../run-request";
+import { prepareRun, prepareReplay } from "../run-preflight";
+import { readRunSpec } from "../../runner/run-spec";
+import { activeRuns, cancelRun, deleteRuns, enqueueRun, heldRunCount, normalizeRunDeleteIds, releaseQueue, reorderQueue, runStoreOptions, type SseClient } from "../runQueue";
 
 /** The fields runReimagine writes onto every job that the retry route needs to rebuild a run. */
 interface RetryJob {
@@ -36,6 +37,16 @@ interface ManifestPrompt {
   user?: string;
 }
 
+async function readActionBody(c: Context): Promise<Record<string, unknown>> {
+  try {
+    const value = await c.req.json();
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("expected object");
+    return value as Record<string, unknown>;
+  } catch (_) {
+    throw Object.assign(new Error("request body must be a valid JSON object"), { status: 400 });
+  }
+}
+
 // GET /api/runs/:id/events (SSE). Pulled out of register() so its branching scores against
 // this small function instead of register's — see connections.ts's putSettingsSync for the
 // same pattern already used in this codebase.
@@ -46,16 +57,60 @@ function handleRunEvents(c: Context<Env, "/api/runs/:id/events">) {
     const entry = activeRuns.get(runId);
     await stream.write("retry: 3000\n\n");
     if (!entry) {
-      // Run already finished, replay the manifest from disk, then close. An invalid/
-      // traversal id makes readManifest throw (store.resolveRunDir), so treat it as
-      // "no manifest" rather than leaking an error or a file outside OUTPUT_DIR.
+      // A CLI or another daemon owns work this server did not start. Read its manifest without
+      // reconciliation: an SSE observer must never turn another process's live batch into an
+      // error merely because this process has no in-memory entry for it.
       let m: store.Manifest | null = null;
       try {
-        m = store.readManifest(runId, runStoreOptions({ staleAfterMs: 0, reason: ORPHANED_RUN_MESSAGE }));
+        m = store.readManifest(runId, runStoreOptions());
       } catch (_) {
         m = null;
       }
-      await stream.write(`data: ${JSON.stringify({ type: "done", runId, manifest: m })}\n\n`);
+      if (!m || (m.status !== "queued" && m.status !== "running")) {
+        await stream.write(`data: ${JSON.stringify({ type: "done", runId, manifest: m })}\n\n`);
+        return;
+      }
+      await stream.write(`data: ${JSON.stringify({ type: "snapshot", runId, manifest: m })}\n\n`);
+
+      // Poll disk for an externally-owned active run. The owner lease is intentionally not used
+      // as an expiry signal here: a busy CLI can miss heartbeats, and this observer has no right
+      // to settle or otherwise mutate its manifest. We stop only once the external writer records
+      // a terminal state or the browser closes the connection.
+      await new Promise<void>((resolve) => {
+        let stopped = false;
+        let polling = false;
+        let timer: ReturnType<typeof setInterval> | null = null;
+        const stop = () => {
+          if (stopped) return;
+          stopped = true;
+          if (timer) clearInterval(timer);
+          timer = null;
+          resolve();
+        };
+        const poll = async () => {
+          if (stopped || polling) return;
+          polling = true;
+          try {
+            let latest: store.Manifest | null = null;
+            try {
+              latest = store.readManifest(runId, runStoreOptions());
+            } catch (_) {
+              latest = null;
+            }
+            if (!latest || (latest.status !== "queued" && latest.status !== "running")) {
+              await stream.write(`data: ${JSON.stringify({ type: "done", runId, manifest: latest })}\n\n`);
+              stop();
+              return;
+            }
+            await stream.write(`data: ${JSON.stringify({ type: "snapshot", runId, manifest: latest })}\n\n`);
+          } finally {
+            polling = false;
+          }
+        };
+        timer = setInterval(() => void poll(), 750);
+        timer.unref?.();
+        stream.onAbort(stop);
+      });
       return;
     }
     entry.clients.add(client);
@@ -97,60 +152,6 @@ async function handleRunThumbnail(c: Context<Env, "/api/runs/:id/thumbnail">) {
   });
 }
 
-// GET /api/runs/:id/download — every successful output of a run as one .zip. Without it a
-// run's redesigns can only be taken off the machine one file at a time, which is the whole
-// reason a bake-off is awkward to share. Pulled out of register(), see handleRunEvents above.
-async function handleRunDownload(c: Context<Env, "/api/runs/:id/download">) {
-  const id = c.req.param("id");
-  let m: store.Manifest | null;
-  try {
-    m = store.readManifest(id, runStoreOptions());
-  } catch (err) {
-    const status = (err as { status?: number })?.status ?? 400;
-    return c.json({ error: "invalid run id" }, status as 400 | 404);
-  }
-  if (!m) return c.json({ error: "run not found" }, 404);
-
-  const jobs = (m.jobs || []).filter((j) => j.status === "ok" && j.file);
-  if (!jobs.length) return c.json({ error: "this run has no successful outputs" }, 404);
-
-  const entries: ZipEntry[] = [];
-  for (const job of jobs) {
-    // job.file is "<runId>/<inputId>/<name>.html"; resolveInside re-checks it against OUTPUT_DIR
-    // rather than trusting a path read back off disk.
-    let abs: string;
-    try {
-      abs = resolveInside(store.OUTPUT_DIR, job.file as string, { decode: false }).full;
-    } catch (_) {
-      continue;
-    }
-    let data: Buffer;
-    let modified: Date | undefined;
-    try {
-      data = await fs.promises.readFile(abs);
-      modified = (await fs.promises.stat(abs)).mtime;
-    } catch (_) {
-      continue; // an output deleted from under us shouldn't fail the whole download
-    }
-    // Flatten one level below the run so the zip opens as <runId>/<input>/<file>.html.
-    entries.push({ name: String(job.file).split("/").slice(1).join("/") || `${job.id}.html`, data: new Uint8Array(data), modified });
-  }
-  if (!entries.length) return c.json({ error: "no output files are still on disk for this run" }, 404);
-
-  let zip: Uint8Array<ArrayBuffer>;
-  try {
-    zip = await buildZip(entries);
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "could not build the archive" }, 500);
-  }
-  const safeId = String(m.runId || id).replace(/[^\w.-]+/g, "_") || "run";
-  return c.body(zip, 200, {
-    "content-type": "application/zip",
-    "content-disposition": `attachment; filename="${safeId}.zip"`,
-    "cache-control": "no-store",
-  });
-}
-
 // inputId -> promptId -> modelId -> how many jobs of that exact combination need redoing.
 // Nested maps rather than a joined string key so no id value can collide with a separator.
 function groupRetryTargets(targets: RetryJob[]): Map<string, Map<string, Map<string, number>>> {
@@ -169,7 +170,7 @@ function groupRetryTargets(targets: RetryJob[]): Map<string, Map<string, Map<str
 // EXACTLY the failed set. Sending one run with the union of inputs/models/prompts would be
 // simpler and would silently re-run combinations that already succeeded, which on this app
 // means spending real money the user did not ask to spend.
-function submitRetryRuns(
+async function submitRetryRuns(
   groups: Map<string, Map<string, Map<string, number>>>,
   promptById: Map<string, ManifestPrompt>,
   m: store.Manifest,
@@ -177,21 +178,22 @@ function submitRetryRuns(
   config: Record<string, unknown>,
   reference: { images?: unknown; note?: string | null } | null | undefined,
   autoStart: boolean,
-): string[] {
+): Promise<string[]> {
   const runIds: string[] = [];
   for (const [inputId, byPrompt] of groups) {
     for (const [promptId, models] of byPrompt) {
       const prompt = promptById.get(promptId);
-      // A custom prompt is not addressable by id (resolvePrompts rebuilds it from its text), so
-      // pass the recorded text back through rather than losing it on retry.
-      const isCustom = prompt?.source === "custom";
+      // Legacy manifests lack a RunSpec, but still retain the prompt text. Preserve it for
+      // named presets too; resolving the ID today would silently change a failed recipe.
+      const savedText = typeof prompt?.user === "string" ? prompt.user : "";
+      if (!savedText.trim()) throw Object.assign(new Error(`The legacy run did not retain prompt ${promptId}; use current settings to create a new run.`), { status: 409 });
       runIds.push(
-        enqueueRun({
+        await enqueueRun({
           label: `Retry · ${m.runId || id}`,
           mock: m.mock === true,
           inputs: [inputId],
           models: [...models.keys()],
-          prompts: isCustom ? { custom: String(prompt?.user || "") } : { presets: [promptId] },
+          prompts: { presets: [], custom: savedText },
           modelQuantities: Object.fromEntries(models),
           concurrency: config.concurrency as number | undefined,
           poolConcurrency: config.poolConcurrency as number | undefined,
@@ -220,11 +222,14 @@ async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
     return c.json({ error: "invalid run id" }, status as 400 | 404);
   }
   if (!m) return c.json({ error: "run not found" }, 404);
-  if (activeRuns.get(id) && !activeRuns.get(id)?.finished) {
+  if (store.isRunOwned(id) || (activeRuns.get(id) && !activeRuns.get(id)?.finished)) {
     return c.json({ error: "this run is still going; wait for it to finish or cancel it first" }, 409);
   }
 
-  const body = ((await c.req.json().catch(() => ({}))) || {}) as { jobIds?: unknown; autoStart?: unknown };
+  const body = await readActionBody(c);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.jobIds != null && (!Array.isArray(body.jobIds) || body.jobIds.some((value: unknown) => typeof value !== "string")))) {
+    return c.json({ error: "retry requires an object with optional string jobIds" }, 400);
+  }
   const wanted = Array.isArray(body.jobIds) ? new Set(body.jobIds.map((x) => String(x))) : null;
   // store.Job is deliberately loose (a status plus an index signature) because store.ts doesn't
   // own the job shape; narrow it here to the fields the runner actually writes and this route
@@ -234,6 +239,13 @@ async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
   );
   const targets = wanted ? retryable.filter((j) => wanted.has(String(j.id))) : retryable;
   if (!targets.length) return c.json({ error: "nothing to retry in this run" }, 400);
+
+  if (m.specVersion === 1) {
+    if (!readRunSpec(store.runDir(id))) return c.json({ error: "Saved run assets or specification are missing or corrupt; restore them before retrying." }, 409);
+    const prepared = await prepareReplay(id, targets.map((job) => job.id));
+    const runId = await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false });
+    return c.json({ runIds: [runId], jobCount: targets.length });
+  }
 
   const config = (m.config || {}) as Record<string, unknown>;
   const manifestPrompts = (Array.isArray(m.prompts) ? m.prompts : []) as ManifestPrompt[];
@@ -252,7 +264,7 @@ async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
   }
 
   const groups = groupRetryTargets(runnable);
-  const runIds = submitRetryRuns(groups, promptById, m, id, config, reference, body.autoStart !== false);
+  const runIds = await submitRetryRuns(groups, promptById, m, id, config, reference, body.autoStart !== false);
   return c.json({ runIds, jobCount: runnable.length, ...(droppedModels.length ? { droppedModels } : {}) });
 }
 
@@ -260,7 +272,10 @@ export function register(app: Hono, _deps: Deps): void {
   // Static segments ("delete") are registered before the "/:id" param routes below, Hono's
   // router resolves a literal segment over a param match regardless of registration order, but
   // keeping this order mirrors server.js's original if/else-if dispatch for readability.
-  app.get("/api/runs", (c) => c.json(store.listRuns(runStoreOptions())));
+  app.get("/api/runs", (c) => {
+    const rawLimit = Number(c.req.query("limit") || 50);
+    return c.json(store.listRunsPage({ cursor: c.req.query("cursor"), limit: rawLimit, options: runStoreOptions() }));
+  });
 
   app.post("/api/runs/delete", requireSameOrigin(), async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -274,9 +289,18 @@ export function register(app: Hono, _deps: Deps): void {
   // Registered before "/:id" so the literal "thumbnail" segment can't be swallowed by the param route.
   app.get("/api/runs/:id/thumbnail", handleRunThumbnail);
 
-  app.get("/api/runs/:id/download", requireSameOrigin(), handleRunDownload);
 
   app.post("/api/runs/:id/retry", requireSameOrigin(), handleRunRetry);
+
+  app.post("/api/runs/:id/repeat", requireSameOrigin(), async (c) => {
+    const id = c.req.param("id");
+    if (store.isRunOwned(id)) return c.json({ error: "This run is still active." }, 409);
+    if (!store.readManifest(id)) return c.json({ error: "run not found" }, 404);
+    const body = await readActionBody(c);
+    if (!body || typeof body !== "object" || Array.isArray(body) || (body.autoStart != null && typeof body.autoStart !== "boolean")) return c.json({ error: "invalid repeat request" }, 400);
+    const prepared = await prepareReplay(id);
+    return c.json({ runId: await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false }) });
+  });
 
   app.get("/api/runs/:id", (c) => {
     const id = c.req.param("id");
@@ -292,9 +316,23 @@ export function register(app: Hono, _deps: Deps): void {
   });
 
   app.post("/api/run", requireSameOrigin(), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) || {};
-    const runId = enqueueRun(body);
+    let rawBody: unknown;
+    try {
+      rawBody = await c.req.json();
+    } catch (_) {
+      return c.json({ error: "invalid JSON request body" }, 400);
+    }
+    const body = validateRunRequest(rawBody);
+    const runId = await enqueueRun(body);
     return c.json({ runId });
+  });
+
+  app.post("/api/run/preflight", requireSameOrigin(), async (c) => {
+    let rawBody: unknown;
+    try { rawBody = await c.req.json(); } catch (_) { return c.json({ error: "invalid JSON request body" }, 400); }
+    const body = validateRunRequest(rawBody);
+    if (body.preflightId) return c.json({ error: "Preflight expects a recipe, not an existing token." }, 400);
+    return c.json(await prepareRun(body));
   });
 
   // Start everything the control panel has parked with `autoStart: false`. Idempotent:

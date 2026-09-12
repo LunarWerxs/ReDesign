@@ -56,36 +56,67 @@ const MODELSDEV_URL = "https://models.dev/api.json";
 
 // ---------------------------------------------------------------------------
 // SOURCE_MAP, our model id -> where to find its price in each source.
-// Inspected the live fetched JSON on 2026-07-05 to confirm each key actually
-// exists with usable cost fields (not guessed blind):
-//   - claude-opus-4-8:       LiteLLM bare key "claude-opus-4-8"
-//                            {input_cost_per_token: 0.000005, output_cost_per_token: 0.000025}
-//   - gpt-5.5:               LiteLLM bare key "gpt-5.5"
-//                            {input_cost_per_token: 0.000005, output_cost_per_token: 0.00003}
+// Every key below was confirmed against the live fetched JSON on 2026-09-12,
+// with usable flat cost fields, not guessed blind. The per-Mtok figures in the
+// notes are what the sources returned that day, recorded so a future reader can
+// tell a key that MOVED from a price that merely CHANGED:
+//   - claude-opus-5:         LiteLLM bare key "claude-opus-5", $5 / $25.
+//   - claude-fable-5-1:      LiteLLM bare key "claude-fable-5-1", $10 / $50.
+//                            OpenRouter spells it "anthropic/claude-fable-5.1",
+//                            a dot where our id has a dash.
+//   - gpt-6-astra:           LiteLLM bare key "gpt-6-astra", $10 / $50. Do NOT take
+//                            "gpt-6-astra-pro", a separate and dearer model.
+//   - gpt-5.5:               LiteLLM bare key "gpt-5.5", $5 / $30.
+//   - gpt-5.6:               our apiModel is the concrete "gpt-5.6-sol", so the key
+//                            names that rather than the family, $4 / $20 (the bare
+//                            "gpt-5.6" key happens to carry the same numbers today).
+//                            OpenRouter resells the same model at $2 / $10, which the
+//                            chain only reaches if LiteLLM and CloudPrice are both down.
+//   - gpt-5.6-terra:         LiteLLM bare key "gpt-5.6-terra", $2 / $12.
+//   - gpt-5.6-luna:          LiteLLM bare key "gpt-5.6-luna", $0.20 / $1.20.
 //   - gemini-flash-latest:   apiModel unpinned to Google's alias (owner policy 2026-09-03).
-//                            ⛔ THE CATALOG KEY BELOW IS NOT THE ALIAS. LiteLLM/CloudPrice/
+//                            THE CATALOG KEY BELOW IS NOT THE ALIAS. LiteLLM/CloudPrice/
 //                            OpenRouter price CONCRETE models, so the key has to name whatever
 //                            the alias currently resolves to: gemini-3.8-flash as of 2026-09-02.
 //                            Verified sourced (estimate:false) from LiteLLM on 2026-09-03 at
-//                            $0.75/$3.75 per Mtok.
-//                            ⚠ THIS KEY GOES STALE WHEN GOOGLE MOVES THE ALIAS, and the failure
+//                            $0.75/$3.75 per Mtok, unchanged on 2026-09-12.
+//                            THIS KEY GOES STALE WHEN GOOGLE MOVES THE ALIAS, and the failure
 //                            is quiet: the run just reports this model as "kept as estimate:true"
 //                            instead of erroring. If you see that, re-point the key at the new
 //                            concrete model rather than assuming the price is unchanged.
 //   - gemini-pro-latest:     Same arrangement: alias in models.json, concrete model in the key.
 //                            Currently gemini-3-pro-preview; verified sourced from LiteLLM on
 //                            2026-09-03 at $2/$12 per Mtok. Same staleness caveat as above.
-//   - deepseek-v4-pro:       LiteLLM bare key "deepseek-v4-pro"
-//                            {input_cost_per_token: 4.35e-7, output_cost_per_token: 8.7e-7}
-//   - qwen-3.5-plus:         LiteLLM's only close match, "dashscope/qwen3.5-plus", has no flat
-//                            input_cost_per_token/output_cost_per_token (only a `tiered_pricing`
-//                            array) -- treated as "not found" in LiteLLM. CloudPrice mirrors the
-//                            same key "dashscope/qwen3.5-plus" but WITH flat costs:
-//                            {input_cost_per_token: 4e-7, output_cost_per_token: 2.4e-6}
-//                            (confirmed live 2026-07-05: ~$0.40 in / ~$2.40 out per Mtok, matching
-//                            the owner's hand-checked number). Falls back further to OpenRouter key
-//                            "qwen/qwen3.5-plus-02-15" {prompt: "0.00000026", completion: "0.00000156"}
-//                            only if CloudPrice is unavailable.
+//                            OpenRouter no longer lists it at all, so that last fallback is dead
+//                            for this one and the first two sources are load-bearing.
+//   - deepseek-4.1-flash:    THE SAME ALIAS ARRANGEMENT as the gemini pair, and worth reading
+//                            before touching. Our apiModel is DeepSeek's own moving name
+//                            "deepseek-flash"; the price sources carry concrete models only, and
+//                            as of 2026-09-12 no source has a "4.1" key at all. The concrete
+//                            flash tier is "deepseek/deepseek-v4-flash" at $0.44 / $1.32, which
+//                            is also exactly what the vision-exp build of it costs. Re-point this
+//                            the day DeepSeek ships a distinct 4.1 entry. OpenRouter's
+//                            "deepseek/deepseek-v4-flash-0731" is a resale tier at $0.04 / $0.08,
+//                            30x under the direct price, which is precisely why OpenRouter sits
+//                            last in the chain and must not be promoted above it.
+//   - qwen-3.8-flash:        LiteLLM has NO direct-provider key for this one (there is no
+//                            "dashscope/qwen3.8-flash"), only openrouter/ and together_ai/
+//                            mirrors, and we never take an openrouter/-prefixed entry out of
+//                            CloudPrice. So the first two sources miss by design and the
+//                            OpenRouter step resolves "qwen/qwen3.8-flash" at $0.15 / $0.47.
+//   - qwen-3.8-max:          LiteLLM/CloudPrice key "dashscope/qwen3.8-max", $2 / $6. OpenRouter
+//                            pins a dated build, "qwen/qwen3.8-max-0902", at the same numbers.
+//   - muse-spark-1.3:        "meta/muse-spark-1.3" in both sources, $1.25 / $4.25. Do NOT take
+//                            "meta/muse-spark-1.3-contributor", which is a different tier.
+//   - kimi-k3:               LiteLLM "moonshot/kimi-k3", $3 / $15. OpenRouter spells the vendor
+//                            "moonshotai/kimi-k3" and resells at $2.30 / $11.55. Our catalog
+//                            reaches the model through the qwen-compatible endpoint (apiModel
+//                            "kimi/kimi-k3"), which changes the route, not who bills it.
+//
+// Models the app no longer ships (claude-opus-4-8, deepseek-v4-pro, qwen-3.5-plus,
+// muse-spark-1.1) are dropped from this map but their pricing.json rows are left
+// alone on purpose: buildNextPrices is additive, and an old run's manifest still
+// needs its model's price to render a cost.
 // ---------------------------------------------------------------------------
 interface SourceMapEntry {
   litellmKey: string;
@@ -95,15 +126,40 @@ interface SourceMapEntry {
 }
 
 const SOURCE_MAP: Record<string, SourceMapEntry> = {
-  "claude-opus-4-8": {
-    litellmKey: "claude-opus-4-8",
-    cloudpriceKey: "claude-opus-4-8",
-    openrouterKey: "anthropic/claude-opus-4.8",
+  "claude-opus-5": {
+    litellmKey: "claude-opus-5",
+    cloudpriceKey: "claude-opus-5",
+    openrouterKey: "anthropic/claude-opus-5",
+  },
+  "claude-fable-5-1": {
+    litellmKey: "claude-fable-5-1",
+    cloudpriceKey: "claude-fable-5-1",
+    openrouterKey: "anthropic/claude-fable-5.1",
+  },
+  "gpt-6-astra": {
+    litellmKey: "gpt-6-astra",
+    cloudpriceKey: "gpt-6-astra",
+    openrouterKey: "openai/gpt-6-astra",
   },
   "gpt-5.5": {
     litellmKey: "gpt-5.5",
     cloudpriceKey: "gpt-5.5",
     openrouterKey: "openai/gpt-5.5",
+  },
+  "gpt-5.6": {
+    litellmKey: "gpt-5.6-sol",
+    cloudpriceKey: "gpt-5.6-sol",
+    openrouterKey: "openai/gpt-5.6-sol",
+  },
+  "gpt-5.6-terra": {
+    litellmKey: "gpt-5.6-terra",
+    cloudpriceKey: "gpt-5.6-terra",
+    openrouterKey: "openai/gpt-5.6-terra",
+  },
+  "gpt-5.6-luna": {
+    litellmKey: "gpt-5.6-luna",
+    cloudpriceKey: "gpt-5.6-luna",
+    openrouterKey: "openai/gpt-5.6-luna",
   },
   "gemini-flash-latest": {
     litellmKey: "gemini-3.8-flash",
@@ -115,15 +171,30 @@ const SOURCE_MAP: Record<string, SourceMapEntry> = {
     cloudpriceKey: "gemini-3-pro-preview",
     openrouterKey: "google/gemini-3-pro-preview",
   },
-  "deepseek-v4-pro": {
-    litellmKey: "deepseek-v4-pro",
-    cloudpriceKey: "deepseek-v4-pro",
-    openrouterKey: "deepseek/deepseek-v4-pro",
+  "deepseek-4.1-flash": {
+    litellmKey: "deepseek/deepseek-v4-flash",
+    cloudpriceKey: "deepseek/deepseek-v4-flash",
+    openrouterKey: "deepseek/deepseek-v4-flash-0731",
   },
-  "qwen-3.5-plus": {
-    litellmKey: "dashscope/qwen3.5-plus",
-    cloudpriceKey: "dashscope/qwen3.5-plus",
-    openrouterKey: "qwen/qwen3.5-plus-02-15",
+  "qwen-3.8-flash": {
+    litellmKey: "dashscope/qwen3.8-flash",
+    cloudpriceKey: "dashscope/qwen3.8-flash",
+    openrouterKey: "qwen/qwen3.8-flash",
+  },
+  "qwen-3.8-max": {
+    litellmKey: "dashscope/qwen3.8-max",
+    cloudpriceKey: "dashscope/qwen3.8-max",
+    openrouterKey: "qwen/qwen3.8-max-0902",
+  },
+  "muse-spark-1.3": {
+    litellmKey: "meta/muse-spark-1.3",
+    cloudpriceKey: "meta/muse-spark-1.3",
+    openrouterKey: "meta/muse-spark-1.3",
+  },
+  "kimi-k3": {
+    litellmKey: "moonshot/kimi-k3",
+    cloudpriceKey: "moonshot/kimi-k3",
+    openrouterKey: "moonshotai/kimi-k3",
   },
 };
 

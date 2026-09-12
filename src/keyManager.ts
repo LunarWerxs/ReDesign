@@ -8,7 +8,8 @@ const CLASS = {
   OK: "ok",
   RATE_LIMIT: "rate_limit", // 429 / overloaded, back off briefly
   NO_BALANCE: "no_balance", // 402 / insufficient quota, long cooldown
-  AUTH: "auth", // 401 / 403 invalid key, effectively dead
+  AUTH: "auth", // 401 / explicit invalid or revoked key, effectively dead
+  PERMISSION: "permission", // 403 resource/model access denied; not a key-health failure
   SERVER: "server", // 5xx, transient, short cooldown
   NETWORK: "network", // timeout / fetch failure, short cooldown
   BAD_REQUEST: "bad_request", // 400, request problem, NOT the key's fault
@@ -69,7 +70,8 @@ interface AcquireResult {
   keyId?: string;
   mask?: string;
   entry?: KeyEntry;
-  reason?: "no_keys" | "all_cooldown" | "aborted";
+  leaseId?: number;
+  reason?: "no_keys" | "all_cooldown" | "busy" | "aborted";
   waitMs?: number;
 }
 
@@ -77,6 +79,7 @@ interface ReportOptions {
   errorClass?: ErrorClass;
   retryAfterMs?: number | null;
   message?: string | null;
+  leaseId?: number;
 }
 
 interface KeyManagerOptions {
@@ -125,12 +128,17 @@ class KeyManager {
   _dirty: boolean;
   _saveTimer: ReturnType<typeof setTimeout> | null;
   _persisted: PersistedState;
+  /** Credential fingerprints currently assigned to a request, shared by every pool. */
+  _leasedKeys: Map<string, number>;
+  _leaseSequence: number;
+  _leaseWaiters: Set<() => void>;
 
   constructor(opts: KeyManagerOptions = {}) {
     this.cooldowns = {
       [CLASS.RATE_LIMIT]: cfgInt("COOLDOWN_RATE_LIMIT_SEC", 60) * 1000,
       [CLASS.NO_BALANCE]: cfgInt("COOLDOWN_NO_BALANCE_SEC", 3600) * 1000,
       [CLASS.AUTH]: cfgInt("COOLDOWN_DEAD_SEC", 86400) * 1000,
+      [CLASS.PERMISSION]: 0, // permission belongs to the operation, not the credential
       [CLASS.SERVER]: 15 * 1000,
       [CLASS.NETWORK]: 15 * 1000,
       [CLASS.UNKNOWN]: 30 * 1000,
@@ -143,6 +151,9 @@ class KeyManager {
     this._dirty = false;
     this._saveTimer = null;
     this._persisted = readJSON<PersistedState>(this.stateFile, { version: 1, keys: {} });
+    this._leasedKeys = new Map();
+    this._leaseSequence = 0;
+    this._leaseWaiters = new Set();
     if (!this._persisted.keys) this._persisted.keys = {};
   }
 
@@ -236,15 +247,21 @@ class KeyManager {
     for (let step = 0; step < n; step++) {
       const idx = (pool.rr + step) % n;
       const e = pool.entries[idx] as KeyEntry;
-      if ((e.cooldownUntil || 0) <= now) {
+      // A physical credential may be configured in several pools.  Do not hand it
+      // to two requests at once: a late success from the first must never erase a
+      // cooldown reported by the second.
+      if ((e.cooldownUntil || 0) <= now && !this._leasedKeys.has(e.id)) {
         pool.rr = (idx + 1) % n;
+        const leaseId = ++this._leaseSequence;
+        this._leasedKeys.set(e.id, leaseId);
         e.lastUsedAt = now;
-        return { available: true, key: e.key, keyId: e.id, mask: e.mask, entry: e };
+        return { available: true, key: e.key, keyId: e.id, mask: e.mask, entry: e, leaseId };
       }
     }
     let soonest = Number.POSITIVE_INFINITY;
     for (const e of pool.entries) soonest = Math.min(soonest, e.cooldownUntil || 0);
-    return { available: false, reason: "all_cooldown", waitMs: Math.max(0, soonest - now) };
+    const busy = pool.entries.some((e) => (e.cooldownUntil || 0) <= now && this._leasedKeys.has(e.id));
+    return busy ? { available: false, reason: "busy" } : { available: false, reason: "all_cooldown", waitMs: Math.max(0, soonest - now) };
   }
 
   /**
@@ -257,6 +274,10 @@ class KeyManager {
       if (signal?.aborted) return { available: false, reason: "aborted" };
       const res = this.acquire(poolName);
       if (res.available || res.reason === "no_keys") return res;
+      if (res.reason === "busy") {
+        await this._waitForLease(signal);
+        continue;
+      }
       const remaining = deadline - Date.now();
       if (remaining <= 0) return res;
       // Cap each nap at 1s so an AbortSignal is observed promptly.
@@ -264,8 +285,33 @@ class KeyManager {
     }
   }
 
+  /** Lease one named credential for health probing without stealing a generation lease. */
+  async acquireSpecificOrWait(poolName: string, kid: string, maxWaitMs = 0, signal: AbortSignal | null = null): Promise<AcquireResult> {
+    const deadline = Date.now() + maxWaitMs;
+    for (;;) {
+      if (signal?.aborted) return { available: false, reason: "aborted" };
+      const pool = this.pools.get(poolName) || this.registerPool(poolName);
+      const entry = pool.entries.find((e) => e.id === kid);
+      if (!entry) return { available: false, reason: "no_keys" };
+      const now = Date.now();
+      if (this._leasedKeys.has(kid)) { await this._waitForLease(signal); continue; }
+      if ((entry.cooldownUntil || 0) > now) {
+        const remaining = deadline - now;
+        if (remaining <= 0) return { available: false, reason: "all_cooldown", waitMs: entry.cooldownUntil - now };
+        await sleep(Math.min(entry.cooldownUntil - now, remaining, 1000));
+        continue;
+      }
+      const leaseId = ++this._leaseSequence;
+      this._leasedKeys.set(kid, leaseId);
+      entry.lastUsedAt = now;
+      return { available: true, key: entry.key, keyId: entry.id, mask: entry.mask, entry, leaseId };
+    }
+  }
+
   // Record the result of using a key. `errorClass` comes from CLASS.*.
-  report(poolName: string, kid: string, { errorClass = CLASS.OK, retryAfterMs = null, message = null }: ReportOptions = {}): void {
+  report(poolName: string, kid: string, { errorClass = CLASS.OK, retryAfterMs = null, message = null, leaseId }: ReportOptions = {}): void {
+    if (leaseId != null && this._leasedKeys.get(kid) !== leaseId) return;
+    this._releaseLease(kid, leaseId);
     const pool = this.pools.get(poolName);
     if (!pool) return;
     const e = pool.entries.find((x) => x.id === kid);
@@ -290,15 +336,36 @@ class KeyManager {
       if (cd > 0) e.cooldownUntil = now + cd;
       if (errorClass === CLASS.AUTH) e.status = "dead";
       else if (errorClass === CLASS.NO_BALANCE) e.status = "no_balance";
-      else if (errorClass === CLASS.BAD_REQUEST) {
-        /* a 400/content problem isn't the key's fault, leave status untouched */
+      else if (errorClass === CLASS.BAD_REQUEST || errorClass === CLASS.PERMISSION) {
+        /* request/content/resource permission problems do not affect key health */
       } else e.status = "cooldown";
     }
     this._mirror(e);
-    // A physical key can live in two pools (Gemini flash + pro). If it is proven
-    // dead / out-of-balance here, mirror that to its other pools too.
-    if (errorClass === CLASS.AUTH || errorClass === CLASS.NO_BALANCE) this._propagate(e);
+    // A physical key can live in two pools (Gemini flash + pro). Any cooldown
+    // applies to the credential, not the model alias, so mirror it everywhere.
+    if ((e.cooldownUntil || 0) > now) this._propagate(e);
     this._scheduleSave();
+  }
+
+  /** Release an acquired key when a caller was cancelled before it had an outcome. */
+  release(_poolName: string, kid: string | undefined, leaseId?: number): void {
+    if (kid) this._releaseLease(kid, leaseId);
+  }
+
+  _releaseLease(kid: string, leaseId?: number): void {
+    if (leaseId != null && this._leasedKeys.get(kid) !== leaseId) return;
+    if (!this._leasedKeys.delete(kid)) return;
+    for (const wake of this._leaseWaiters) wake();
+    this._leaseWaiters.clear();
+  }
+
+  _waitForLease(signal: AbortSignal | null): Promise<void> {
+    if (signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const wake = () => { signal?.removeEventListener("abort", wake); resolve(); };
+      this._leaseWaiters.add(wake);
+      signal?.addEventListener("abort", wake, { once: true });
+    });
   }
 
   _propagate(src: KeyEntry): void {

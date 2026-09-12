@@ -18,8 +18,12 @@ import type {
   ReferenceUploadResponse,
   RunDeleteResponse,
   RunRequest,
+  RunPreflightResponse,
+  PreparedRunRequest,
+  RepeatRunResponse,
   RunRetryResponse,
   RunSummary,
+  RunPage,
   SpendToDate,
   SyncStatus,
   UploadImage,
@@ -113,6 +117,7 @@ export const api = {
     if (params.keyEnv) qs.set('keyEnv', params.keyEnv);
     return request<AvailableModelsResponse>(`/api/models/available?${qs.toString()}`);
   },
+  uploadLimits: () => request<{ bodyLimitBytes: number; imageLimitBytes: number }>('/api/inputs/limits'),
   saveModel: (body: ModelSaveRequest) =>
     request<ModelSettingsResponse>('/api/models/save', postJson(body)),
   starModel: (id: string, starred: boolean) =>
@@ -123,11 +128,12 @@ export const api = {
     request<ModelSettingsResponse>('/api/models/restore', postJson({ id })),
   reorderModels: (order: string[]) =>
     request<ModelSettingsResponse>('/api/models/reorder', postJson({ order })),
-  runs: () => request<RunSummary[]>('/api/runs'),
+  runs: (cursor?: string | null) => request<RunPage>(`/api/runs?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`),
   deleteRuns: (ids: string[]) =>
     request<RunDeleteResponse>('/api/runs/delete', postJson({ ids })),
   run: (id: string) => request<Manifest>(`/api/runs/${encodeURIComponent(id)}`),
-  startRun: (body: RunRequest) => request<{ runId: string }>('/api/run', postJson(body)),
+  preflightRun: (body: RunRequest) => request<RunPreflightResponse>('/api/run/preflight', postJson(body)),
+  startRun: (body: PreparedRunRequest) => request<{ runId: string }>('/api/run', postJson(body)),
   startQueue: () => request<{ started: number; held: number }>('/api/queue/start', { method: 'POST' }),
   reorderQueue: (order: string[]) => request<{ order: string[] }>('/api/queue/reorder', postJson({ order })),
   cancelRun: (id: string) =>
@@ -137,6 +143,8 @@ export const api = {
   // still going — see src/http/routes/runs.ts.
   retryRun: (id: string, body: { jobIds?: string[]; autoStart?: boolean }) =>
     request<RunRetryResponse>(`/api/runs/${encodeURIComponent(id)}/retry`, postJson(body)),
+  repeatRun: (id: string, body: { autoStart?: boolean } = {}) =>
+    request<RepeatRunResponse>(`/api/runs/${encodeURIComponent(id)}/repeat`, postJson(body)),
   healthCheck: (opts?: { signal?: AbortSignal }) =>
     request<HealthCheckResponse>('/api/health-check', { ...postJson({ models: 'all' }), signal: opts?.signal }),
   openOutput: (file: string, target: 'file' | 'folder') =>

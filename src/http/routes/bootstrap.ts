@@ -18,16 +18,15 @@ import {
 } from "../../server/settings";
 import * as store from "../../store";
 import { runStoreOptions } from "../runQueue";
-import { spendToDate } from "../../runner";
+import { cachedSpendToDate } from "../../runner";
 import { PROVIDER_DEFAULTS } from "../../config/shared";
 
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/bootstrap", (c) => {
     const settings = modelSettings();
-    // One run-directory walk, shared by the run list and the spend total (spendToDate would
-    // otherwise repeat it): this is the endpoint every page load hits.
+    // Keep the visible history page bounded; lifetime spend has a separate short-lived cache.
     const runOptions = runStoreOptions();
-    const runs = store.listRuns(runOptions);
+    const runs = store.listRunsPage({ limit: 50, options: runOptions }).runs;
     return c.json({
       models: settings.models,
       archivedModels: settings.archivedModels,
@@ -36,8 +35,10 @@ export function register(app: Hono, _deps: Deps): void {
       inputs: listInputs(),
       references: listReferences(),
       keys: keySnapshot(),
-      runs: runs.slice(0, 50),
-      spend: spendToDate(runOptions, runs),
+      runs,
+      // Spend remains an all-history aggregate; never derive it from the visible page or the
+      // control panel would under-report older paid runs.
+      spend: cachedSpendToDate(runOptions),
       providerDefaults: PROVIDER_DEFAULTS,
     });
   });

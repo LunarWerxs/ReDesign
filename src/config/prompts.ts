@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import { uniqueSlugId, writeJSON } from "../util";
-import { jsonCache, PROMPTS_DEFAULTS_FILE, PROMPTS_FILE, readConfig } from "./shared";
+import { uniqueSlugId } from "../util";
+import { jsonCache, PROMPTS_DEFAULTS_FILE, PROMPTS_FILE, readConfig, withConfigLock, writeConfigJSONIfChanged } from "./shared";
 
 interface StatusError extends Error {
   status?: number;
@@ -60,7 +60,7 @@ function loadPrompts(): PromptsFileData {
 }
 
 function writePromptsData(data: PromptsFileData): void {
-  writeJSON(PROMPTS_FILE, data);
+  withConfigLock(() => writeConfigJSONIfChanged(PROMPTS_FILE, data));
   const st = fs.statSync(PROMPTS_FILE);
   jsonCache.set(PROMPTS_FILE, {
     mtimeMs: st.mtimeMs,
@@ -231,7 +231,7 @@ function normalizePromptBuilderRecipe(value: unknown): PromptBuilderRecipe | und
   };
 }
 
-function savePromptPreset(input: PromptInput = {}): PromptPreset {
+function savePromptPresetUnlocked(input: PromptInput = {}): PromptPreset {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, { systemContract: "", prompts: [] });
   const prompts = Array.isArray(data.prompts) ? [...data.prompts] : [];
   const existingId = String(input.id || "").trim();
@@ -309,7 +309,7 @@ function removePromptBuilderOption(
   return { id: optionId, builderOptions: nextOptions };
 }
 
-function savePromptBuilderOption(input: PromptBuilderOptionInput = {}): PromptBuilderOption {
+function savePromptBuilderOptionUnlocked(input: PromptBuilderOptionInput = {}): PromptBuilderOption {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, {
     systemContract: "",
     prompts: [],
@@ -320,7 +320,7 @@ function savePromptBuilderOption(input: PromptBuilderOptionInput = {}): PromptBu
   return result.builderOption;
 }
 
-function deletePromptBuilderOption(id: unknown): string {
+function deletePromptBuilderOptionUnlocked(id: unknown): string {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, {
     systemContract: "",
     prompts: [],
@@ -336,7 +336,7 @@ function deletePromptBuilderOption(id: unknown): string {
 // Toggle the picker "starred" hint on a prompt preset. Kept separate from
 // savePromptPreset so a star toggle needn't re-send the whole prompt (and can't
 // trip its label/text validation). Mirrors setModelStarred in config/models.ts.
-function setPromptStarred(id: string, starred: boolean): PromptPreset {
+function setPromptStarredUnlocked(id: string, starred: boolean): PromptPreset {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, { systemContract: "", prompts: [] });
   const prompts = Array.isArray(data.prompts) ? [...data.prompts] : [];
   const promptId = String(id || "").trim();
@@ -349,7 +349,7 @@ function setPromptStarred(id: string, starred: boolean): PromptPreset {
   return next;
 }
 
-function deletePromptPreset(id: string): string {
+function deletePromptPresetUnlocked(id: string): string {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, { systemContract: "", prompts: [] });
   const promptId = String(id || "").trim();
   if (!promptId) throw statusError("id is required", 400);
@@ -360,7 +360,7 @@ function deletePromptPreset(id: string): string {
   return promptId;
 }
 
-function restoreDefaultPrompts(): PromptPreset[] {
+function restoreDefaultPromptsUnlocked(): PromptPreset[] {
   const data = readConfig<PromptsFileData>(PROMPTS_FILE, { systemContract: "", prompts: [] });
   const defaults = readConfig<PromptsDefaultsData>(PROMPTS_DEFAULTS_FILE, { prompts: [] });
   const prompts = Array.isArray(defaults.prompts) ? defaults.prompts : [];
@@ -381,8 +381,8 @@ interface ResolvePromptsOptions {
 
 /**
  * Build the list of prompt specs to run. Accepts selected preset ids and an
- * optional custom prompt. Falls back to the first default preset if nothing
- * is chosen, so a bare "run" still does something sensible.
+ * optional custom prompt. A bare run falls back to the first default preset,
+ * but an explicit preset list never silently substitutes a different recipe.
  */
 function resolvePrompts({ presets, custom }: ResolvePromptsOptions = {}): ResolvedPrompt[] {
   const { prompts } = loadPrompts();
@@ -393,16 +393,24 @@ function resolvePrompts({ presets, custom }: ResolvePromptsOptions = {}): Resolv
   if (ids === "all" || ids === "*") ids = prompts.map((p) => p.id);
   if (typeof ids === "string") ids = ids.split(",").map((s) => s.trim()).filter(Boolean);
   if (Array.isArray(ids)) {
+    const seen = new Set<string>();
     for (const id of ids) {
       const found = byId.get(id);
-      if (found) out.push({ ...found, source: "preset" });
+      if (!found) throw statusError(`unknown prompt preset: ${String(id)}`, 400);
+      if (found && !seen.has(found.id)) {
+        seen.add(found.id);
+        out.push({ ...found, source: "preset" });
+      }
     }
   }
 
   const customText = (custom || "").trim();
-  if (customText) out.push({ id: "custom", label: "Custom", user: customText, source: "custom" });
+  // Use the same filesystem-safe slug allocator as saved presets. Including selected
+  // prompts keeps a saved `custom` recipe distinct; `source` remains the semantic
+  // discriminator, so retry still understands manifests created with the old id.
+  if (customText) out.push({ id: uniqueSlugId([...prompts, ...out], "Custom", undefined, "custom"), label: "Custom", user: customText, source: "custom" });
 
-  if (!out.length) {
+  if (!out.length && presets === undefined && !customText) {
     const fallback = prompts[0];
     if (fallback) out.push({ ...fallback, source: "preset" });
   }
@@ -419,6 +427,12 @@ export type {
   PromptsFileData,
   ResolvedPrompt,
 };
+function savePromptPreset(input: PromptInput = {}): PromptPreset { return withConfigLock(() => savePromptPresetUnlocked(input)) as PromptPreset; }
+function savePromptBuilderOption(input: PromptBuilderOptionInput = {}): PromptBuilderOption { return withConfigLock(() => savePromptBuilderOptionUnlocked(input)) as PromptBuilderOption; }
+function deletePromptBuilderOption(id: unknown): string { return withConfigLock(() => deletePromptBuilderOptionUnlocked(id)) as string; }
+function setPromptStarred(id: string, starred: boolean): PromptPreset { return withConfigLock(() => setPromptStarredUnlocked(id, starred)) as PromptPreset; }
+function deletePromptPreset(id: string): string { return withConfigLock(() => deletePromptPresetUnlocked(id)) as string; }
+function restoreDefaultPrompts(): PromptPreset[] { return withConfigLock(() => restoreDefaultPromptsUnlocked()) as PromptPreset[]; }
 export {
   deletePromptBuilderOption,
   deletePromptPreset,

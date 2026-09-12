@@ -1,5 +1,4 @@
-import { ref } from 'vue';
-import { api } from '@/lib/api';
+import type { SettingsStore } from './settings-store';
 
 /**
  * Hide-tray-icon opt-in (see misc/ReDesign-Tray.ps1): hides the notification-area icon while
@@ -8,38 +7,17 @@ import { api } from '@/lib/api';
  * change here reaches it within a few seconds without a restart. Mirrors
  * @/stores/control/portable-mode-settings.ts.
  */
-export function createHideTraySettingsActions() {
-  const hideTrayIconEnabled = ref(false);
-  const hideTrayIconLoading = ref(false); // initial load + toggle in flight
+export function createHideTraySettingsActions(settings: SettingsStore) {
 
   /** Load the current setting (call on mount). Best-effort, leaves the default (off) on failure. */
   async function loadHideTrayIconSetting(): Promise<void> {
-    hideTrayIconLoading.value = true;
-    try {
-      const s = await api.getSettings();
-      hideTrayIconEnabled.value = s.hideTrayIcon;
-    } catch {
-      /* non-critical, leave the default */
-    } finally {
-      hideTrayIconLoading.value = false;
-    }
+    await settings.loadSettings();
   }
 
   /** Toggle hide-tray-icon (optimistic; rolls back on failure). */
   async function setHideTrayIcon(enabled: boolean): Promise<void> {
-    const prev = hideTrayIconEnabled.value;
-    hideTrayIconEnabled.value = enabled;
-    hideTrayIconLoading.value = true;
-    try {
-      const s = await api.setHideTrayIcon(enabled);
-      hideTrayIconEnabled.value = s.hideTrayIcon;
-    } catch (e) {
-      hideTrayIconEnabled.value = prev; // roll back
-      throw e;
-    } finally {
-      hideTrayIconLoading.value = false;
-    }
+    await settings.updateSettings({ hideTrayIcon: enabled });
   }
 
-  return { hideTrayIconEnabled, hideTrayIconLoading, loadHideTrayIconSetting, setHideTrayIcon };
+  return { hideTrayIconEnabled: settings.hideTrayIconEnabled, hideTrayIconLoading: settings.settingsLoading, loadHideTrayIconSetting, setHideTrayIcon };
 }

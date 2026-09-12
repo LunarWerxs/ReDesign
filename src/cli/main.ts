@@ -94,6 +94,7 @@ ${C.bold("RēDesign")} (ReDesign), run UI screenshots through many AI models.
     --concurrency N         max parallel calls across the whole run
     --pool-concurrency N    max parallel calls per key pool/provider lane
     --max-images N          cap reference images per group
+    --max-cost USD          stop admitting new provider calls after this run reaches the ceiling
     --label name            tag the run id
 
   ${C.dim("Web UI:")} ${C.cyan("npm start")}  →  http://localhost:${process.env.PORT || 5178}

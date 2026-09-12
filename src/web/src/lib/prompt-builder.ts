@@ -20,11 +20,6 @@ export {
   PROMPT_BUILDER_SCOPE_OPTIONS,
 };
 
-/** @deprecated Prefer PROMPT_BUILDER_SCOPE_OPTIONS. */
-export const PROMPT_BUILDER_SCOPES = PROMPT_BUILDER_SCOPE_OPTIONS;
-/** @deprecated Prefer PROMPT_BUILDER_QUALITY_OPTIONS. */
-export const PROMPT_BUILDER_MODIFIERS = PROMPT_BUILDER_QUALITY_OPTIONS;
-
 const DEFAULT_SCOPE: PromptBuilderScopeId = 'balanced';
 const CUSTOM_OPTION_CATEGORIES: readonly PromptBuilderCustomOptionCategory[] = [
   'structure',

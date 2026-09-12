@@ -28,6 +28,21 @@ export const readInstanceInfo = pointer.readInstanceInfo;
 export const clearInstanceInfo = pointer.clearInstanceInfo;
 export const findLiveInstance = pointer.findLiveInstance;
 
+/**
+ * Pointer files are best-effort. The launch path also probes its preferred port, but accepts it
+ * only after the health response proves this is RēDesign rather than an unrelated loopback app.
+ */
+export async function findLiveInstanceAt(baseUrl: string, timeoutMs = 1_000): Promise<{ url: string } | null> {
+  try {
+    const response = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { ok?: unknown; service?: unknown };
+    return body.ok === true && body.service === "redesign" ? { url: baseUrl } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // "Full shutdown requested" sentinel — a marker file the PowerShell tray host polls so a
 // user "Shut Down" from the web UI (or `redesign stop`) tears down the WHOLE app,

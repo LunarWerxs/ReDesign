@@ -13,8 +13,13 @@
  *   manifests.ts  manifest read/write + the run listing
  *   retention.ts  disk usage, the retention sweep, run deletion
  */
-export { OUTPUT_DIR, newRunId, runDir, manifestPath } from "./store/paths";
-export { writeManifest, readManifest, listRuns, settleStaleRuns } from "./store/manifests";
+
+export type { RunPage } from "./store/manifests";
+export { listRuns, listRunsPage, readManifest, settleStaleRuns, writeManifest } from "./store/manifests";
+export { claimRunOwnership, isRunOwned } from "./store/ownership";
+export { manifestPath, newRunId, OUTPUT_DIR, runDir } from "./store/paths";
+export { cachedOutputBytes, deleteRun, outputBytes, pruneRuns } from "./store/retention";
+export type { RunReview } from "./store/reviews";
+export { getReview, reviewPath, saveReview } from "./store/reviews";
 export { settleStaleManifest } from "./store/stale";
-export { pruneRuns, outputBytes, deleteRun } from "./store/retention";
-export type { Manifest, Job, Counts, RunSummary, ReadManifestOptions, PruneRunsResult } from "./store/types";
+export type { Counts, Job, Manifest, PruneRunsResult, QueueState, ReadManifestOptions, RunOwnership, RunOwnershipClaim, RunSummary } from "./store/types";

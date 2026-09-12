@@ -6,6 +6,7 @@ import { CLASS, type ErrorClass } from "./keyManager";
 import { redactSecrets, sleep, type ImagePayload } from "./util";
 import type { Model } from "./config/models";
 import { OPENAI_FAMILY } from "./config/shared";
+import { providerCall } from "./provider-call";
 
 // ---------------------------------------------------------------------------
 // Errors + HTTP
@@ -15,6 +16,10 @@ interface ProviderErrorOptions {
   status?: number | null;
   retryAfterMs?: number | null;
   providerMessage?: string | null;
+  providerCode?: string | null;
+  providerType?: string | null;
+  usage?: unknown;
+  finishReason?: string | null;
 }
 
 class ProviderError extends Error {
@@ -22,19 +27,27 @@ class ProviderError extends Error {
   status: number | null;
   retryAfterMs: number | null;
   providerMessage: string;
+  providerCode: string | null;
+  providerType: string | null;
+  usage: unknown;
+  finishReason: string | null;
 
-  constructor(message: string, { errorClass = CLASS.UNKNOWN, status = null, retryAfterMs = null, providerMessage = null }: ProviderErrorOptions = {}) {
+  constructor(message: string, { errorClass = CLASS.UNKNOWN, status = null, retryAfterMs = null, providerMessage = null, providerCode = null, providerType = null, usage = null, finishReason = null }: ProviderErrorOptions = {}) {
     super(message);
     this.name = "ProviderError";
     this.errorClass = errorClass;
     this.status = status;
     this.retryAfterMs = retryAfterMs;
     this.providerMessage = providerMessage || message;
+    this.providerCode = providerCode;
+    this.providerType = providerType;
+    this.usage = usage;
+    this.finishReason = finishReason;
   }
-  // A different key can't fix a malformed request or content-blocked response,
-  // so BAD_REQUEST is the one class the runner should not retry across keys.
+  // A different key cannot fix malformed/content-blocked requests or an operation's
+  // resource permission, so neither class should rotate through the key pool.
   get retryable(): boolean {
-    return this.errorClass !== CLASS.BAD_REQUEST;
+    return this.errorClass !== CLASS.BAD_REQUEST && this.errorClass !== CLASS.PERMISSION;
   }
 }
 
@@ -66,40 +79,67 @@ const ACCOUNT_DEAD_HINTS = [
   "api key", "invalid key", "api_key", "incorrect api key", "invalid_api_key",
   "suspend", "deactivat", "account disabled", "key disabled", "expired", "revoked",
 ];
+const INVALID_CREDENTIAL_HINTS = [
+  "invalid api key", "api key is invalid", "api key not valid", "incorrect api key", "invalid_api_key",
+  "api key has been revoked", "key has been revoked", "api key revoked", "key revoked",
+];
+const INVALID_CREDENTIAL_TYPES = new Set(["invalid_api_key", "api_key_invalid", "authentication_error"]);
 
 interface Classification {
   errorClass: ErrorClass;
   retryAfterMs: number | null;
+  providerCode: string | null;
+  providerType: string | null;
+}
+
+function providerDetails(bodyText: string | null | undefined): Pick<Classification, "providerCode" | "providerType"> {
+  try {
+    const parsed = JSON.parse(bodyText || "") as { code?: unknown; type?: unknown; error?: { code?: unknown; type?: unknown } };
+    const error = parsed && typeof parsed === "object" ? parsed.error : null;
+    const pick = (value: unknown) => typeof value === "string" ? value : null;
+    return { providerCode: pick(error?.code) || pick(parsed.code), providerType: pick(error?.type) || pick(parsed.type) };
+  } catch {
+    return { providerCode: null, providerType: null };
+  }
 }
 
 // Map an HTTP response (status + headers + body text) to a key-manager class.
 function classifyHttp(status: number, headers: Headers | null | undefined, bodyText: string | null | undefined): Classification {
   const body = (bodyText || "").toLowerCase();
   const retryAfterMs = parseRetryAfter(headers);
+  const details = providerDetails(bodyText);
   const mentions = (...words: string[]) => words.some((w) => body.includes(w));
+  const invalidCredential = () =>
+    mentions(...INVALID_CREDENTIAL_HINTS) ||
+    INVALID_CREDENTIAL_TYPES.has((details.providerType || "").toLowerCase()) ||
+    INVALID_CREDENTIAL_TYPES.has((details.providerCode || "").toLowerCase());
 
-  if (status === 401) return { errorClass: CLASS.AUTH, retryAfterMs };
+  if (status === 401) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
   if (status === 403) {
-    if (mentions("quota", "exceeded", "exhausted", ...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs };
-    return { errorClass: CLASS.AUTH, retryAfterMs };
+    if (mentions("quota", "exceeded", "exhausted", ...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
+    // Providers use 403 for model/resource entitlement failures. Those can vary
+    // by key and model, but do not prove the credential is invalid. Keep AUTH
+    // for explicit invalid/revoked-key evidence only.
+    if (invalidCredential()) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
+    return { errorClass: CLASS.PERMISSION, retryAfterMs, ...details };
   }
-  if (status === 402) return { errorClass: CLASS.NO_BALANCE, retryAfterMs };
+  if (status === 402) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
   if (status === 429) {
     // Daily/credit exhaustion -> long cooldown. Generic 429 (per-minute rate)
     // stays RATE_LIMIT so a still-good key isn't benched for an hour.
-    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs };
-    return { errorClass: CLASS.RATE_LIMIT, retryAfterMs };
+    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
+    return { errorClass: CLASS.RATE_LIMIT, retryAfterMs, ...details };
   }
   if (status === 400) {
     // Account/billing failures dressed up as a 400 are key-specific → retry elsewhere.
-    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs };
-    if (mentions(...ACCOUNT_DEAD_HINTS)) return { errorClass: CLASS.AUTH, retryAfterMs };
-    return { errorClass: CLASS.BAD_REQUEST, retryAfterMs };
+    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
+    if (mentions(...ACCOUNT_DEAD_HINTS)) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
+    return { errorClass: CLASS.BAD_REQUEST, retryAfterMs, ...details };
   }
-  if (status === 404) return { errorClass: CLASS.BAD_REQUEST, retryAfterMs }; // model not found etc.
-  if (status === 529) return { errorClass: CLASS.RATE_LIMIT, retryAfterMs }; // anthropic overloaded
-  if (status >= 500) return { errorClass: CLASS.SERVER, retryAfterMs };
-  return { errorClass: CLASS.UNKNOWN, retryAfterMs };
+  if (status === 404) return { errorClass: CLASS.BAD_REQUEST, retryAfterMs, ...details }; // model not found etc.
+  if (status === 529) return { errorClass: CLASS.RATE_LIMIT, retryAfterMs, ...details }; // anthropic overloaded
+  if (status >= 500) return { errorClass: CLASS.SERVER, retryAfterMs, ...details };
+  return { errorClass: CLASS.UNKNOWN, retryAfterMs, ...details };
 }
 
 /**
@@ -136,9 +176,9 @@ async function requestJSON<T = unknown>(url: string, options: RequestInit, timeo
     }
 
     if (!res.ok) {
-      const { errorClass, retryAfterMs } = classifyHttp(res.status, res.headers, text);
+      const { errorClass, retryAfterMs, providerCode, providerType } = classifyHttp(res.status, res.headers, text);
       const snippet = redactSecrets(text.replace(/\s+/g, " ").slice(0, 300));
-      throw new ProviderError(`HTTP ${res.status}: ${snippet || res.statusText}`, { errorClass, status: res.status, retryAfterMs, providerMessage: snippet });
+      throw new ProviderError(`HTTP ${res.status}: ${snippet || res.statusText}`, { errorClass, status: res.status, retryAfterMs, providerMessage: snippet, providerCode, providerType });
     }
     try {
       return JSON.parse(text);
@@ -202,7 +242,7 @@ async function anthropicCall(req: ProviderRequest): Promise<ProviderResult> {
     signal
   );
   const text = Array.isArray(data.content) ? data.content.filter((b) => b.type === "text").map((b) => b.text).join("") : "";
-  if (!text.trim()) throw new ProviderError(`empty response (stop_reason=${data.stop_reason})`, { errorClass: CLASS.BAD_REQUEST });
+  if (!text.trim()) throw new ProviderError(`empty response (stop_reason=${data.stop_reason})`, { errorClass: CLASS.BAD_REQUEST, usage: data.usage || null, finishReason: data.stop_reason || null });
   return { text, usage: data.usage || null, finishReason: data.stop_reason || null, raw: data };
 }
 
@@ -254,7 +294,7 @@ async function openaiCall(req: ProviderRequest): Promise<ProviderResult> {
     if (typeof msg.content === "string") text = msg.content;
     else if (Array.isArray(msg.content)) text = msg.content.map((p) => p.text || "").join("");
   }
-  if (!text.trim()) throw new ProviderError(`empty response (finish_reason=${choice?.finish_reason})`, { errorClass: CLASS.BAD_REQUEST });
+  if (!text.trim()) throw new ProviderError(`empty response (finish_reason=${choice?.finish_reason})`, { errorClass: CLASS.BAD_REQUEST, usage: data.usage || null, finishReason: choice?.finish_reason || null });
   return { text, usage: data.usage || null, finishReason: choice?.finish_reason, raw: data };
 }
 
@@ -294,13 +334,13 @@ async function geminiCall(req: ProviderRequest): Promise<ProviderResult> {
     timeoutMs,
     signal
   );
-  if (data.promptFeedback?.blockReason) throw new ProviderError(`blocked: ${data.promptFeedback.blockReason}`, { errorClass: CLASS.BAD_REQUEST });
+  if (data.promptFeedback?.blockReason) throw new ProviderError(`blocked: ${data.promptFeedback.blockReason}`, { errorClass: CLASS.BAD_REQUEST, usage: data.usageMetadata || null });
   const cand = data.candidates?.[0];
   const text = cand?.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || "").join("") : "";
   if (!text.trim()) {
     const reason = cand ? cand.finishReason : "no_candidates";
     const hint = reason === "MAX_TOKENS" ? ", raise maxTokens in models.json" : "";
-    throw new ProviderError(`empty response (finishReason=${reason})${hint}`, { errorClass: CLASS.BAD_REQUEST });
+    throw new ProviderError(`empty response (finishReason=${reason})${hint}`, { errorClass: CLASS.BAD_REQUEST, usage: data.usageMetadata || null, finishReason: cand?.finishReason || null });
   }
   return { text, usage: data.usageMetadata || null, finishReason: cand?.finishReason, raw: data };
 }
@@ -372,10 +412,19 @@ for (const provider of OPENAI_FAMILY) ADAPTERS[provider] = openaiAdapter;
 const MOCK: Adapter = { call: mockCall };
 
 function getAdapter(model: Model, { mock = false }: { mock?: boolean } = {}): Adapter {
-  if (mock) return MOCK;
-  const adapter = ADAPTERS[model.provider];
+  const adapter = mock ? MOCK : ADAPTERS[model.provider];
   if (!adapter) throw new Error(`No adapter for provider "${model.provider}" (model ${model.id})`);
-  return adapter;
+  return {
+    call: (req) => providerCall({
+      pool: model.keyEnv,
+      apiKey: req.apiKey,
+      modelId: model.id,
+      provider: model.provider,
+      apiModel: model.apiModel,
+      promptLabel: req.promptLabel,
+      signal: req.signal,
+    }, () => adapter.call(req)),
+  };
 }
 
 export { ProviderError, classifyHttp, parseRetryAfter, requestJSON, getAdapter, ADAPTERS };

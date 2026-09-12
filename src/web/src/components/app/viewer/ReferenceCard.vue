@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ExternalLinkIcon } from '@lucide/vue';
-import { inputUrl } from '@/lib/api';
+import { inputUrl, outputRawUrl } from '@/lib/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { InputItem } from '@/types';
 import { t } from '@/i18n';
 
-const props = defineProps<{ input: InputItem }>();
+const props = defineProps<{ input: InputItem; runId: string; specVersion?: number }>();
 
 const images = () => (props.input.images && props.input.images.length ? props.input.images : [props.input.preview]);
+const assetUrl = (rel: string) =>
+  props.specVersion === 1 ? outputRawUrl(`${props.runId}/${rel}`) : inputUrl(rel);
 </script>
 
 <template>
@@ -20,7 +22,7 @@ const images = () => (props.input.images && props.input.images.length ? props.in
       <Tooltip>
         <TooltipTrigger as-child>
           <a
-            :href="inputUrl(input.preview)"
+            :href="assetUrl(input.preview)"
             target="_blank"
             :aria-label="t('viewer.open')"
             class="text-muted-foreground hover:text-foreground"
@@ -32,7 +34,7 @@ const images = () => (props.input.images && props.input.images.length ? props.in
       </Tooltip>
     </div>
     <div class="max-h-[700px] overflow-auto bg-black">
-      <img v-for="(rel, i) in images()" :key="i" loading="lazy" :src="inputUrl(rel)" alt="" class="block w-full" />
+      <img v-for="(rel, i) in images()" :key="i" loading="lazy" :src="assetUrl(rel)" alt="" class="block w-full" />
     </div>
   </div>
 </template>

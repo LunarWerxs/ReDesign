@@ -99,7 +99,7 @@ describe("MCP tool: batch_reimagine", () => {
     async () => {
       const digest = (await tool("batch_reimagine").run({
         inputs: realInputs[0]!.id,
-        models: "gemini-flash-latest,deepseek-v4-pro",
+        models: "gemini-flash-latest,kimi-k3",
         prompts: "faithful-refresh",
         mock: true,
         wait: true,
@@ -119,16 +119,16 @@ describe("MCP tool: batch_reimagine", () => {
         expect(j.error).toBeNull();
       }
 
-      // deepseek-v4-pro is text-only in models.json, the runner captions the input for it, and
+      // kimi-k3 is text-only in models.json, the runner captions the input for it, and
       // the caption lands in the job's .meta.json sidecar (src/runner/reimagine.ts). Confirm the
       // digest surfaces it via the /output-raw/*.meta.json read path.
-      const dsJob = digest.jobs.find((j) => j.model === "deepseek-v4-pro");
-      expect(dsJob).toBeTruthy();
-      if (!dsJob) throw new Error("deepseek-v4-pro job not found in digest.jobs");
-      const dsCaption = dsJob.caption;
-      expect(typeof dsCaption).toBe("string");
-      if (typeof dsCaption !== "string") throw new Error("expected deepseek-v4-pro caption to be a string");
-      expect(dsCaption.length).toBeGreaterThan(0);
+      const textJob = digest.jobs.find((j) => j.model === "kimi-k3");
+      expect(textJob).toBeTruthy();
+      if (!textJob) throw new Error("kimi-k3 job not found in digest.jobs");
+      const textCaption = textJob.caption;
+      expect(typeof textCaption).toBe("string");
+      if (typeof textCaption !== "string") throw new Error("expected kimi-k3 caption to be a string");
+      expect(textCaption.length).toBeGreaterThan(0);
       expect(/1\/2|2\/2/.test(digest.captionSummary)).toBe(true);
 
       // Sanity: the manifest this digest was built from is really on disk.

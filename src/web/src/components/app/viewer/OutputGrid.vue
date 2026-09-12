@@ -56,6 +56,10 @@ const emptyMsg = computed(() => {
     <Badge variant="secondary">{{ t('runFlyout.mockBadge') }}</Badge>
     {{ t('viewer.mockRunNotice') }}
   </div>
+  <div v-if="store.manifest" class="mx-[18px] mt-[18px] flex items-center gap-3 text-xs text-muted-foreground">
+    <label class="flex items-center gap-1"><input type="checkbox" :checked="store.review.keep" @change="store.setReviewKeep(($event.target as HTMLInputElement).checked)"> {{ t('viewer.keepRun') }}</label>
+    <a class="underline" :href="`/api/runs/${encodeURIComponent(store.manifest.runId)}/download?shortlist=1`">{{ t('viewer.downloadShortlist') }}</a>
+  </div>
   <div
     v-if="store.grouped.length"
     class="grid gap-[18px] p-[18px]"
@@ -68,7 +72,7 @@ const emptyMsg = computed(() => {
           <span class="text-xs font-normal text-muted-foreground/70">· {{ t('viewer.outputsCount', { count: group.okCount }, group.okCount) }}</span>
         </h2>
       </div>
-      <ReferenceCard :input="group.input" />
+      <ReferenceCard :input="group.input" :run-id="store.manifest?.runId ?? ''" :spec-version="store.manifest?.specVersion" />
       <template v-for="job in group.jobs" :key="job.id">
         <ErrorCard
           v-if="job.status === 'error' || job.status === 'skipped'"
@@ -101,6 +105,12 @@ const emptyMsg = computed(() => {
           :item-hidden="store.isItemHidden(job.id)"
           @toggle-star="store.toggleItemStarred(job.id)"
           @toggle-hidden="store.toggleItemHidden(job.id)"
+        />
+        <textarea
+          class="col-span-full min-h-8 rounded border bg-background p-2 text-xs"
+          :value="store.review.notes[job.id] || ''"
+          :placeholder="t('viewer.reviewNotePlaceholder')"
+          @change="store.setReviewNote(job.id, ($event.target as HTMLTextAreaElement).value)"
         />
       </template>
     </template>

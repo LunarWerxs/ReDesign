@@ -11,7 +11,7 @@
 import type { Hono } from "hono";
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
-import { spendToDate, estimateRunCost, recentTraces } from "../../runner";
+import { cachedSpendToDate, estimateRunCost, recentTraces } from "../../runner";
 import { runStoreOptions } from "../runQueue";
 
 interface EstimateBody {
@@ -21,7 +21,7 @@ interface EstimateBody {
 }
 
 export function register(app: Hono, _deps: Deps): void {
-  app.get("/api/costs", (c) => c.json(spendToDate(runStoreOptions())));
+  app.get("/api/costs", (c) => c.json(cachedSpendToDate(runStoreOptions())));
 
   app.post("/api/costs/estimate", requireSameOrigin(), async (c) => {
     const body = ((await c.req.json().catch(() => ({}))) || {}) as EstimateBody;

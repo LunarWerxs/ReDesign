@@ -6,18 +6,19 @@
  * executable. Source checkouts continue to use updater-engine.mjs through updater.ts.
  */
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
+  createWriteStream,
   existsSync,
   mkdirSync,
-  readdirSync,
   renameSync,
-  rmSync,
+  rmSync
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import pkg from "../package.json";
 import { coarseOsTag, getInstallId, PING_URL } from "./install-ping";
+import { cleanupUpdateArtifacts } from "./update-lock";
 import type { UpdateApplyResult, UpdateStatus } from "./updater-engine.mjs";
 
 const SERVICE = "redesign";
@@ -42,6 +43,9 @@ const LATEST_API = PING_URL;
  */
 const GITHUB_LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const VERSION = pkg.version;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+const MAX_ARCHIVE_BYTES = 1_024 * 1024 * 1024;
+const MAX_CHECKSUM_BYTES = 1_024 * 1024;
 
 export interface ReleaseAsset {
   name: string;
@@ -241,9 +245,10 @@ async function expectedSha256(release: Release | null, assetName: string): Promi
     const response = await fetch(sums.browser_download_url, {
       headers: { accept: "text/plain", "user-agent": `${SERVICE}/${VERSION}` },
       redirect: "follow",
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
     });
     if (!response.ok) return null;
-    text = await response.text();
+    text = new TextDecoder().decode(await readResponseWithLimit(response, MAX_CHECKSUM_BYTES));
   } catch {
     return null;
   }
@@ -255,6 +260,82 @@ async function expectedSha256(release: Release | null, assetName: string): Promi
     if (digest && name && basename(name) === assetName) return digest.toLowerCase();
   }
   return null;
+}
+
+/** Read a finite response with a hard cap; callers never retain an unbounded update payload. */
+async function readResponseWithLimit(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const lengthHeader = response.headers.get("content-length");
+  const contentLength = lengthHeader === null ? Number.NaN : Number(lengthHeader);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error(`download exceeds ${maxBytes} byte limit`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error(`download exceeds ${maxBytes} byte limit`);
+      parts.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.byteLength;
+  }
+  return result;
+}
+
+/**
+ * Stream a release asset to disk while enforcing both GitHub's published size and an absolute
+ * safety ceiling. Failure always removes the partial file, so cleanup is not deferred to a
+ * future launch.
+ */
+export async function downloadResponseToFile(
+  response: Response,
+  destination: string,
+  expectedBytes: number,
+  maximumBytes = MAX_ARCHIVE_BYTES,
+): Promise<void> {
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > maximumBytes) {
+    throw new Error("release asset has an invalid or unsafe published size");
+  }
+  const lengthHeader = response.headers.get("content-length");
+  const contentLength = lengthHeader === null ? Number.NaN : Number(lengthHeader);
+  if (Number.isFinite(contentLength) && contentLength !== expectedBytes) {
+    throw new Error("download size does not match the published asset size");
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("download has no response body");
+  const writer = createWriteStream(destination, { flags: "wx", mode: 0o600 });
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > expectedBytes || total > maximumBytes) throw new Error("download is larger than expected");
+      if (!writer.write(value)) await new Promise<void>((resolve, reject) => {
+        writer.once("drain", resolve);
+        writer.once("error", reject);
+      });
+    }
+    if (total !== expectedBytes) throw new Error("download size does not match the published asset size");
+    await new Promise<void>((resolve, reject) => writer.end((error?: Error | null) => (error ? reject(error) : resolve())));
+  } catch (error) {
+    writer.destroy();
+    rmSync(destination, { force: true });
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 function verifyVersion(executable: string, expected: string): Promise<boolean> {
@@ -317,32 +398,58 @@ async function downloadAndStageUpdate(
   mkdirSync(staging, { recursive: true });
   const archive = join(staging, asset.name);
   output.push(`downloading ${asset.name} (${Math.round(asset.size / 1048576)} MB)`);
-  const response = await fetch(asset.browser_download_url, {
+  let response: Response;
+  try {
+    response = await fetch(asset.browser_download_url, {
     headers: { accept: "application/octet-stream", "user-agent": `${SERVICE}/${VERSION}` },
     redirect: "follow",
-  });
-  if (!response.ok) return { ok: false, result: failure(`download failed (HTTP ${response.status})`) };
-  await Bun.write(archive, response);
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    });
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: false, result: failure(`download failed: ${error instanceof Error ? error.message : String(error)}`) };
+  }
+  if (!response.ok) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: false, result: failure(`download failed (HTTP ${response.status})`) };
+  }
+  try {
+    await downloadResponseToFile(response, archive, asset.size);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: false, result: failure(`download failed: ${error instanceof Error ? error.message : String(error)}`) };
+  }
 
   // Authenticate the download BEFORE unpacking it and long before verifyVersion() executes it.
   // Auto-update is on by default and unattended, so this check is what keeps a hijacked release
   // from becoming silent code execution on every install.
   const expected = await expectedSha256(release, asset.name);
   if (!expected) {
+    rmSync(staging, { recursive: true, force: true });
     return { ok: false, result: failure(`no published checksum for ${asset.name}; refusing to install v${remoteVersion}`) };
   }
   const actual = await sha256File(archive);
   if (actual !== expected) {
     output.push(`checksum mismatch: expected ${expected}, got ${actual}`);
+    rmSync(staging, { recursive: true, force: true });
     return { ok: false, result: failure(`${asset.name} failed its checksum; refusing to install v${remoteVersion}`) };
   }
   output.push("checksum verified");
 
-  await extract(archive, staging);
+  try {
+    await extract(archive, staging);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: false, result: failure(`could not unpack update: ${error instanceof Error ? error.message : String(error)}`) };
+  }
 
   const candidate = join(staging, bundledName);
-  if (!existsSync(candidate)) return { ok: false, result: failure(`the update archive has no ${bundledName}`) };
+  if (!existsSync(candidate)) {
+    rmSync(staging, { recursive: true, force: true });
+    return { ok: false, result: failure(`the update archive has no ${bundledName}`) };
+  }
   if (!(await verifyVersion(candidate, remoteVersion))) {
+    rmSync(staging, { recursive: true, force: true });
     return { ok: false, result: failure("the downloaded executable failed its version self-check") };
   }
   return { ok: true, candidate, output };
@@ -393,6 +500,7 @@ export async function applyUpdate(): Promise<UpdateApplyResult> {
       output,
     };
   } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
     if (movedAside && existsSync(oldExecutable)) {
       try {
         rmSync(executable, { force: true });
@@ -407,11 +515,6 @@ export function cleanupStaleUpdateArtifacts(): void {
   try {
     const installDir = dirname(process.execPath);
     const executableName = basename(process.execPath);
-    rmSync(join(installDir, ".update-staging"), { recursive: true, force: true });
-    for (const name of readdirSync(installDir)) {
-      if (name.startsWith(`${executableName}.old-`)) {
-        rmSync(join(installDir, name), { force: true });
-      }
-    }
+    cleanupUpdateArtifacts(installDir, executableName);
   } catch {}
 }

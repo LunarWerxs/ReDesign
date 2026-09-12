@@ -12,18 +12,18 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { ensureDir, writeJSON } from "../util";
-import { CLASS, type KeyManager } from "../keyManager";
 import type { resolvePrompts } from "../config";
-import type { InputItem, LoadedImage } from "../inputResolver";
-import { getAdapter, type ProviderError } from "../providers";
-import { extractHtml } from "../extractHtml";
-import { injectOutputHeightMeasure } from "../outputMeasure";
-import * as store from "../store";
-import { groundingBlock, visionReferenceBlock, textReferenceBlock, brandStyleGuideBlock } from "./helpers";
-import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
-import type { Job } from "./scheduling";
 import type { Model } from "../config/models";
+import { extractHtml } from "../extractHtml";
+import type { InputItem, LoadedImage } from "../inputResolver";
+import { CLASS, type KeyManager } from "../keyManager";
+import { injectOutputHeightMeasure } from "../outputMeasure";
+import { getAdapter, type ProviderError } from "../providers";
+import * as store from "../store";
+import { ensureDir, writeJSON } from "../util";
+import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
+import { brandStyleGuideBlock, groundingBlock, textReferenceBlock, visionReferenceBlock } from "./helpers";
+import type { Job } from "./scheduling";
 
 type ResolvedPrompt = ReturnType<typeof resolvePrompts>[number];
 
@@ -145,7 +145,11 @@ async function finalizeJobResult(
   // Mock-mode jobs spend no real quota, so they never carry a cost (keeps the
   // run's cost meter and spend-to-date honest, see cost.ts isMockUsage).
   job.cost = job.usage && !isMockUsage(job.usage) ? costForUsage(model.id, job.usage) : null;
-  if (job.cost) {
+  // A run wrapped in withProviderRun records this call before we reach the
+  // filesystem. Its ledger includes helpers and empty billed replies, so adding
+  // the generation here would double-count it. Legacy/direct worker fixtures
+  // keep the previous per-job aggregate.
+  if (job.cost && !Array.isArray(manifest.providerCalls)) {
     const rc = manifest.cost as RunCostResult;
     rc.totalCost += job.cost.totalCost;
     rc.jobCount++;
@@ -155,10 +159,9 @@ async function finalizeJobResult(
 
   const rel = path.join(job.inputId, `${model.id}__${prompt.id}__v${job.variant}.html`);
   const abs = path.join(store.runDir(runId), rel);
-  let wrapped: boolean;
+  let extracted: ReturnType<typeof extractHtml>;
   try {
-    const extracted = extractHtml(result.text);
-    wrapped = extracted.wrapped;
+    extracted = extractHtml(result.text);
     ensureDir(path.dirname(abs));
     // Embed the viewer's height-measurement script now, so /output-raw/* can stream the
     // file straight off disk instead of reading and rewriting it on every gallery card.
@@ -177,7 +180,8 @@ async function finalizeJobResult(
       keyMask,
       usage: result.usage || null,
       finishReason: result.finishReason || null,
-      wrapped,
+      wrapped: extracted.wrapped,
+      extraction: extracted.outcome,
       rawChars: result.text.length,
       caption: caption || null,
       captionBy: caption ? describer?.id || null : null,
@@ -193,15 +197,26 @@ async function finalizeJobResult(
     return { ok: false, error: `output could not be saved: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}` };
   }
 
-  job.status = "ok";
   job.file = path.join(runId, rel).split(path.sep).join("/");
-  job.wrapped = wrapped;
+  job.wrapped = extracted.wrapped;
   job.finishReason = result.finishReason || null;
   // Normalize each provider's distinct truncation signal:
   // Anthropic 'max_tokens' · OpenAI/DeepSeek/Qwen 'length' · Gemini 'MAX_TOKENS'.
   const fr = String(result.finishReason || "").toLowerCase();
   job.truncated = fr === "max_tokens" || fr === "length" || fr === "model_length";
   if (job.truncated) job.note = "output truncated at token limit, raise maxTokens in models.json";
+  if (extracted.outcome === "non-html") {
+    // The provider may have billed this response, and the diagnostic artifact above is useful
+    // for inspection, but a refusal/prose response is not a redesign. Stop here rather than
+    // rotating to another key (which would automatically pay again); the normal failed-job retry
+    // action can make a deliberate new attempt.
+    const error = "model returned no HTML output";
+    job.status = "error";
+    job.error = error;
+    return { ok: false, error };
+  }
+
+  job.status = "ok";
   job.error = null;
   return { ok: true };
 }
@@ -231,6 +246,7 @@ function classifyJobCallError(err: unknown, ctx: JobWorkerContext, job: Job, mod
   // A cancelled in-flight request isn't a key failure, don't cool the key.
   if (ctx.signal?.aborted) {
     job.status = "cancelled";
+    ctx.km.release(model.keyEnv, acq.keyId, acq.leaseId);
     return null;
   }
   const provErr = err as ProviderError;
@@ -239,6 +255,7 @@ function classifyJobCallError(err: unknown, ctx: JobWorkerContext, job: Job, mod
     errorClass: isProvider ? provErr.errorClass : CLASS.UNKNOWN,
     retryAfterMs: isProvider ? provErr.retryAfterMs : null, // don't blame key for our bug
     message: provErr.message,
+    leaseId: acq.leaseId,
   });
   return { retryable: isProvider ? provErr.retryable : false, message: provErr.message };
 }
@@ -276,7 +293,8 @@ async function runJobAttempts(ctx: JobWorkerContext, job: Job, model: Model, pro
       });
       // A mock success proves nothing about the real key, so don't record it
       // as validated health (a default mock run leaves key state untouched).
-      if (!mock) km.report(model.keyEnv, acq.keyId as string, { errorClass: CLASS.OK });
+      if (!mock) km.report(model.keyEnv, acq.keyId as string, { errorClass: CLASS.OK, leaseId: acq.leaseId });
+      else km.release(model.keyEnv, acq.keyId, acq.leaseId);
 
       const outcome = await finalizeJobResult(ctx, job, model, prompt, input, result, built, acq.mask as string);
       if (!outcome.ok) {
@@ -321,16 +339,29 @@ export async function runOneJob(job: Job, ctx: JobWorkerContext): Promise<void> 
     const adapter = getAdapter(model, { mock });
     const built = await buildJobPrompt(ctx, job, prompt, input, hasVision, t0);
     prepMs = built.prepMs;
-    job.status = "running";
-    job.startedAt = new Date().toISOString();
-    onProgress({ type: "job", runId, job });
+    if (signal?.aborted) {
+      // Captioning may finish after cancellation. Preserve that terminal state instead of
+      // translating its null result into a retryable prerequisite failure.
+      job.status = "cancelled";
+    } else if (!hasVision && !built.caption) {
+      // A text-only model has no other way to see the screenshot. Never turn a failed
+      // caption helper into a paid generic redesign; retry becomes available once the
+      // vision helper/key pool has recovered.
+      job.status = "skipped";
+      job.error = "screenshot caption is required before this text-only model can generate output";
+      job.note = "screenshot caption unavailable; generation was not started";
+    } else {
+      job.status = "running";
+      job.startedAt = new Date().toISOString();
+      onProgress({ type: "job", runId, job });
 
-    const maxAttempts = km.attemptBudget(model.keyEnv);
-    const lastErr = await runJobAttempts(ctx, job, model, prompt, input, adapter, built, maxAttempts);
+      const maxAttempts = km.attemptBudget(model.keyEnv);
+      const lastErr = await runJobAttempts(ctx, job, model, prompt, input, adapter, built, maxAttempts);
 
-    if (job.status !== "ok" && job.status !== "cancelled" && job.status !== "skipped") {
-      job.status = "error";
-      job.error = lastErr || "failed";
+      if (job.status !== "ok" && job.status !== "cancelled" && job.status !== "skipped") {
+        job.status = "error";
+        job.error = lastErr || "failed";
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { writeJSON, asciiSlug, uniqueSlugId, normalizeSelectionIds, type SelectionInput } from "../util";
+import { asciiSlug, uniqueSlugId, normalizeSelectionIds, type SelectionInput } from "../util";
 import {
   MODELS_FILE,
   jsonCache,
@@ -7,6 +7,8 @@ import {
   MODEL_PROVIDERS,
   OPENAI_FAMILY,
   readConfig,
+  withConfigLock,
+  writeConfigJSONIfChanged,
   providerDefault,
 } from "./shared";
 
@@ -56,7 +58,7 @@ function loadArchivedModels(): Model[] {
 }
 
 function writeModelsData(data: ModelsFileData): void {
-  writeJSON(MODELS_FILE, data);
+  withConfigLock(() => writeConfigJSONIfChanged(MODELS_FILE, data));
   const st = fs.statSync(MODELS_FILE);
   jsonCache.set(MODELS_FILE, {
     mtimeMs: st.mtimeMs,
@@ -203,7 +205,7 @@ function normalizeModelInput(input: ModelInput = {}, existing: Model | null = nu
   };
 }
 
-function saveModel(input: ModelInput = {}): Model {
+function saveModelUnlocked(input: ModelInput = {}): Model {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const models = Array.isArray(data.models) ? [...data.models] : [];
   const archive = Array.isArray(data[MODEL_ARCHIVE_KEY]) ? [...(data[MODEL_ARCHIVE_KEY] as Model[])] : [];
@@ -227,7 +229,7 @@ function saveModel(input: ModelInput = {}): Model {
   return nextModel;
 }
 
-function deleteModel(id: string): string {
+function deleteModelUnlocked(id: string): string {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const modelId = String(id || "").trim();
   if (!modelId) throw statusError("id is required", 400);
@@ -243,7 +245,7 @@ function deleteModel(id: string): string {
   return modelId;
 }
 
-function restoreModel(id: string): Model {
+function restoreModelUnlocked(id: string): Model {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const modelId = String(id || "").trim();
   if (!modelId) throw statusError("id is required", 400);
@@ -264,7 +266,7 @@ function restoreModel(id: string): Model {
 // Toggle the picker "starred" hint on an active model. Kept separate from
 // saveModel() so the client can star/unstar without re-validating the whole
 // model form (base url, tokens, etc.).
-function setModelStarred(id: string, starred: boolean): Model {
+function setModelStarredUnlocked(id: string, starred: boolean): Model {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const modelId = String(id || "").trim();
   if (!modelId) throw statusError("id is required", 400);
@@ -277,7 +279,7 @@ function setModelStarred(id: string, starred: boolean): Model {
   return next;
 }
 
-function reorderModels(orderedIds: unknown): Model[] {
+function reorderModelsUnlocked(orderedIds: unknown): Model[] {
   const data = readConfig<ModelsFileData>(MODELS_FILE, { models: [] });
   const models = Array.isArray(data.models) ? data.models : [];
   const ids = (Array.isArray(orderedIds) ? orderedIds : []).map(String);
@@ -291,6 +293,12 @@ function reorderModels(orderedIds: unknown): Model[] {
   writeModelsData({ ...data, models: nextModels });
   return nextModels.filter((m) => m?.id);
 }
+
+function saveModel(input: ModelInput = {}): Model { return withConfigLock(() => saveModelUnlocked(input)) as Model; }
+function deleteModel(id: string): string { return withConfigLock(() => deleteModelUnlocked(id)) as string; }
+function restoreModel(id: string): Model { return withConfigLock(() => restoreModelUnlocked(id)) as Model; }
+function setModelStarred(id: string, starred: boolean): Model { return withConfigLock(() => setModelStarredUnlocked(id, starred)) as Model; }
+function reorderModels(orderedIds: unknown): Model[] { return withConfigLock(() => reorderModelsUnlocked(orderedIds)) as Model[]; }
 
 export {
   loadModels,

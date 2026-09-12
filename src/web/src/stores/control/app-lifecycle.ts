@@ -20,7 +20,9 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
   // silently revert a selection the user made after the newer response already landed —
   // same fix as refreshCostEstimate()'s estimateSeq in ./runs.ts, mirrored here.
   let bootstrapSeq = 0;
+  let bootstrapped = false;
   async function bootstrap() {
+    if (bootstrapped) return;
     const seq = ++bootstrapSeq;
     try {
       const data = await api.bootstrap();
@@ -72,6 +74,7 @@ export function createAppLifecycleActions(state: ControlState, deps: AppLifecycl
       state.runs.value = data.runs || [];
       state.spend.value = data.spend || null;
       state.providerDefaults.value = data.providerDefaults || {};
+      bootstrapped = true;
       // The server keeps generating with the tab closed; pick those runs back up.
       void deps.resumeRuns();
       void deps.checkForUpdate();

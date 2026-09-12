@@ -161,4 +161,67 @@ describe("withKeyRotation + KeyManager.availableCount/attemptBudget", () => {
       delete process.env[POOL];
     }
   });
+
+  it("leases a physical key across pools until its outcome is reported", () => {
+    const A = "TESTPOOL_SHARED_A";
+    const B = "TESTPOOL_SHARED_B";
+    process.env[A] = "shared";
+    process.env[B] = "shared";
+    try {
+      const km = new KeyManager({ stateFile: `${tmpState}.i` });
+      const first = km.acquire(A);
+      expect(first.available).toBe(true);
+      expect(km.acquire(B).available).toBe(false);
+      km.report(A, first.keyId as string, { errorClass: CLASS.RATE_LIMIT });
+      expect(km.acquire(B).available).toBe(false);
+    } finally {
+      delete process.env[A];
+      delete process.env[B];
+    }
+  });
+
+  it("waits for a held healthy key beyond cooldown wait budget", async () => {
+    const POOL = "TESTPOOL_HELD_WAIT";
+    process.env[POOL] = "held";
+    try {
+      const km = new KeyManager({ stateFile: `${tmpState}.j` });
+      const first = km.acquire(POOL);
+      const waiting = km.acquireOrWait(POOL, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      km.report(POOL, first.keyId as string, { leaseId: first.leaseId });
+      const second = await waiting;
+      expect(second.available).toBe(true);
+      km.release(POOL, second.keyId, second.leaseId);
+    } finally { delete process.env[POOL]; }
+  });
+
+  it("ignores a stale report so health cannot unlock a newer generation lease", () => {
+    const POOL = "TESTPOOL_STALE_LEASE";
+    process.env[POOL] = "lease";
+    try {
+      const km = new KeyManager({ stateFile: `${tmpState}.k` });
+      const first = km.acquire(POOL);
+      km.release(POOL, first.keyId, first.leaseId);
+      const current = km.acquire(POOL);
+      km.report(POOL, current.keyId as string, { leaseId: first.leaseId, errorClass: CLASS.OK });
+      expect(km.acquire(POOL).reason).toBe("busy");
+      km.release(POOL, current.keyId, current.leaseId);
+    } finally { delete process.env[POOL]; }
+  });
+
+  it("specific health leases wait for a generation lease and cannot release it", async () => {
+    const POOL = "TESTPOOL_HEALTH_OVERLAP";
+    process.env[POOL] = "probe";
+    try {
+      const km = new KeyManager({ stateFile: `${tmpState}.l` });
+      const generation = km.acquire(POOL);
+      const health = km.acquireSpecificOrWait(POOL, generation.keyId as string, 1);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(km.acquire(POOL).reason).toBe("busy");
+      km.report(POOL, generation.keyId as string, { leaseId: generation.leaseId });
+      const probe = await health;
+      expect(probe.available).toBe(true);
+      km.report(POOL, probe.keyId as string, { leaseId: probe.leaseId });
+    } finally { delete process.env[POOL]; }
+  });
 });

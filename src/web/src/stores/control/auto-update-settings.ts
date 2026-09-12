@@ -1,5 +1,4 @@
-import { ref } from 'vue';
-import { api } from '@/lib/api';
+import type { SettingsStore } from './settings-store';
 
 /**
  * Auto-update settings (see src/auto-update.ts): a daemon-wide timer that checks the update
@@ -13,64 +12,28 @@ import { api } from '@/lib/api';
  * Also carries the running build's version, which rides along on the same GET /api/settings
  * payload and is displayed next to the update controls (Settings ▸ General ▸ Updates).
  */
-export function createAutoUpdateSettingsActions() {
-  const autoUpdateEnabled = ref(false);
-  const updateNotifyEnabled = ref(true);
-  const autoUpdateLoading = ref(false); // initial load + either toggle in flight
-  const appVersion = ref('');
+export function createAutoUpdateSettingsActions(settings: SettingsStore) {
 
   /** Load both settings (call on mount). Best-effort, leaves the defaults on failure. */
   async function loadAutoUpdateSetting(): Promise<void> {
-    autoUpdateLoading.value = true;
-    try {
-      const s = await api.getSettings();
-      autoUpdateEnabled.value = s.autoUpdate;
-      updateNotifyEnabled.value = s.updateNotify;
-      appVersion.value = s.version || '';
-    } catch {
-      /* non-critical, leave the defaults */
-    } finally {
-      autoUpdateLoading.value = false;
-    }
+    await settings.loadSettings();
   }
 
   /** Toggle silent auto-apply (optimistic; rolls back on failure). */
   async function setAutoUpdate(enabled: boolean): Promise<void> {
-    const prev = autoUpdateEnabled.value;
-    autoUpdateEnabled.value = enabled;
-    autoUpdateLoading.value = true;
-    try {
-      const s = await api.setAutoUpdate(enabled);
-      autoUpdateEnabled.value = s.autoUpdate;
-    } catch (e) {
-      autoUpdateEnabled.value = prev; // roll back
-      throw e;
-    } finally {
-      autoUpdateLoading.value = false;
-    }
+    await settings.updateSettings({ autoUpdate: enabled });
   }
 
   /** Toggle "tell me about updates" (optimistic; rolls back on failure). */
   async function setUpdateNotify(enabled: boolean): Promise<void> {
-    const prev = updateNotifyEnabled.value;
-    updateNotifyEnabled.value = enabled;
-    autoUpdateLoading.value = true;
-    try {
-      const s = await api.setUpdateNotify(enabled);
-      updateNotifyEnabled.value = s.updateNotify;
-    } catch (e) {
-      updateNotifyEnabled.value = prev; // roll back
-      throw e;
-    } finally {
-      autoUpdateLoading.value = false;
-    }
+    await settings.updateSettings({ updateNotify: enabled });
   }
 
   return {
-    autoUpdateEnabled,
-    updateNotifyEnabled,
-    autoUpdateLoading,
-    appVersion,
+    autoUpdateEnabled: settings.autoUpdateEnabled,
+    updateNotifyEnabled: settings.updateNotifyEnabled,
+    autoUpdateLoading: settings.settingsLoading,
+    appVersion: settings.appVersion,
     loadAutoUpdateSetting,
     setAutoUpdate,
     setUpdateNotify,

@@ -17,9 +17,8 @@
 #     refuse to host rather than silently adopting it (the other family members 'attach').
 #   - Mutex: hashed per-checkout Local\redesign.tray.<sha16> (computed below) so a second
 #     checkout of this repo on the same machine gets its own tray host.
-#   - RebuildCommand: a resolver scriptblock — misc\Rebuild.bat first (it skips `npm
-#     install` on every rebuild since node_modules is already present), else `npm run
-#     build`.
+#   - RebuildCommand: a resolver scriptblock — misc\rebuild_redesign.bat first (repairs locked
+#     dependency links and builds the web UI), else `npm run build`.
 #   - RestartRetries 1 / UsePortFreeWait $true: one extra restart attempt after a failed
 #     bind, waiting for the port to actually free first (Windows can hold the socket a
 #     moment after a force-kill).
@@ -41,14 +40,14 @@ try {
   $sha.Dispose()
 }
 
-# "Rebuild & Restart" command resolver: a standalone misc\Rebuild.bat if present (it skips
-# `npm install` on every rebuild since node_modules is already there), else `npm run build`
+# "Rebuild & Restart" command resolver: a standalone misc\rebuild_redesign.bat if present (it repairs
+# dependency links before building), else `npm run build`
 # when package.json declares a build script, else $null (no rebuild support). Passed to the
 # engine as-is (a scriptblock(appRoot, scriptDir) resolver); also reused directly below for
 # the first-run bootstrap.
 $RebuildResolver = {
   param($appRoot, $appScriptDir)
-  $rebuildBat = Join-Path $appScriptDir "Rebuild.bat"
+  $rebuildBat = Join-Path $appScriptDir "rebuild_redesign.bat"
   if (Test-Path $rebuildBat) { return "`"$rebuildBat`"" }
   $packageJson = Join-Path $appRoot "package.json"
   if (Test-Path $packageJson) {
@@ -93,7 +92,7 @@ $TrayConfig = @{
   FirstRun             = $FirstRunBootstrap
   RebuildCommand       = $RebuildResolver
   RebuildLogName       = "ReDesign-Rebuild.log"
-  # "Rebuild & Restart" only shows when REDESIGN_DEV=1 (public users rebuild via misc\Rebuild.bat).
+  # "Rebuild & Restart" only shows when REDESIGN_DEV=1 (public users rebuild via misc\rebuild_redesign.bat).
   IsDevTree            = ($env:REDESIGN_DEV -eq "1")
   SentinelFile         = Join-Path $rdHome "shutdown.request"
   OnStrayDaemon        = "warn"

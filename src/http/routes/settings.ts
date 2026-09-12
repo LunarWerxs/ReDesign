@@ -11,22 +11,15 @@
  */
 import { dirname, join } from "node:path";
 import type { Hono } from "hono";
-import type { Deps } from "../deps";
-import { requireSameOrigin, PORT, HOST } from "../origin-guard";
-import { ROOT, readJSON } from "../../util";
-import * as store from "../../store";
-import { loadAppSettings, saveAppSettings } from "../../app-settings";
-import { readInstanceInfo, updateInstanceInfo, instanceFilePath } from "../../instance";
+import { applyAppSettings, loadAppSettings } from "../../app-settings";
+import { autoUpdateEnabled, getAutoUpdateIntervalSecs, updateNotifyEnabled } from "../../auto-update";
+import { instanceFilePath, readInstanceInfo } from "../../instance";
 import { openPortableWindow } from "../../portable-window.mjs";
+import * as store from "../../store";
+import { ROOT, readJSON } from "../../util";
 import { WINDOW_SIZE_HINT_PARAM, windowSizeHintFor } from "../../window-size";
-import {
-  autoUpdateEnabled,
-  updateNotifyEnabled,
-  getAutoUpdateIntervalSecs,
-  setAutoUpdateEnabled,
-  setUpdateNotifyEnabled,
-  setAutoUpdateIntervalSecs,
-} from "../../auto-update";
+import type { Deps } from "../deps";
+import { HOST, PORT, requireSameOrigin } from "../origin-guard";
 
 /**
  * First-run outer size of the portable app window (what Chromium's `--window-size` takes).
@@ -75,57 +68,20 @@ function snapshot() {
     // 0 = keep every run forever (the default). The sweep itself runs once at boot, see
     // http/serve.ts, so changing this takes effect on the next start rather than immediately.
     outputRetentionDays: loadAppSettings().outputRetentionDays ?? 0,
-    // Walks output/, so it is computed on demand rather than on every settings read.
-    outputBytes: store.outputBytes(),
   };
 }
 
 export function register(app: Hono, _deps: Deps): void {
   app.get("/api/settings", (c) => c.json({ ok: true, ...snapshot() }));
 
+  // Disk accounting is deliberately isolated from ordinary preference reads and writes. The
+  // retention store caches/coalesces the expensive walk, so opening the visible storage pane is
+  // the only settings action that can request it.
+  app.get("/api/settings/storage", async (c) => c.json({ ok: true, outputBytes: await store.cachedOutputBytes() }));
+
   app.put("/api/settings", requireSameOrigin(), async (c) => {
     const b = ((await c.req.json().catch(() => ({}))) || {}) as Record<string, unknown>;
-    const settings = loadAppSettings();
-
-    // Toggling either of these starts/stops the daemon-wide auto-update timer (see
-    // auto-update.ts): the timer runs whenever EITHER is on, so turning one off while the other
-    // stays on leaves the check itself running.
-    if (typeof b.autoUpdate === "boolean") {
-      settings.autoUpdate = b.autoUpdate;
-      setAutoUpdateEnabled(b.autoUpdate);
-      saveAppSettings(settings);
-    }
-    if (typeof b.updateNotify === "boolean") {
-      settings.updateNotify = b.updateNotify;
-      setUpdateNotifyEnabled(b.updateNotify);
-      saveAppSettings(settings);
-    }
-    if (typeof b.autoUpdateIntervalSecs === "number" && Number.isFinite(b.autoUpdateIntervalSecs)) {
-      // setAutoUpdateIntervalSecs clamps to [900, 604800], persist the clamped value, not the raw input.
-      settings.autoUpdateIntervalSecs = setAutoUpdateIntervalSecs(b.autoUpdateIntervalSecs);
-      saveAppSettings(settings);
-    }
-    if (typeof b.portableMode === "boolean") {
-      settings.portableMode = b.portableMode;
-      saveAppSettings(settings);
-      // Keep runtime.json current so the tray/start.cmd launcher picks up the change on its
-      // next open, without waiting for a daemon restart (see src/instance.ts / instance-pointer.mjs).
-      updateInstanceInfo({ portableMode: b.portableMode });
-    }
-    // Retention deletes the user's saved runs, so only an explicit finite number sets it and
-    // anything out of range is clamped rather than rejected; 0 (or negative) means keep forever.
-    if (typeof b.outputRetentionDays === "number" && Number.isFinite(b.outputRetentionDays)) {
-      const days = Math.floor(b.outputRetentionDays);
-      settings.outputRetentionDays = days > 0 ? Math.min(3650, Math.max(1, days)) : 0;
-      saveAppSettings(settings);
-    }
-    if (typeof b.hideTrayIcon === "boolean") {
-      settings.hideTrayIcon = b.hideTrayIcon;
-      saveAppSettings(settings);
-      // Keep runtime.json current so the tray host's live-sync timer (misc/ReDesign-Tray.ps1)
-      // picks up the change within a few seconds, without restarting anything.
-      updateInstanceInfo({ hideTrayIcon: b.hideTrayIcon });
-    }
+    applyAppSettings(b);
 
     return c.json({ ok: true, ...snapshot() });
   });

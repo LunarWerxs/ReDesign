@@ -40,9 +40,9 @@
   "compiledExe": "redesign.exe",
   "startCommandCompiled": "\"{COMPILED}\" serve",
 
-  "firstRun": [{ "missing": "src\\web\\dist\\index.html", "run": "misc\\Rebuild.bat" }],
+  "firstRun": [{ "missing": "src\\web\\dist\\index.html", "run": "misc\\rebuild_redesign.bat" }],
 
-  "rebuildCommand": "misc\\Rebuild.bat",
+  "rebuildCommand": "misc\\rebuild_redesign.bat",
   "rebuildLogName": "ReDesign-Rebuild.log",
   "isDevTree": "%REDESIGN_DEV%",
 

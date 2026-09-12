@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID, createHash } from "node:crypto";
+import { APP_CONFIG_DIR, readJSON, writeJSON } from "../util";
+import { mergeShippedRecords } from "./migration";
+import legacyShipped from "./legacy-shipped.json";
 import modelsSeed from "./models.json";
 import pricingSeed from "./pricing.json";
-import promptsSeed from "./prompts.json";
 import promptDefaultsSeed from "./prompts.defaults.json";
-import { APP_CONFIG_DIR, readJSON } from "../util";
+import promptsSeed from "./prompts.json";
 
 // ONE live config location, packaged or from source: <REDESIGN_HOME|~/.redesign>/config.
 //
@@ -19,15 +22,129 @@ const MODELS_FILE = path.join(CONFIG_ROOT, "models.json");
 const PROMPTS_FILE = path.join(CONFIG_ROOT, "prompts.json");
 const PROMPTS_DEFAULTS_FILE = path.join(CONFIG_ROOT, "prompts.defaults.json");
 const PRICING_FILE = path.join(CONFIG_ROOT, "pricing.json");
+const SHIPPED_BASELINE_FILE = path.join(CONFIG_ROOT, ".reimagine-shipped-baseline.json");
 
 fs.mkdirSync(CONFIG_ROOT, { recursive: true });
-for (const [file, seed] of [
-  [MODELS_FILE, modelsSeed],
-  [PROMPTS_FILE, promptsSeed],
-  [PROMPTS_DEFAULTS_FILE, promptDefaultsSeed],
-] as const) {
-  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
+
+type ShippedRecord = { id?: unknown; [key: string]: unknown };
+type ShippedBaseline = {
+  version: 1;
+  revision: string;
+  models: ShippedRecord[];
+  prompts: ShippedRecord[];
+  systemContract?: string;
+};
+
+const CONFIG_LOCK_FILE = path.join(CONFIG_ROOT, ".reimagine-config.lock");
+let configLockDepth = 0;
+function withConfigLock<T>(work: () => T): T {
+  if (configLockDepth) {
+    configLockDepth += 1;
+    try { return work(); } finally { configLockDepth -= 1; }
+  }
+  let fd: number | undefined;
+  const token = randomUUID();
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 2_000;
+  while (fd === undefined && Date.now() < deadline) {
+    try {
+      fd = fs.openSync(CONFIG_LOCK_FILE, "wx", 0o600);
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { pid?: number };
+        if (Number.isInteger(owner.pid) && (owner.pid || 0) > 0) {
+          try { process.kill(owner.pid as number, 0); } catch (probe) {
+            if ((probe as NodeJS.ErrnoException).code === "ESRCH") fs.rmSync(CONFIG_LOCK_FILE, { force: true });
+          }
+        }
+      } catch { /* lock owner may have released it */ }
+      Atomics.wait(pause, 0, 0, 20);
+    }
+  }
+  if (fd === undefined) throw Object.assign(new Error("Configuration is busy in another process; retry the change."), { status: 409 });
+  configLockDepth = 1;
+  try { return work(); }
+  finally {
+    configLockDepth = 0;
+    try {
+      fs.closeSync(fd);
+      const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { token?: string };
+      if (owner.token === token) fs.rmSync(CONFIG_LOCK_FILE, { force: true });
+    } catch { /* best effort */ }
+  }
 }
+function jsonText(data: unknown): string { return `${JSON.stringify(data, null, 2)}\n`; }
+function writeConfigJSONIfChanged(file: string, data: unknown): boolean {
+  const next = jsonText(data);
+  if (fs.existsSync(file) && fs.readFileSync(file, "utf8") === next) return false;
+  writeJSON(file, data);
+  return true;
+}
+
+function records(value: unknown): ShippedRecord[] {
+  return Array.isArray(value) ? value.filter((item): item is ShippedRecord => !!item && typeof item === "object") : [];
+}
+
+/** Refresh shipped definitions while preserving edits and explicit model archives. */
+function migrateShippedConfig(): void {
+  try { withConfigLock(() => migrateShippedConfigLocked()); } catch (error) {
+    // A reader may use the last valid files while a different process is migrating.
+    // Mutations call withConfigLock directly and return an explicit conflict on timeout.
+    if (!fs.existsSync(MODELS_FILE) || !fs.existsSync(PROMPTS_FILE)) throw error;
+  }
+}
+function migrateShippedConfigLocked(): void {
+  const hadModels = fs.existsSync(MODELS_FILE);
+  const hadPrompts = fs.existsSync(PROMPTS_FILE);
+  const baseline = readJSON<ShippedBaseline | null>(SHIPPED_BASELINE_FILE, null);
+  const modelsData = readJSON<Record<string, unknown>>(MODELS_FILE, { models: modelsSeed.models });
+  const promptsData = readJSON<Record<string, unknown>>(PROMPTS_FILE, promptsSeed as Record<string, unknown>);
+  const seedModels = records((modelsSeed as { models?: unknown }).models);
+  const seedPrompts = records((promptsSeed as { prompts?: unknown }).prompts);
+  const systemContract = (promptsSeed as { systemContract?: unknown }).systemContract;
+  const revision = createHash("sha256").update(JSON.stringify({ modelsSeed, promptsSeed, promptDefaultsSeed })).digest("hex");
+  const nextBaseline: ShippedBaseline = { version: 1, revision, models: seedModels, prompts: seedPrompts, ...(typeof systemContract === "string" ? { systemContract } : {}) };
+  if (hadModels && hadPrompts && fs.existsSync(PROMPTS_DEFAULTS_FILE) && baseline?.version === 1 && baseline.revision === nextBaseline.revision) return;
+
+  if (baseline?.version === 1) {
+    const archive = records(modelsData.modelArchive);
+    modelsData.models = mergeShippedRecords(records(modelsData.models), baseline.models, seedModels, archive.map((m) => String(m.id || "")));
+    const currentPrompts = records(promptsData.prompts);
+    promptsData.prompts = mergeShippedRecords(currentPrompts, baseline.prompts, seedPrompts, baseline.prompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
+    if (baseline.systemContract !== undefined && promptsData.systemContract === baseline.systemContract) {
+      promptsData.systemContract = (promptsSeed as { systemContract?: unknown }).systemContract;
+    }
+  } else if (hadModels || hadPrompts) {
+    // Profiles created by the immediately preceding 1.6.6 build have no baseline file. Its
+    // tracked catalog is embedded here so exact old shipped records receive corrections while
+    // edits, explicit prompt deletions and archived models remain untouched.
+    const legacyModels = records((legacyShipped.models as { models?: unknown }).models);
+    const legacyPrompts = records((legacyShipped.prompts as { prompts?: unknown }).prompts);
+    const archive = records(modelsData.modelArchive);
+    modelsData.models = mergeShippedRecords(records(modelsData.models), legacyModels, seedModels, archive.map((m) => String(m.id || "")));
+    const currentPrompts = records(promptsData.prompts);
+    promptsData.prompts = mergeShippedRecords(currentPrompts, legacyPrompts, seedPrompts, legacyPrompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
+    if (promptsData.systemContract === legacyShipped.prompts.systemContract) promptsData.systemContract = systemContract;
+  } else {
+    // A fresh profile gets exact shipped content. Existing pre-baseline profiles are deliberately
+    // left alone on this first bootstrap: guessing whether an absent item was deleted loses data.
+    modelsData.models = seedModels;
+    Object.assign(promptsData, promptsSeed);
+  }
+  try {
+    writeConfigJSONIfChanged(MODELS_FILE, modelsData);
+    writeConfigJSONIfChanged(PROMPTS_FILE, promptsData);
+    // Defaults are immutable restore source, not a user-editable catalog: always refresh them.
+    writeConfigJSONIfChanged(PROMPTS_DEFAULTS_FILE, promptDefaultsSeed);
+    writeConfigJSONIfChanged(SHIPPED_BASELINE_FILE, nextBaseline);
+  } catch (_) {
+    /* read-only profiles keep their existing usable files */
+  }
+}
+
+migrateShippedConfig();
 
 // pricing.json is the one seed with no user-editable path: nothing in the UI, the CLI or the API
 // writes it (scripts/update-pricing.ts refreshes the SEED in the repo, which then ships inside the
@@ -194,18 +311,20 @@ function providerDefault(provider: string, key: keyof ProviderDefaults): string 
   return PROVIDER_DEFAULTS[provider]?.[key] || "";
 }
 
+export type { JsonCacheEntry, ProviderDefaults };
 export {
-  MODELS_FILE,
-  PROMPTS_FILE,
-  PROMPTS_DEFAULTS_FILE,
-  PRICING_FILE,
   jsonCache,
   MODEL_ARCHIVE_KEY,
   MODEL_PROVIDERS,
+  MODELS_FILE,
   OPENAI_FAMILY,
-  PROVIDER_LABELS,
+  PRICING_FILE,
+  PROMPTS_DEFAULTS_FILE,
+  PROMPTS_FILE,
   PROVIDER_DEFAULTS,
-  readConfig,
+  PROVIDER_LABELS,
   providerDefault,
+  withConfigLock,
+  writeConfigJSONIfChanged,
+  readConfig,
 };
-export type { ProviderDefaults, JsonCacheEntry };

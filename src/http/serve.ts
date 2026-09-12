@@ -20,21 +20,22 @@
  * setting process.env.PORT before this module's PORT/HOST consts are read. Also still runnable
  * directly (`bun src/http/serve.ts`) via the entry-module guard.
  */
+
 import { dirname } from "node:path";
 import pkg from "../../package.json";
-import { materializeTrayToolkit, startTrayHostIfMissing } from "../tray-bootstrap.mjs";
-import { APP_CONFIG_DIR, C, IS_PACKAGED, ROOT } from "../util";
+import { loadAppSettings } from "../app-settings";
+import { stopAutoUpdate } from "../auto-update";
 import { loadModels } from "../config";
+import * as connections from "../connections";
+import { findFreePort } from "../find-free-port.mjs";
+import { clearInstanceInfo, clearShutdownRequest, writeInstanceInfo } from "../instance";
 import { getKeyManager } from "../runner";
 import * as store from "../store";
-import { ORPHANED_RUN_MESSAGE } from "./runQueue";
+import { materializeTrayToolkit, startTrayHostIfMissing } from "../tray-bootstrap.mjs";
+import { APP_CONFIG_DIR, C, IS_PACKAGED, ROOT } from "../util";
 import { createApp } from "./app";
+import { ORPHANED_RUN_MESSAGE, recoverQueuedRuns, runStoreOptions } from "./runQueue";
 import { webUiAvailable } from "./web";
-import * as connections from "../connections";
-import { stopAutoUpdate } from "../auto-update";
-import { findFreePort } from "../find-free-port.mjs";
-import { writeInstanceInfo, clearInstanceInfo, clearShutdownRequest } from "../instance";
-import { loadAppSettings } from "../app-settings";
 
 const PORT = Number.parseInt(process.env.PORT || "", 10) || 5178;
 const HOST = process.env.HOST || "127.0.0.1";
@@ -183,7 +184,8 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
   clearShutdownRequest();
   process.on("exit", cleanupInstance);
 
-  const settled = store.settleStaleRuns({ staleAfterMs: 0, reason: ORPHANED_RUN_MESSAGE }).settled;
+  const recovered = recoverQueuedRuns();
+  const settled = store.settleStaleRuns({ staleAfterMs: 0, reason: ORPHANED_RUN_MESSAGE, reconcile: true, ...runStoreOptions() }).settled;
 
   // Opt-in retention sweep, once per boot and never on a timer: output/ otherwise grows forever
   // (a run is only ever removed by the user deleting it). Off unless outputRetentionDays is set.
@@ -218,6 +220,7 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
   if (settled.length) {
     console.log(C.dim(`  ▸ finalized ${settled.length} interrupted run${settled.length === 1 ? "" : "s"}\n`));
   }
+  if (recovered) console.log(C.dim(`  ▸ restored ${recovered} queued run${recovered === 1 ? "" : "s"} (held)\n`));
   if (!webUiAvailable()) {
     console.log(C.dim("  ⚠ Web UI not built, run ") + C.cyan("npm run build") + C.dim(" (dev: npm run dev:web)\n"));
   }
@@ -231,4 +234,4 @@ async function startServer(): Promise<ReturnType<typeof Bun.serve>> {
 // `bun src/http/serve.ts` runs this directly (mirrors server.js's `require.main === module` guard).
 if (import.meta.main) void startServer();
 
-export { startServer, shutdown, PORT, HOST };
+export { HOST, PORT, shutdown, startServer };

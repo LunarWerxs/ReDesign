@@ -3,7 +3,7 @@
 // popover so they can live as sections inside the combined Settings sidebar.
 import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { ChevronDownIcon, DownloadIcon, RefreshCwIcon } from '@lucide/vue';
+import { ChevronDownIcon, DownloadIcon, RefreshCwIcon, RotateCcwIcon } from '@lucide/vue';
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
@@ -172,8 +172,10 @@ const hasRetryableJobs = computed(() =>
   ),
 );
 const hasSuccessfulOutputs = computed(() => (store.manifest?.counts?.ok ?? 0) > 0);
+const canRepeatOriginal = computed(() => store.manifest?.specVersion === 1);
 const downloadAllUrl = computed(() => (store.runId ? runDownloadUrl(store.runId) : ''));
 const retryingAll = ref(false);
+const repeatingOriginal = ref(false);
 
 async function retryFailed() {
   if (retryingAll.value) return;
@@ -184,6 +186,23 @@ async function retryFailed() {
     if (target) router.push({ path: '/viewer', query: { run: target } });
   } finally {
     retryingAll.value = false;
+  }
+}
+
+async function repeatOriginal() {
+  if (repeatingOriginal.value) return;
+  repeatingOriginal.value = true;
+  try {
+    const nextRunId = await store.repeatOriginal();
+    // Exact repeats are deliberately held. Moving to the control page makes the pending queue
+    // visible and gives the owner the existing Run queue button to release it. Control may
+    // already be initialized, so register it before navigation instead of relying on bootstrap.
+    if (nextRunId) {
+      await controlStore.adoptHeldRun(nextRunId);
+      await router.push('/');
+    }
+  } finally {
+    repeatingOriginal.value = false;
   }
 }
 const flyoutTitle = computed(() => (runsFlyoutMode.value === 'switch' ? t('viewSettings.switchRun') : t('viewSettings.recentRuns')));
@@ -293,10 +312,21 @@ function selectCustomInput(event: FocusEvent) {
     </section>
 
     <!-- Actions: run-level retry / download, only meaningful with a run actually open -->
-    <section v-if="store.runId && (hasRetryableJobs || hasSuccessfulOutputs)" class="py-1">
+    <section v-if="store.runId && (hasRetryableJobs || hasSuccessfulOutputs || canRepeatOriginal)" class="py-1">
       <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {{ t('viewSettings.actionsSection') }}
       </p>
+      <button
+        v-if="canRepeatOriginal"
+        type="button"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        :disabled="store.isLive || repeatingOriginal"
+        :title="store.isLive ? t('viewer.repeatOriginalWaitTitle') : t('viewer.repeatOriginalTitle')"
+        @click="repeatOriginal"
+      >
+        <span class="text-[13px] text-muted-foreground">{{ t('viewer.repeatOriginal') }}</span>
+        <RotateCcwIcon class="size-3.5 shrink-0 text-muted-foreground/60" :class="repeatingOriginal ? 'animate-spin' : ''" />
+      </button>
       <button
         v-if="hasRetryableJobs"
         type="button"

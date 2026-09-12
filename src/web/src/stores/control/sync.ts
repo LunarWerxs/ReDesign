@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { bindSignInNudgeStatus, nudgeOnSettingsChange } from '@/lib/sign-in-nudge';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import type { SyncStatus } from '@/types';
+import type { SettingsStore } from './settings-store';
 
 /**
  * "Sync my settings with Connections", opt-in cloud sync of Reimagine's one portable
@@ -15,7 +16,7 @@ import type { SyncStatus } from '@/types';
  * Call INSIDE the control Pinia store and spread the returned refs/functions into its
  * `return {}}`, mirroring how `useSelfUpdate` is composed there.
  */
-export function createSyncActions() {
+export function createSyncActions(settings?: SettingsStore) {
   const { mode: themeMode, setTheme } = useTheme();
 
   const syncStatus = ref<SyncStatus | null>(null);
@@ -93,6 +94,9 @@ export function createSyncActions() {
     syncActionBusy.value = true;
     try {
       absorbSyncStatus(await api.syncPull());
+      // Remote preferences apply at the daemon too; refresh every settings consumer from its
+      // authoritative resulting snapshot without a browser-side echo.
+      await settings?.loadSettings(true);
     } finally {
       syncActionBusy.value = false;
     }

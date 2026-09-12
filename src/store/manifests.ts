@@ -1,7 +1,6 @@
 /**
- * Reading and writing manifest.json, and the run listing built on top of it. Every path in
- * here runs a manifest through the stale check on the way out, so no caller can observe a
- * run that has been dead for a day still claiming to be running.
+ * Reading and writing manifest.json and its lightweight paginated history. Ordinary reads
+ * are non-mutating; explicit maintenance reconciliation settles unowned interrupted runs.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -42,7 +41,7 @@ function readManifest(runId: string, options: ReadManifestOptions = {}): Manifes
   return maybeSettleStaleManifest(runId, mp, manifest, st, normalizeStaleOptions(options)).manifest;
 }
 
-function readRunSummary(name: string, mp: string, opts: NormalizedStaleOptions): RunSummary | null {
+function readRunSummary(name: string, mp: string, opts: NormalizedStaleOptions, cacheIfRoom = false): RunSummary | null {
   let st: fs.Stats;
   try {
     st = fs.statSync(mp);
@@ -65,9 +64,9 @@ function readRunSummary(name: string, mp: string, opts: NormalizedStaleOptions):
   const summary = summarizeManifest(settled, name);
   try {
     const nextStat = fs.statSync(mp);
-    cacheRunSummary(mp, { mtimeMs: nextStat.mtimeMs, size: nextStat.size, summary });
+    cacheRunSummary(mp, { mtimeMs: nextStat.mtimeMs, size: nextStat.size, summary }, { ifRoom: cacheIfRoom });
   } catch (_) {
-    cacheRunSummary(mp, { mtimeMs: st.mtimeMs, size: st.size, summary });
+    cacheRunSummary(mp, { mtimeMs: st.mtimeMs, size: st.size, summary }, { ifRoom: cacheIfRoom });
   }
   return summary;
 }
@@ -77,12 +76,41 @@ function listRuns(options: ReadManifestOptions = {}): RunSummary[] {
   if (!fs.existsSync(OUTPUT_DIR)) return [];
   const opts = normalizeStaleOptions(options);
   const out: RunSummary[] = [];
-  for (const name of fs.readdirSync(OUTPUT_DIR)) {
+  for (const name of fs.readdirSync(OUTPUT_DIR).sort((a, b) => b.localeCompare(a))) {
     const mp = path.join(OUTPUT_DIR, name, "manifest.json");
-    const summary = readRunSummary(name, mp, opts);
+    const summary = readRunSummary(name, mp, opts, true);
     if (summary) out.push(summary);
   }
   return out.sort((a, b) => String(b.runId).localeCompare(String(a.runId)));
+}
+
+export interface RunPage { runs: RunSummary[]; nextCursor: string | null; }
+/**
+ * History reader for the UI: inspect only one bounded page of manifests. Cursor is the last
+ * returned directory name (run ids are sortable timestamps), never an offset that can drift
+ * when a new run arrives. The legacy listRuns remains for maintenance callers that truly need
+ * all history.
+ */
+function listRunsPage({ cursor, limit = 50, options = {} }: { cursor?: string | null; limit?: number; options?: ReadManifestOptions } = {}): RunPage {
+  if (!fs.existsSync(OUTPUT_DIR)) return { runs: [], nextCursor: null };
+  const max = Math.max(1, Math.min(200, Math.floor(limit) || 50));
+  const names = fs.readdirSync(OUTPUT_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => entry.name)
+    .sort((a, b) => b.localeCompare(a));
+  const start = cursor ? names.findIndex((name) => name.localeCompare(cursor) < 0) : 0;
+  if (start < 0) return { runs: [], nextCursor: null };
+  const opts = normalizeStaleOptions(options);
+  const runs: RunSummary[] = [];
+  let last: string | null = null;
+  for (let index = start; index < names.length && runs.length < max; index++) {
+    const name = names[index] as string;
+    last = name;
+    const summary = readRunSummary(name, path.join(OUTPUT_DIR, name, "manifest.json"), opts);
+    if (summary) runs.push(summary);
+  }
+  const hasMore = !!last && names.some((name) => name.localeCompare(last) < 0);
+  return { runs, nextCursor: hasMore ? last : null };
 }
 
 interface SettleStaleRunsResult {
@@ -92,7 +120,7 @@ interface SettleStaleRunsResult {
 
 function settleStaleRuns(options: ReadManifestOptions = {}): SettleStaleRunsResult {
   if (!fs.existsSync(OUTPUT_DIR)) return { settled: [], runs: [] };
-  const opts = normalizeStaleOptions(options);
+  const opts = normalizeStaleOptions({ ...options, reconcile: true });
   const settled: string[] = [];
   for (const name of fs.readdirSync(OUTPUT_DIR)) {
     const mp = path.join(OUTPUT_DIR, name, "manifest.json");
@@ -107,8 +135,8 @@ function settleStaleRuns(options: ReadManifestOptions = {}): SettleStaleRunsResu
     const result = maybeSettleStaleManifest(name, mp, manifest, st, opts);
     if (result.stale) settled.push(result.manifest.runId || name);
   }
-  return { settled, runs: listRuns(opts) };
+  return { settled, runs: listRuns({ ...opts, reconcile: true }) };
 }
 
-export { writeManifest, readManifest, listRuns, settleStaleRuns };
+export { writeManifest, readManifest, listRuns, listRunsPage, settleStaleRuns };
 export type { SettleStaleRunsResult };

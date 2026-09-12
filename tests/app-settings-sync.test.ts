@@ -10,18 +10,19 @@
  * trip: these assertions are about WHICH keys move, and a transport mock would only make that
  * harder to read.
  */
-import { test, expect, beforeEach, afterAll } from "bun:test";
+import { afterAll, beforeEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import {
-  SETTINGS_FILE,
-  SYNCED_PREF_KEYS,
-  NEVER_SYNCED_PREF_KEYS,
+  type AppSettings,
+  applyAppSettings,
   applySyncedPrefs,
   loadAppSettings,
+  NEVER_SYNCED_PREF_KEYS,
   readSyncedPrefs,
   resetAppSettingsCache,
+  SETTINGS_FILE,
+  SYNCED_PREF_KEYS,
   saveAppSettings,
-  type AppSettings,
 } from "../src/app-settings";
 
 // The settings file is the developer's real one — save it and put it back rather than leaving
@@ -62,6 +63,27 @@ test("the two lists partition AppSettings and never overlap", () => {
   expect(both).toEqual([]);
   const total = SYNCED_PREF_KEYS.length + NEVER_SYNCED_PREF_KEYS.length;
   expect(Object.keys(ALL).length).toBe(total);
+});
+
+test("a local transition persists validated preferences and schedules one outbound sync", () => {
+  let scheduled = 0;
+  applyAppSettings({ updateNotify: false, autoUpdateIntervalSecs: 1 }, {
+    onLocalChange: () => scheduled++,
+  });
+  expect(loadAppSettings().updateNotify).toBe(false);
+  expect(loadAppSettings().autoUpdateIntervalSecs).toBe(900);
+  expect(scheduled).toBe(1);
+});
+
+test("a remote transition validates values without scheduling an echo", () => {
+  let scheduled = 0;
+  applyAppSettings({ portableMode: true, autoUpdateIntervalSecs: "bad" }, {
+    source: "remote",
+    onLocalChange: () => scheduled++,
+  });
+  expect(loadAppSettings().portableMode).toBe(true);
+  expect(loadAppSettings().autoUpdateIntervalSecs).toBe(43_200);
+  expect(scheduled).toBe(0);
 });
 
 test("only allowlisted preferences leave the machine", () => {

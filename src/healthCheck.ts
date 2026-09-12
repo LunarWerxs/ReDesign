@@ -85,12 +85,16 @@ async function healthCheckModel(km: KeyManager, model: Model, { timeoutMs = 3000
 
   const results = await mapLimit(entries, concurrency, async (entry) => {
     throwIfAborted(signal);
+    const acq = await km.acquireSpecificOrWait(model.keyEnv, entry.id, timeoutMs, signal || null);
+    if (!acq.available) {
+      return { mask: entry.mask, status: "inconclusive" as const, detail: acq.reason === "all_cooldown" ? "key is cooling down" : "key probe cancelled" };
+    }
     let ok = false;
     let err: ProviderError | null = null;
     try {
       await adapter.call({
         model: pingModel,
-        apiKey: entry.key,
+        apiKey: acq.key as string,
         systemContract: "You are a health check. Reply with the single word: OK",
         userPrompt: "OK",
         images: [],
@@ -101,7 +105,10 @@ async function healthCheckModel(km: KeyManager, model: Model, { timeoutMs = 3000
       });
       ok = true;
     } catch (e) {
-      if (signal?.aborted) throw cancelledError();
+      if (signal?.aborted) {
+        km.release(model.keyEnv, acq.keyId, acq.leaseId);
+        throw cancelledError();
+      }
       err = e as ProviderError;
     }
     const verdict = interpret(ok, err);
@@ -109,6 +116,7 @@ async function healthCheckModel(km: KeyManager, model: Model, { timeoutMs = 3000
       errorClass: verdict.report,
       retryAfterMs: err?.retryAfterMs,
       message: err?.message,
+      leaseId: acq.leaseId,
     });
     const row: HealthCheckRow = { mask: entry.mask, status: verdict.status, detail: err ? err.message : "ok" };
     if (onResult) onResult(model, row);

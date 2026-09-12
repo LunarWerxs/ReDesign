@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { assetForPlatform, checkForUpdate, isNewer, releaseTarget } from "../src/github-updater";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { assetForPlatform, checkForUpdate, downloadResponseToFile, isNewer, releaseTarget } from "../src/github-updater";
 
 const direct = {
   name: "redesign-windows-x64.exe",
@@ -71,5 +74,28 @@ test("both endpoints down reports the primary failure, not the backstop's", asyn
     expect(String(status.reason)).toContain("primary is unreachable");
   } finally {
     globalThis.fetch = real;
+  }
+});
+
+test("release archive download rejects a stream larger than its published asset size and removes it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "redesign-update-download-"));
+  const file = join(dir, "candidate.zip");
+  const response = new Response(new Uint8Array([1, 2, 3, 4]));
+  try {
+    await expect(downloadResponseToFile(response, file, 3, 10)).rejects.toThrow("larger than expected");
+    expect(existsSync(file)).toBe(false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("release archive download writes exactly the published size", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "redesign-update-download-"));
+  const file = join(dir, "candidate.zip");
+  try {
+    await downloadResponseToFile(new Response(new Uint8Array([1, 2, 3])), file, 3, 10);
+    expect(readFileSync(file)).toEqual(Buffer.from([1, 2, 3]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

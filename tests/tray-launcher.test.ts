@@ -355,13 +355,18 @@ describeWin32("tray launcher: root shortcut → environment + tray icon", () => 
     expect(/if\s*\(-not\s+\$useToken\)\s*\{\s*\n\s*Stop-DaemonHere\s+\$true/i.test(engine)).toBe(true);
   });
 
-  // ReDesign's rebuild resolver (misc\Rebuild.bat first, else npm run build) is ADAPTER config;
-  // IsDevTree is gated by the REDESIGN_DEV env var (public users rebuild via misc\Rebuild.bat
+  // ReDesign's rebuild resolver (misc\rebuild_redesign.bat first, else npm run build) is ADAPTER config;
+  // IsDevTree is gated by the REDESIGN_DEV env var (public users rebuild via misc\rebuild_redesign.bat
   // instead of the tray menu item); the dual/triple gate that hides the menu item outside a dev
   // tree is ENGINE-invariant machinery.
-  it("supplies a Rebuild.bat-first resolver and gates Rebuild & Restart on REDESIGN_DEV", () => {
+  it("supplies an existing rebuild script to both tray hosts and gates Rebuild & Restart on REDESIGN_DEV", () => {
     const tray = fs.existsSync(trayPath) ? fs.readFileSync(trayPath, "utf8") : "";
-    expect(/Rebuild\.bat/i.test(tray)).toBe(true);
+    const rebuildFile = tray.match(/\$rebuildBat\s*=\s*Join-Path\s+\$appScriptDir\s+"([^"]+)"/)?.[1];
+    expect(rebuildFile).toBe("rebuild_redesign.bat");
+    expect(fs.existsSync(path.join(repoRoot, "misc", rebuildFile!))).toBe(true);
+    const nativeConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, "misc", "ReDesign-Tray.json"), "utf8"));
+    expect(nativeConfig.rebuildCommand).toBe(`misc\\${rebuildFile}`);
+    expect(nativeConfig.firstRun[0].run).toBe(nativeConfig.rebuildCommand);
     expect(/npm run build/i.test(tray)).toBe(true);
     expect(/IsDevTree\s*=\s*\(\$env:REDESIGN_DEV -eq "1"\)/i.test(tray)).toBe(true);
     expect(/RebuildLogName\s*=\s*["']ReDesign-Rebuild\.log["']/i.test(tray)).toBe(true);

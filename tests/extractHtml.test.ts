@@ -1,12 +1,13 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { extractHtml } from "../src/extractHtml";
 
 describe("extractHtml", () => {
   it("extracts a fenced ```html block", () => {
-    const html = extractHtml(
+    const extracted = extractHtml(
       "blah\n```html\n<!DOCTYPE html><html><body>hi</body></html>\n```\nthanks"
-    ).html;
-    expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
+    );
+    expect(extracted.html.startsWith("<!DOCTYPE html>")).toBe(true);
+    expect(extracted.outcome).toBe("document");
   });
 
   it("slices from doctype, drops preamble", () => {
@@ -26,11 +27,20 @@ describe("extractHtml", () => {
   it("wraps a bare body fragment", () => {
     const w = extractHtml("<body><div>fragment only</div></body>");
     expect(w.wrapped).toBe(true);
+    expect(w.outcome).toBe("fragment");
     expect(w.html.includes("<!DOCTYPE html>")).toBe(true);
   });
 
   it("empty input yields a visible wrapped doc", () => {
-    expect(extractHtml("").wrapped).toBe(true);
+    const extracted = extractHtml("");
+    expect(extracted.wrapped).toBe(true);
+    expect(extracted.outcome).toBe("non-html");
+  });
+
+  it("classifies a prose refusal as non-HTML while retaining its diagnostic", () => {
+    const extracted = extractHtml("I cannot produce the requested redesign.");
+    expect(extracted.outcome).toBe("non-html");
+    expect(extracted.html).toContain("I cannot produce the requested redesign.");
   });
 
   it("preserves a nested triple-backtick fence inside the document", () => {

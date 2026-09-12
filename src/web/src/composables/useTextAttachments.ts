@@ -5,6 +5,9 @@
 
 /** A cap per file so one huge text dump can't blow past a model's context. */
 export const MAX_ATTACHMENT_CHARS = 20000;
+// UTF-8 takes at most four bytes for a single Unicode code point. Reading this prefix gives us
+// enough decoded text to cap by JavaScript characters without ever loading a multi-megabyte CSV.
+const MAX_ATTACHMENT_PREFIX_BYTES = MAX_ATTACHMENT_CHARS * 4;
 
 const TEXT_EXTENSIONS = /\.(txt|md|markdown|mdx|csv|json|yaml|yml|xml|html?)$/i;
 
@@ -38,16 +41,14 @@ export interface TextAttachment {
   truncated: boolean;
 }
 
-/** Read a File as plain text, capped to MAX_ATTACHMENT_CHARS. */
-export function readTextAttachment(file: File): Promise<TextAttachment> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const full = String(reader.result || '');
-      const truncated = full.length > MAX_ATTACHMENT_CHARS;
-      resolve({ name: file.name || 'attachment.txt', text: truncated ? full.slice(0, MAX_ATTACHMENT_CHARS) : full, truncated });
-    };
-    reader.onerror = () => reject(reader.error || new Error('Failed to read attachment'));
-    reader.readAsText(file);
-  });
+/** Read a bounded UTF-8 prefix and report truncation without allocating the whole attachment. */
+export async function readTextAttachment(file: File): Promise<TextAttachment> {
+  const prefix = file.slice(0, MAX_ATTACHMENT_PREFIX_BYTES);
+  const text = new TextDecoder().decode(await prefix.arrayBuffer());
+  const truncated = file.size > MAX_ATTACHMENT_PREFIX_BYTES || text.length > MAX_ATTACHMENT_CHARS;
+  return {
+    name: file.name || 'attachment.txt',
+    text: text.slice(0, MAX_ATTACHMENT_CHARS),
+    truncated,
+  };
 }

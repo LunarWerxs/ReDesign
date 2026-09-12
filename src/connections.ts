@@ -22,15 +22,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  createConnect,
-  createSettingsSync,
   type ConnectClient,
   type ConnectStore,
+  createConnect,
+  createSettingsSync,
   type SettingsSync,
   type SettingsSyncStatus,
   type TokenSet,
 } from "@cnct/connect";
-import { applySyncedPrefs, readSyncedPrefs } from "./app-settings";
+import { applySyncedPrefs, readSyncedPrefs, setAppSettingsSyncScheduler } from "./app-settings";
 import { seal, unseal, wrapTokenStore } from "./dpapi-seal.mjs";
 import { ROOT } from "./util";
 
@@ -342,6 +342,13 @@ async function updateAppearance(
   if (state.enabled && hasConnection()) syncEngine().push();
 }
 
+/** Settings transitions call this for local changes; the SDK coalesces the actual outbound write. */
+function schedulePrefsSync(): void {
+  if (state.enabled && hasConnection()) syncEngine().push();
+}
+
+setAppSettingsSyncScheduler(schedulePrefsSync);
+
 /** Flush a pending debounce before daemon shutdown. */
 async function flushPending(): Promise<void> {
   if (state.enabled && hasConnection()) {
@@ -356,16 +363,16 @@ async function logout(): Promise<void> {
 }
 
 export {
-  initConnections,
-  hasConnection,
   buildAuthorizeUrl,
-  handleCallback,
-  syncStatus,
-  pushNow,
-  pullNow,
-  enable,
   disable,
-  updateAppearance,
+  enable,
   flushPending,
+  handleCallback,
+  hasConnection,
+  initConnections,
   logout,
+  pullNow,
+  pushNow,
+  syncStatus,
+  updateAppearance,
 };

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import * as config from "../src/config";
 
 describe("config: model & prompt resolution", () => {
@@ -7,7 +7,7 @@ describe("config: model & prompt resolution", () => {
   });
 
   it("resolveModels by id", () => {
-    expect(config.resolveModels({ ids: ["deepseek-v4-pro"] }).map((m) => m.id)).toEqual(["deepseek-v4-pro"]);
+    expect(config.resolveModels({ ids: ["deepseek-4.1-flash"] }).map((m) => m.id)).toEqual(["deepseek-4.1-flash"]);
   });
 
   it("resolvePrompts includes preset + custom", () => {
@@ -19,6 +19,27 @@ describe("config: model & prompt resolution", () => {
 
   it("resolvePrompts falls back when empty", () => {
     expect(config.resolvePrompts({}).length).toBe(1);
+  });
+
+  it("resolvePrompts does not replace an unknown explicit preset with the default", () => {
+    expect(() => config.resolvePrompts({ presets: ["deleted-preset"] })).toThrow("unknown prompt preset");
+    expect(() => config.resolvePrompts({ presets: ["deleted-preset"], custom: "one-off" })).toThrow("unknown prompt preset");
+  });
+
+  it("resolvePrompts deduplicates repeated presets and gives one-off custom text a reserved id", () => {
+    const prompts = config.resolvePrompts({ presets: ["minimalist", "minimalist"], custom: "make it pink" });
+    expect(prompts.map((prompt) => prompt.id)).toEqual(["minimalist", "custom"]);
+  });
+
+  it("gives one-off custom text a filesystem-safe id when a saved Custom preset is selected", () => {
+    const saved = config.savePromptPreset({ label: "Custom", user: "saved prompt" });
+    try {
+      const prompts = config.resolvePrompts({ presets: [saved.id], custom: "one-off prompt" });
+      expect(prompts.map((prompt) => prompt.id)).toEqual(["custom", "custom-2"]);
+      expect(prompts.every((prompt) => /^[a-z0-9-]+$/.test(prompt.id))).toBe(true);
+    } finally {
+      config.deletePromptPreset(saved.id);
+    }
   });
 
   it("material-3 + approachable + minimalist-two presets are present", () => {

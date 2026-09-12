@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, useTemplateRef } from 'vue';
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from 'vue';
 import { useControlStore } from '@/stores/control';
 import { clipboardImageFiles, uploadableImageFiles } from '@/composables/useImageUpload';
 import { t } from '@/i18n';
@@ -8,14 +8,15 @@ import PasteMenu from './PasteMenu.vue';
 
 const store = useControlStore();
 const pasteMenu = useTemplateRef<InstanceType<typeof PasteMenu>>('pasteMenu');
-const uploading = ref(false);
+const uploadsInFlight = ref(0);
+const uploading = computed(() => uploadsInFlight.value > 0);
 
 async function handle(files: FileList | File[] | null, source: string) {
-  uploading.value = true;
+  uploadsInFlight.value += 1;
   try {
     await store.uploadFiles(files, source);
   } finally {
-    uploading.value = false;
+    uploadsInFlight.value -= 1;
   }
 }
 
@@ -35,6 +36,10 @@ function onPaste(e: ClipboardEvent) {
   if (e.target instanceof Element && e.target.closest('[data-reference-drop]')) return;
   const files = clipboardImageFiles(e.clipboardData);
   if (!files.length) return;
+  if (uploading.value) {
+    e.preventDefault();
+    return;
+  }
   e.preventDefault();
   handle(files, 'paste');
 }

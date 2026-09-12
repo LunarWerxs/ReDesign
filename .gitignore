@@ -37,8 +37,8 @@ tmp/
 # Personal sample screenshots — users drop their own here
 /input/*
 
-# Local root rebuild convenience wrapper (delegates to misc/Rebuild.bat)
-/Rebuild.bat
+# Local root rebuild and restart wrapper (builds via misc/rebuild_redesign.bat)
+/rebuild_redesign.bat
 
 # Local AI memory for this repo. Deliberately NOT published.
 /.claude/memory/

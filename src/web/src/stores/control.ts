@@ -10,6 +10,7 @@ import { createUpdateNotifyEventsActions } from './control/update-notify-events'
 import { createPortableModeSettingsActions } from './control/portable-mode-settings';
 import { createHideTraySettingsActions } from './control/hide-tray-settings';
 import { createOutputRetentionSettingsActions } from './control/output-retention-settings';
+import { createSettingsStore } from './control/settings-store';
 import { createRunAgainActions } from './control/run-again';
 import { useSelfUpdate } from '@/lib/useSelfUpdate';
 import { api } from '@/lib/api';
@@ -31,19 +32,20 @@ export const useControlStore = defineStore('control', () => {
     resumeRuns: runsActions.resumeRuns,
   });
   // "Sync my settings with Connections" (opt-in cloud sync of theme), see @/stores/control/sync.
-  const syncActions = createSyncActions();
+  const settingsStore = createSettingsStore();
+  const syncActions = createSyncActions(settingsStore);
   // Auto-update notify + silent-apply opt-ins, see @/stores/control/auto-update-settings.
-  const autoUpdateSettingsActions = createAutoUpdateSettingsActions();
+  const autoUpdateSettingsActions = createAutoUpdateSettingsActions(settingsStore);
   // Daemon-wide "update available" push, see @/stores/control/update-notify-events. Shares the
   // manual applyUpdate() from useSelfUpdate so "Update now" (toast) and the Settings ▸ Updates
   // button are the same code path.
   const updateNotifyEventsActions = createUpdateNotifyEventsActions({ applyUpdate: selfUpdate.applyUpdate });
   // Portable window opt-in, see @/stores/control/portable-mode-settings.
-  const portableModeSettingsActions = createPortableModeSettingsActions();
+  const portableModeSettingsActions = createPortableModeSettingsActions(settingsStore);
   // Hide-tray-icon opt-in, see @/stores/control/hide-tray-settings.
-  const hideTraySettingsActions = createHideTraySettingsActions();
+  const hideTraySettingsActions = createHideTraySettingsActions(settingsStore);
   // Output retention (0/off + a disk-usage readout), see @/stores/control/output-retention-settings.
-  const outputRetentionSettingsActions = createOutputRetentionSettingsActions();
+  const outputRetentionSettingsActions = createOutputRetentionSettingsActions(settingsStore);
   // "Run again" prefill (RunGallery.vue), see @/stores/control/run-again.
   const runAgainActions = createRunAgainActions(state);
 
@@ -75,6 +77,7 @@ export const useControlStore = defineStore('control', () => {
     referenceOn: state.referenceOn,
     mock: state.mock,
     modelQty: state.modelQty,
+    maxCostUsd: state.maxCostUsd,
     customOn: state.customOn,
     custom: state.custom,
     advancedOpen: state.advancedOpen,
@@ -172,6 +175,8 @@ export const useControlStore = defineStore('control', () => {
     reorderQueue: runsActions.reorderQueue,
     cancelRun: runsActions.cancelRun,
     focusRun: runsActions.focusRun,
+    resumeRuns: runsActions.resumeRuns,
+    adoptHeldRun: runsActions.adoptHeldRun,
     refreshCostEstimate: runsActions.refreshCostEstimate,
     loadSyncStatus: syncActions.loadSyncStatus,
     enableSync: syncActions.enableSync,
@@ -189,6 +194,7 @@ export const useControlStore = defineStore('control', () => {
     loadHideTrayIconSetting: hideTraySettingsActions.loadHideTrayIconSetting,
     setHideTrayIcon: hideTraySettingsActions.setHideTrayIcon,
     loadOutputRetentionSetting: outputRetentionSettingsActions.loadOutputRetentionSetting,
+    loadOutputStorage: outputRetentionSettingsActions.loadOutputStorage,
     setOutputRetentionDays: outputRetentionSettingsActions.setOutputRetentionDays,
     stageRunAgain: runAgainActions.stageRunAgain,
     applyPendingRunAgain: runAgainActions.applyPendingRunAgain,

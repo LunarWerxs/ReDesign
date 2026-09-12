@@ -5,6 +5,7 @@ import { toast } from 'vue-sonner';
 import { api, ApiError, eventsUrl } from '@/lib/api';
 import { toggleIn } from '@/lib/array';
 import { recordFirstStar } from '@/lib/starTally';
+import { getRunReview, saveRunReview, type RunReview } from '@/lib/review-api';
 import { t } from '@/i18n';
 import { useControlStore } from '@/stores/control';
 import type { InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunRetryResponse, RunSummary } from '@/types';
@@ -34,6 +35,12 @@ export const useViewerStore = defineStore('viewer', () => {
   const starredItems = useStorage<string[]>('redesign.viewer.starred-items', []);
   const showHiddenItems = ref(false);
   const showErrors = ref(false);
+  const review = ref<RunReview>({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null });
+  let reviewRunId: string | null = null;
+  let hydratedReviewRunId: string | null = null;
+  let reviewIntent = 0;
+  const reviewVersions = new Map<string, number>();
+  const reviewWriteTails = new Map<string, Promise<void>>();
 
   // viewport controls
   const cols = ref(3);
@@ -47,6 +54,7 @@ export const useViewerStore = defineStore('viewer', () => {
   let liveJobIndexes = new Map<string, number>();
   let runsRequestSeq = 0;
   let loadRequestSeq = 0;
+  const nextRunsCursor = ref<string | null>(null);
   const confirmedDeletedRunIds = new Set<string>();
 
   const isLive = computed(
@@ -121,11 +129,76 @@ export const useViewerStore = defineStore('viewer', () => {
     }
   }
 
+  function resetReview(nextRunId: string | null) {
+    reviewRunId = nextRunId;
+    hydratedReviewRunId = null;
+    reviewIntent++;
+    review.value = { shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null };
+  }
+
   function acceptManifest(next: Manifest | null) {
+    if (next?.runId !== reviewRunId) resetReview(next?.runId || null);
     manifest.value = next;
     liveJobIndexes = new Map((next?.jobs || []).map((job, index) => [job.id, index]));
     reconcileItemState(next);
+    // SSE snapshots can arrive frequently. Hydrate once for this loaded run; load() explicitly
+    // resets that gate when the owner intentionally reopens the same run.
+    if (next?.runId && hydratedReviewRunId !== next.runId) {
+      hydratedReviewRunId = next.runId;
+      void hydrateReview(next, reviewIntent).catch(() => undefined);
+    }
     if (!isLive.value) stopPoll();
+  }
+
+  async function hydrateReview(next: Manifest, intent: number) {
+    const versionAtStart = reviewVersions.get(next.runId) || 0;
+    const remote = await getRunReview(next.runId);
+    // A late GET must never overwrite edits made while it was in flight, nor a later run.
+    if (runId.value !== next.runId || reviewIntent !== intent || (reviewVersions.get(next.runId) || 0) !== versionAtStart) return;
+    const prefix = `${next.runId}:`;
+    // First open on an older browser migrates its local choices once; subsequent opens use the
+    // run-owned sidecar so another machine sees the same shortlist/hidden decisions. An empty
+    // sidecar with updatedAt is deliberate, so it must clear (not resurrect) old browser state.
+    const legacyShortlist = starredItems.value.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    const legacyHidden = hiddenItems.value.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    const migrateLegacy = remote.updatedAt === null;
+    const shortlist = migrateLegacy ? (remote.shortlist.length ? remote.shortlist : legacyShortlist) : remote.shortlist;
+    const hidden = migrateLegacy ? (remote.hidden.length ? remote.hidden : legacyHidden) : remote.hidden;
+    review.value = { ...remote, shortlist, hidden };
+    starredItems.value = [...starredItems.value.filter((key) => !key.startsWith(prefix)), ...shortlist.map((id) => `${prefix}${id}`)];
+    hiddenItems.value = [...hiddenItems.value.filter((key) => !key.startsWith(prefix)), ...hidden.map((id) => `${prefix}${id}`)];
+    if (migrateLegacy && ((!remote.shortlist.length && legacyShortlist.length) || (!remote.hidden.length && legacyHidden.length))) persistReview();
+  }
+
+  function persistReview() {
+    const id = runId.value; if (!id) return;
+    const prefix = `${id}:`;
+    const shortlist = starredItems.value.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    const hidden = hiddenItems.value.filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length));
+    const version = (reviewVersions.get(id) || 0) + 1;
+    reviewVersions.set(id, version);
+    // Capture a complete immutable payload. The API has no revision token, so serializing writes
+    // is what prevents a slower old PUT from winning over a newer full replacement.
+    const payload = { shortlist: [...shortlist], hidden: [...hidden], notes: { ...review.value.notes }, keep: review.value.keep };
+    const previous = reviewWriteTails.get(id) || Promise.resolve();
+    const write = previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const next = await saveRunReview(id, payload);
+          if (runId.value === id && reviewVersions.get(id) === version) review.value = next;
+        } catch (error) {
+          toast.error(t('viewer.reviewSaveFailed'), { description: error instanceof Error ? error.message : String(error) });
+        }
+      });
+    reviewWriteTails.set(id, write);
+    void write;
+  }
+  function setReviewKeep(keep: boolean) { review.value = { ...review.value, keep }; persistReview(); }
+  function setReviewNote(id: string, note: string) {
+    review.value = { ...review.value, notes: { ...review.value.notes, ...(note.trim() ? { [id]: note } : {}) } };
+    if (!note.trim()) delete review.value.notes[id];
+    persistReview();
   }
 
   function handleLiveEvent(id: string, raw: string) {
@@ -181,16 +254,23 @@ export const useViewerStore = defineStore('viewer', () => {
   async function loadRuns() {
     const seq = ++runsRequestSeq;
     try {
-      const loaded = await api.runs();
+      const page = await api.runs();
       if (seq !== runsRequestSeq) return;
       const pending = deletingRunIds.value;
-      runs.value = loaded.filter(
+      nextRunsCursor.value = page.nextCursor;
+      runs.value = page.runs.filter(
         (run) => !pending.has(run.runId) && !confirmedDeletedRunIds.has(run.runId),
       );
     } catch {
       // Keep the last good gallery snapshot through a transient refresh failure.
       // The initial value is already empty, so first-load failure still degrades cleanly.
     }
+  }
+  async function loadMoreRuns() {
+    if (!nextRunsCursor.value) return;
+    const page = await api.runs(nextRunsCursor.value);
+    nextRunsCursor.value = page.nextCursor;
+    runs.value = mergeRuns(runs.value, page.runs);
   }
 
   function pruneDeletedRunState(ids: string[]) {
@@ -294,6 +374,8 @@ export const useViewerStore = defineStore('viewer', () => {
     // Mirrors the runsRequestSeq pattern in loadRuns() below: only the latest request wins.
     const seq = ++loadRequestSeq;
     stopPoll();
+    // A route-driven reopen is an intentional revalidation, even if it names the current run.
+    resetReview(id);
     runId.value = id;
     if (!id) {
       acceptManifest(null);
@@ -345,6 +427,24 @@ export const useViewerStore = defineStore('viewer', () => {
     }
   }
 
+  /**
+   * Clone a durable snapshot on the server. Unlike gallery "Run again", this never maps the
+   * old recipe through today's controls, so the queued run has the exact original assets and
+   * settings. The control page lets the owner explicitly release the held run.
+   */
+  async function repeatOriginal(): Promise<string | null> {
+    const current = manifest.value;
+    if (!current || current.specVersion !== 1 || isLive.value) return null;
+    try {
+      const result = await api.repeatRun(current.runId, { autoStart: false });
+      toast.success(t('viewer.repeatOriginalQueued'));
+      return result.runId;
+    } catch (e) {
+      toast.error(t('viewer.repeatOriginalFailed'), { description: e instanceof Error ? e.message : String(e) });
+      return null;
+    }
+  }
+
   function toggleModel(id: string) {
     hiddenModels.value = toggleIn(hiddenModels.value, id);
   }
@@ -359,11 +459,13 @@ export const useViewerStore = defineStore('viewer', () => {
   }
   function toggleItemHidden(id: string) {
     hiddenItems.value = toggleIn(hiddenItems.value, itemKey(id));
+    persistReview();
   }
   function toggleItemStarred(id: string) {
     const key = itemKey(id);
     const starring = !starredItemSet.value.has(key);
     starredItems.value = toggleIn(starredItems.value, key);
+    persistReview();
     if (!starring || !runId.value) return;
     // Cross-run tally: only the FIRST star in a run counts, check before this
     // toggle added `key`, i.e. no other starred item already carries this run's prefix.
@@ -391,13 +493,17 @@ export const useViewerStore = defineStore('viewer', () => {
     aspect,
     height,
     previewScale,
+    review,
     isLive,
     grouped,
     loadRuns,
+    loadMoreRuns,
+    nextRunsCursor,
     deleteRuns,
     load,
     refreshManifest,
     retryJobs,
+    repeatOriginal,
     stopPoll,
     toggleModel,
     togglePrompt,
@@ -405,5 +511,8 @@ export const useViewerStore = defineStore('viewer', () => {
     isItemStarred,
     toggleItemHidden,
     toggleItemStarred,
+    persistReview,
+    setReviewKeep,
+    setReviewNote,
   };
 });

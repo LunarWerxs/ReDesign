@@ -10,8 +10,9 @@ import * as store from "../store";
 import { runReimagine } from "../runner";
 // `reference` arrives as untyped JSON off the wire; runReimagine validates the shape
 // itself, so this only names the target type instead of widening the whole body to any.
-import type { ReferenceOptions } from "../runner/reimagine";
-import { normalizeSelectionIds, type SelectionInput } from "../util";
+import { readRunSpec, type RunSpec } from "../runner/run-spec";
+import { getPreparedSummary, prepareRun, takePreparedRun, undoPreparedRun } from "./run-preflight";
+import type { SelectionInput } from "../util";
 // Lazy (dynamic) import, not a static one: auto-update.ts itself imports hasActiveRun from
 // this module, so a static import here would create a module-init circular dependency.
 // Deferring the require to call time (inside pumpRunQueue(), well after both modules have
@@ -28,6 +29,9 @@ interface SseClient {
 
 interface RunBody {
   label?: string;
+  preflightId?: string;
+  maxCostUsd?: number;
+  timeoutMs?: number;
   mock?: boolean;
   inputs?: SelectionInput;
   models?: SelectionInput;
@@ -60,6 +64,8 @@ interface RunEntry {
   /** False while the run is parked in the queue waiting for an explicit "Run queue". */
   released: boolean;
   body: RunBody;
+  spec: RunSpec;
+  ownership: store.RunOwnershipClaim;
   heartbeat?: ReturnType<typeof setInterval>;
 }
 
@@ -102,38 +108,25 @@ function startHeartbeat(entry: RunEntry): void {
   entry.heartbeat.unref?.();
 }
 
-function selectedIds(selection: SelectionInput): string[] {
-  return normalizeSelectionIds(selection, { extraKeys: ["ids", "presets"] });
-}
+const MAX_QUEUED_RUNS = 100;
+const MAX_QUEUED_BYTES = 1024 * 1024 * 1024;
 
-function queuedManifest(runId: string, body: RunBody, position: number, held = false): store.Manifest {
-  const prompts = body.prompts || {};
-  const promptIds = selectedIds(prompts as SelectionInput);
-  if (prompts.custom) promptIds.push("custom");
+function queuedManifest(runId: string, spec: RunSpec, position: number, held = false): store.Manifest {
   return {
-    runId,
-    createdAt: new Date().toISOString(),
-    finishedAt: null,
-    status: "queued",
-    mock: !!body.mock,
-    summary: body.label ? { title: String(body.label).trim(), source: "label" } : null,
+    runId, createdAt: spec.createdAt, finishedAt: null, status: "queued", mock: spec.settings.mock,
+    summary: spec.label ? { title: spec.label, source: "label" } : null,
+    specVersion: spec.version,
     config: {
-      inputIds: selectedIds(body.inputs || "all"),
-      modelIds: selectedIds(body.models || "all"),
-      promptIds,
-      variants: Math.max(1, Number.parseInt(String(body.variants), 10) || 1),
-      // Absent = uncapped (see runner/reimagine.ts), so don't invent a default here either.
-      maxImagesPerInput: Number.parseInt(String(body.maxImages), 10) > 0 ? Number.parseInt(String(body.maxImages), 10) : null,
-      concurrency: body.concurrency || null,
-      poolConcurrency: body.poolConcurrency || null,
-      reference: body.reference || null,
+      inputIds: spec.inputs.map((input) => input.id), modelIds: spec.models.map((model) => model.id),
+      promptIds: spec.prompts.map((prompt) => prompt.id), ...spec.settings,
+      reference: spec.referenceRels.length ? { images: spec.referenceRels, note: spec.referenceNote || null } : null,
+      brandStyleGuide: spec.brandStyleGuide,
     },
-    queue: { position, held },
-    inputs: [],
-    prompts: [],
-    models: [],
-    counts: { total: 0, done: 0, ok: 0, error: 0, skipped: 0 },
-    jobs: [],
+    queue: { position, held }, inputs: spec.inputs, models: spec.models, prompts: spec.prompts,
+    counts: { total: spec.jobs.length, done: 0, ok: 0, error: 0, skipped: 0 },
+    jobs: structuredClone(spec.jobs), assets: spec.assets, assetBytes: spec.assetBytes,
+    cost: { totalCost: 0, currency: "USD", jobCount: 0, anyEstimatePricing: false, anyUnpriced: false },
+    providerCalls: [],
   };
 }
 
@@ -141,7 +134,7 @@ function updateQueuedManifests(): void {
   runQueue.forEach((runId, idx) => {
     const entry = activeRuns.get(runId);
     if (entry?.status !== "queued") return;
-    const existing = entry.lastManifest || queuedManifest(runId, entry.body || {}, idx + 1, !entry.released);
+    const existing = entry.lastManifest || queuedManifest(runId, entry.spec, idx + 1, !entry.released);
     const manifest: store.Manifest = {
       ...existing,
       status: "queued",
@@ -152,31 +145,37 @@ function updateQueuedManifests(): void {
   });
 }
 
-function enqueueRun(body: RunBody): string {
-  const runId = store.newRunId(body.label);
-  const controller = new AbortController();
-  // Only an explicit `autoStart: false` parks the run. Anything else — including a
-  // body from an older client that has never heard of the flag — keeps the original
-  // submit-and-run behavior, so the MCP tools and CLI are unaffected by the queue gate.
-  const released = body.autoStart !== false;
-  const entry: RunEntry = {
-    clients: new Set(),
-    controller,
-    lastManifest: null,
-    finished: false,
-    status: "queued",
-    released,
-    body,
-  };
-  activeRuns.set(runId, entry);
-  startHeartbeat(entry);
-
-  runQueue.push(runId);
-  entry.lastManifest = queuedManifest(runId, body, runQueue.length, !released);
-  store.writeManifest(runId, entry.lastManifest);
-  updateQueuedManifests();
+/** Admission is synchronous after asset preparation: capacity, ownership and persistence
+ * commit together before the pump can start work. Tokens make a lost response safe to retry. */
+async function enqueueRun(body: RunBody): Promise<string> {
+  const token = body.preflightId || (await prepareRun(body)).preflightId;
+  const prepared = getPreparedSummary(token);
+  if (prepared.runId) return prepared.runId;
+  const waiting = [...activeRuns.values()].filter((entry) => !entry.finished);
+  if (waiting.length >= MAX_QUEUED_RUNS) throw Object.assign(new Error("The queue is full (100 runs)."), { status: 429 });
+  if (waiting.reduce((bytes, entry) => bytes + entry.spec.assetBytes, 0) + prepared.assetBytes > MAX_QUEUED_BYTES) {
+    throw Object.assign(new Error("Queued run assets exceed 1 GiB."), { status: 413 });
+  }
+  const { runId, spec, reused } = takePreparedRun(token);
+  if (reused) return runId;
+  let ownership: store.RunOwnershipClaim | undefined;
+  try {
+    ownership = store.claimRunOwnership(runId);
+    const entry: RunEntry = {
+      clients: new Set(), controller: new AbortController(), lastManifest: null, finished: false,
+      status: "queued", released: body.autoStart !== false, body: { ...body }, spec, ownership,
+    };
+    entry.lastManifest = queuedManifest(runId, spec, runQueue.length + 1, !entry.released);
+    store.writeManifest(runId, entry.lastManifest);
+    activeRuns.set(runId, entry);
+    runQueue.push(runId);
+    startHeartbeat(entry);
+  } catch (error) {
+    ownership?.release();
+    undoPreparedRun(token, runId);
+    throw error;
+  }
   pumpRunQueue();
-
   return runId;
 }
 
@@ -260,7 +259,7 @@ function pumpRunQueue(): void {
     if (runId && entry) {
       currentRunId = runId;
       entry.status = "running";
-      updateQueuedManifests();
+      try { updateQueuedManifests(); } catch (error) { console.warn("Could not persist remaining queue positions:", error); }
       runQueuedEntry(runId, entry);
       return;
     }
@@ -268,44 +267,33 @@ function pumpRunQueue(): void {
   // Queue fully drained (nothing running, nothing waiting), a deferred auto-update restart
   // (see src/auto-update.ts) can now fire safely without interrupting an in-flight run.
   // Held runs count as waiting: restarting would orphan work the user has lined up.
-  if (!runQueue.length) void maybeApplyDeferredRestart();
+  if (!runQueue.length) void maybeApplyDeferredRestart().catch((error) => console.warn("Deferred restart failed:", error));
 }
 
 function runQueuedEntry(runId: string, entry: RunEntry): void {
-  const body = entry.body || {};
   runReimagine({
-    runId,
-    inputs: body.inputs || "all",
-    models: body.models || "all",
-    prompts: body.prompts || {},
-    reference: (body.reference as ReferenceOptions | null | undefined) || null,
-    brandStyleGuide: typeof body.brandStyleGuide === "string" ? body.brandStyleGuide : null,
-    variants: body.variants || 1,
-    modelQuantities: body.modelQuantities || undefined,
-    mock: !!body.mock,
-    concurrency: body.concurrency,
-    poolConcurrency: body.poolConcurrency,
-    maxImagesPerInput: body.maxImages,
-    label: body.label,
-    signal: entry.controller.signal,
-    onProgress: (ev) => broadcast(runId, ev),
+    runId, preparedSpec: entry.spec, ownership: entry.ownership,
+    signal: entry.controller.signal, onProgress: (event) => broadcast(runId, event),
   })
     .then(() => {
       /* completion was already broadcast by runReimagine */
     })
     .catch((err: Error) => {
-      const fallback = entry.lastManifest || queuedManifest(runId, body, 0);
+      const fallback = store.readManifest(runId) || entry.lastManifest || queuedManifest(runId, entry.spec, 0);
+      const jobs = (fallback.jobs || []).map((job) => ["ok", "error", "skipped", "cancelled"].includes(job.status) ? job : { ...job, status: "error", error: err.message, finishedAt: new Date().toISOString() });
       const manifest: store.Manifest = {
         ...fallback,
+        jobs,
         status: "error",
         finishedAt: new Date().toISOString(),
         error: err.message,
         queue: null,
       };
-      store.writeManifest(runId, manifest);
+      try { store.writeManifest(runId, manifest); } catch (error) { console.warn(`Could not persist failed run ${runId}:`, error); }
       broadcast(runId, { type: "error", runId, message: err.message, manifest });
     })
     .finally(() => {
+      entry.ownership.release();
       entry.finished = true;
       entry.status = "finished";
       if (currentRunId === runId) currentRunId = null;
@@ -325,24 +313,32 @@ function closeRun(runId: string): void {
       /* ignore */
     }
   }
+  entry.ownership.release();
   activeRuns.delete(runId);
 }
 
 function cancelRun(runId: string): boolean {
   const entry = activeRuns.get(runId);
-  if (!entry) return false;
+  if (!entry) {
+    if (store.isRunOwned(runId)) throw Object.assign(new Error("This run is owned by another live process; cancel it there."), { status: 409 });
+    return false;
+  }
+  if (entry.finished) return false;
   entry.controller.abort();
   if (entry.status === "queued") {
     const idx = runQueue.indexOf(runId);
     if (idx !== -1) runQueue.splice(idx, 1);
     const manifest: store.Manifest = {
-      ...(entry.lastManifest || queuedManifest(runId, entry.body || {}, 0)),
+      ...(entry.lastManifest || queuedManifest(runId, entry.spec, 0)),
+      jobs: entry.spec.jobs.map((job) => ({ ...job, status: "cancelled", finishedAt: new Date().toISOString() })),
+      counts: { total: entry.spec.jobs.length, done: entry.spec.jobs.length, ok: 0, error: 0, skipped: 0 },
       status: "cancelled",
       finishedAt: new Date().toISOString(),
       queue: null,
     };
     store.writeManifest(runId, manifest);
     broadcast(runId, { type: "done", runId, manifest });
+    entry.ownership.release();
     entry.finished = true;
     entry.status = "finished";
     setTimeout(() => closeRun(runId), 2000);
@@ -373,7 +369,7 @@ function deleteRuns(ids: string[]): DeleteRunsResult {
   const skipped: Array<{ runId: string; reason: string }> = [];
   for (const runId of ids) {
     const entry = activeRuns.get(runId);
-    if (entry && !entry.finished) {
+    if ((entry && !entry.finished) || store.isRunOwned(runId)) {
       skipped.push({ runId, reason: "run is still active" });
       continue;
     }
@@ -399,7 +395,48 @@ function hasActiveRun(): boolean {
   for (const entry of activeRuns.values()) {
     if (entry.status === "queued" || entry.status === "running") return true;
   }
-  return false;
+  return store.listRuns().some((run) => (run.status === "running" || run.status === "queued") && store.isRunOwned(run.runId));
+}
+
+/** Recover persisted recipes, including previously released waiting work, as held.
+ * Ownership prevents a second daemon from adopting another process's live queue. */
+function recoverQueuedRuns(): number {
+  let recovered = 0;
+  let bytes = [...activeRuns.values()].reduce((total, entry) => total + entry.spec.assetBytes, 0);
+  const candidates = store.listRuns().filter((run) => run.status === "queued").sort((a, b) =>
+    (a.queuePosition ?? Number.MAX_SAFE_INTEGER) - (b.queuePosition ?? Number.MAX_SAFE_INTEGER) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  for (const run of candidates) {
+    if (activeRuns.has(run.runId) || store.isRunOwned(run.runId)) continue;
+    let ownership: store.RunOwnershipClaim;
+    try { ownership = store.claimRunOwnership(run.runId); } catch (_) { continue; }
+    try {
+      const existing = store.readManifest(run.runId);
+      if (existing?.status !== "queued") { ownership.release(); continue; }
+      const spec = readRunSpec(store.runDir(run.runId));
+      if (!spec) throw new Error("Queued run cannot be recovered: its saved specification or assets are missing or corrupt.");
+      if (activeRuns.size >= MAX_QUEUED_RUNS || bytes + spec.assetBytes > MAX_QUEUED_BYTES) {
+        throw new Error("Queue recovery reached its resource limit; retry this saved run after the queue drains.");
+      }
+      const entry: RunEntry = {
+        clients: new Set(), controller: new AbortController(), lastManifest: existing, finished: false,
+        status: "queued", released: false, body: { autoStart: false }, spec, ownership,
+      };
+      activeRuns.set(run.runId, entry);
+      runQueue.push(run.runId);
+      startHeartbeat(entry);
+      bytes += spec.assetBytes;
+      recovered++;
+    } catch (error) {
+      const existing = store.readManifest(run.runId);
+      if (existing) {
+        const jobs = (existing.jobs || []).map((job) => ({ ...job, status: "error", error: "Queue recovery requires an explicit retry." }));
+        store.writeManifest(run.runId, { ...existing, status: "error", jobs, counts: { total: jobs.length, done: jobs.length, ok: 0, error: jobs.length, skipped: 0 }, queue: null, finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
+      }
+      ownership.release();
+    }
+  }
+  updateQueuedManifests();
+  return recovered;
 }
 
 export {
@@ -407,6 +444,7 @@ export {
   runStoreOptions,
   ORPHANED_RUN_MESSAGE,
   enqueueRun,
+  recoverQueuedRuns,
   releaseQueue,
   reorderQueue,
   heldRunCount,

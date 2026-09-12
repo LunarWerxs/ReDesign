@@ -174,6 +174,10 @@ export interface RunCost {
   jobCount: number;
   anyEstimatePricing: boolean;
   anyUnpriced: boolean;
+  /** At least one provider response had incomplete token usage, so the total is a lower bound. */
+  anyPartialUsage?: boolean;
+  /** Cached-token accounting was incomplete for at least one provider response. */
+  anyCacheAccountingPartial?: boolean;
 }
 
 export interface RunSummaryMeta {
@@ -202,10 +206,14 @@ export interface ManifestConfig {
    *  addToQueue) — there is no way to split attachments back out of it. */
   brandStyleGuide?: string;
   grounded?: boolean;
+  /** Optional ceiling copied onto a run so Run Again can preserve the original budget. */
+  maxCostUsd?: number;
 }
 
 export interface Manifest {
   runId: string;
+  /** Durable run snapshots own their assets under output/<runId>/assets/. */
+  specVersion?: number;
   status: RunStatus;
   createdAt?: string;
   /** When the runner finished this run. Null while it is still queued/running. */
@@ -254,6 +262,7 @@ export interface RunSummary {
   /** Fallback thumbnail: first input screenshot, relative to input/. Gone once input/ is cleared. */
   preview?: string | null;
 }
+export interface RunPage { runs: RunSummary[]; nextCursor: string | null; }
 
 export interface RunDeleteSkipped {
   runId: string;
@@ -446,6 +455,26 @@ export interface RunRequest {
   // "Run queue" press starts it. Omitting the flag keeps the server's original
   // submit-and-run behavior, which the MCP tools and CLI still rely on.
   autoStart?: boolean;
+  /** Optional hard ceiling in USD; omitted means no client-requested ceiling. */
+  maxCostUsd?: number;
+}
+
+export interface RunPreflightResponse {
+  preflightId: string;
+  jobCount: number;
+  assetBytes: number;
+  estimatedCostUsd: number | null;
+  unknownPricing: boolean;
+  expiresAt: string;
+}
+
+export interface PreparedRunRequest {
+  preflightId: string;
+  autoStart?: boolean;
+}
+
+export interface RepeatRunResponse {
+  runId: string;
 }
 
 export interface HealthCheckResponse {

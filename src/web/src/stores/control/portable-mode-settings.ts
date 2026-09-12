@@ -1,5 +1,4 @@
-import { ref } from 'vue';
-import { api } from '@/lib/api';
+import type { SettingsStore } from './settings-store';
 
 /**
  * Portable window opt-in (see src/portable-window.mjs): opens the app UI in a chromeless
@@ -7,38 +6,17 @@ import { api } from '@/lib/api';
  * tray/start.cmd launcher, which reads the same setting back out of runtime.json. OFF by
  * default; toggled via PUT /api/settings. Mirrors @/stores/control/auto-update-settings.ts.
  */
-export function createPortableModeSettingsActions() {
-  const portableModeEnabled = ref(false);
-  const portableModeLoading = ref(false); // initial load + toggle in flight
+export function createPortableModeSettingsActions(settings: SettingsStore) {
 
   /** Load the current setting (call on mount). Best-effort, leaves the default (off) on failure. */
   async function loadPortableModeSetting(): Promise<void> {
-    portableModeLoading.value = true;
-    try {
-      const s = await api.getSettings();
-      portableModeEnabled.value = s.portableMode;
-    } catch {
-      /* non-critical, leave the default */
-    } finally {
-      portableModeLoading.value = false;
-    }
+    await settings.loadSettings();
   }
 
   /** Toggle portable mode (optimistic; rolls back on failure). */
   async function setPortableMode(enabled: boolean): Promise<void> {
-    const prev = portableModeEnabled.value;
-    portableModeEnabled.value = enabled;
-    portableModeLoading.value = true;
-    try {
-      const s = await api.setPortableMode(enabled);
-      portableModeEnabled.value = s.portableMode;
-    } catch (e) {
-      portableModeEnabled.value = prev; // roll back
-      throw e;
-    } finally {
-      portableModeLoading.value = false;
-    }
+    await settings.updateSettings({ portableMode: enabled });
   }
 
-  return { portableModeEnabled, portableModeLoading, loadPortableModeSetting, setPortableMode };
+  return { portableModeEnabled: settings.portableModeEnabled, portableModeLoading: settings.settingsLoading, loadPortableModeSetting, setPortableMode };
 }

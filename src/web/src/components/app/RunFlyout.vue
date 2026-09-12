@@ -91,7 +91,9 @@ function runCostLabel(run: RunSummary) {
   const cost = run.cost;
   if (!cost || !cost.jobCount || !cost.totalCost) return null;
   const amount = cost.totalCost < 0.01 ? cost.totalCost.toFixed(4) : cost.totalCost.toFixed(2);
-  return t('cost.actualCost', { amount });
+  return cost.anyPartialUsage || cost.anyCacheAccountingPartial
+    ? t('cost.partialCost', { amount })
+    : t('cost.actualCost', { amount });
 }
 function runCostTitle(run: RunSummary) {
   const cost = run.cost;
@@ -99,6 +101,8 @@ function runCostTitle(run: RunSummary) {
   const bits: string[] = [];
   if (cost.anyEstimatePricing) bits.push(t('cost.estimatePricingIsGuess'));
   if (cost.anyUnpriced) bits.push(t('cost.unpriced'));
+  if (cost.anyPartialUsage) bits.push(t('cost.partialUsage'));
+  if (cost.anyCacheAccountingPartial) bits.push(t('cost.cacheAccountingPartial'));
   return bits.join(' · ');
 }
 

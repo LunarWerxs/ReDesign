@@ -26,7 +26,9 @@ const meta = computed(() => {
 
 function onPick() {
   const m = props.model;
-  if (!runnable.value) {
+  // An unavailable row can still be selected by an old persisted choice or Run again. Let that
+  // click clear the stale selection; only block adding a new unavailable choice.
+  if (!runnable.value && !selected.value) {
     toast(
       !m.enabled
         ? t('modelSelect.disabledToast', { label: m.label })

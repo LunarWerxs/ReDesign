@@ -11,6 +11,10 @@ import type { Manifest, PruneRunsResult } from "./types";
 import { OUTPUT_DIR, resolveRunDir } from "./paths";
 import { runSummaryCache } from "./summary";
 import { manifestActivityMs } from "./stale";
+import { getReview } from "./reviews";
+import { isRunOwned } from "./ownership";
+
+const cachedUsage: { value: number; expiresAt: number; pending: Promise<number> | null } = { value: 0, expiresAt: 0, pending: null };
 
 /** Total bytes under a run dir. Best-effort: an unreadable entry contributes 0 rather than throwing. */
 function runDirBytes(dir: string): number {
@@ -40,6 +44,27 @@ function outputBytes(): number {
   return fs.existsSync(OUTPUT_DIR) ? runDirBytes(OUTPUT_DIR) : 0;
 }
 
+/** Asynchronous, single-flight usage read for Settings. Normal settings updates no longer walk output/. */
+async function cachedOutputBytes(): Promise<number> {
+  if (Date.now() < cachedUsage.expiresAt) return cachedUsage.value;
+  if (cachedUsage.pending) return cachedUsage.pending;
+  async function walk(dir: string): Promise<number> {
+    let entries: fs.Dirent[];
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch (_) { return 0; }
+    let total = 0;
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) total += await walk(full);
+      else { try { total += (await fs.promises.stat(full)).size; } catch (_) { /* vanished */ } }
+    }
+    return total;
+  }
+  cachedUsage.pending = (fs.existsSync(OUTPUT_DIR) ? walk(OUTPUT_DIR) : Promise.resolve(0)).then((value) => {
+    cachedUsage.value = value; cachedUsage.expiresAt = Date.now() + 15_000; return value;
+  }).finally(() => { cachedUsage.pending = null; });
+  return cachedUsage.pending;
+}
+
 /**
  * Delete FINISHED runs whose last activity is older than `maxAgeDays`. Opt-in retention, swept
  * once at boot (see app-settings.ts outputRetentionDays and the call in http/serve.ts): before
@@ -67,6 +92,10 @@ function pruneRuns({ maxAgeDays, nowMs = Date.now() }: { maxAgeDays: number; now
     const manifest = readJSON<Manifest | null>(mp, null);
     if (!manifest) continue;
     if (ACTIVE_RUN_STATUSES.has(manifest.status)) continue;
+    if (isRunOwned(name)) continue;
+    // A reviewer explicitly protected this run. Corrupt/missing review sidecars are treated as
+    // unprotected; only a durable affirmative choice prevents retention.
+    try { if (getReview(name).keep) continue; } catch (_) { continue; }
     const lastActivity = manifestActivityMs(manifest, st);
     if (!lastActivity || lastActivity >= cutoff) continue;
     const bytes = runDirBytes(dir);
@@ -78,6 +107,7 @@ function pruneRuns({ maxAgeDays, nowMs = Date.now() }: { maxAgeDays: number; now
     runSummaryCache.delete(mp);
     result.deleted.push(manifest.runId || name);
     result.freedBytes += bytes;
+    cachedUsage.expiresAt = 0;
   }
   return result;
 }
@@ -94,7 +124,8 @@ function deleteRun(runId: unknown): string {
   if (!st.isFile()) throw statusError("run not found", 404);
   fs.rmSync(dir, { recursive: true, force: false });
   runSummaryCache.delete(mp);
+  cachedUsage.expiresAt = 0;
   return String(runId);
 }
 
-export { outputBytes, pruneRuns, deleteRun };
+export { outputBytes, cachedOutputBytes, pruneRuns, deleteRun };

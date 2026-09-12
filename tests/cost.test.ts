@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "bun:test";
 import fs from "node:fs";
 import * as store from "../src/store";
-import { normalizeUsage, costForUsage, runCost, spendToDate, averageUsageByModel, estimateRunCost, runTraces, traceStatsByModel, recentTraces } from "../src/runner/cost";
+import { normalizeUsage, costForUsage, runCost, recordProviderUsage, spendToDate, averageUsageByModel, estimateRunCost, runTraces, traceStatsByModel, recentTraces } from "../src/runner/cost";
 import { loadPricing, priceForModel, pricingLastUpdated } from "../src/config/pricing";
 
 const KNOWN_MODEL = "claude-opus-4-8"; // present in src/config/pricing.json
@@ -121,6 +121,21 @@ describe("cost: runCost aggregates a manifest's jobs", () => {
     expect(runCost(null)).toMatchObject({ totalCost: 0, jobCount: 0 });
     expect(runCost(undefined)).toMatchObject({ totalCost: 0, jobCount: 0 });
   });
+
+  it("flags cache-token usage as partial when no cache-specific rate is configured", () => {
+    const breakdown = costForUsage(KNOWN_MODEL, { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 40 });
+    expect(breakdown.cacheTokens).toBe(40);
+    expect(breakdown.cacheAccountingPartial).toBe(true);
+  });
+
+  it("uses the provider ledger instead of double-counting a generation job", () => {
+    const manifest = { runId: "ledger", status: "running", jobs: [{ status: "ok", modelId: KNOWN_MODEL, usage: { input_tokens: 900, output_tokens: 900 } }] } as store.Manifest;
+    recordProviderUsage(manifest, { modelId: KNOWN_MODEL, provider: "anthropic", apiModel: KNOWN_MODEL, pool: "keys", purpose: "caption", promptLabel: "caption", usage: { input_tokens: 100, output_tokens: 50 }, finishReason: "stop", partial: false, pricingRevision: null, status: "ok", error: null, startedAt: new Date().toISOString(), ms: 1, at: new Date().toISOString() });
+    recordProviderUsage(manifest, { modelId: KNOWN_MODEL, provider: "anthropic", apiModel: KNOWN_MODEL, pool: "keys", purpose: "generation", promptLabel: "generation", usage: null, finishReason: null, partial: true, pricingRevision: null, status: "error", error: "empty", startedAt: new Date().toISOString(), ms: 1, at: new Date().toISOString() });
+    expect(runCost(manifest).jobCount).toBe(1);
+    expect(runCost(manifest).anyPartialUsage).toBe(true);
+    expect(manifest.cost!.totalCost).toBe(costForUsage(KNOWN_MODEL, { input_tokens: 100, output_tokens: 50 }).totalCost);
+  });
 });
 
 describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
@@ -198,6 +213,15 @@ describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
 });
 
 describe("cost: runTraces flattens a manifest into per-generation trace rows", () => {
+  it("uses provider ledger rows for helpers and billed errors instead of jobs", () => {
+    const traces = runTraces({ runId: "ledger", jobs: [{ modelId: KNOWN_MODEL, status: "ok", usage: { input_tokens: 999, output_tokens: 999 } }], providerCalls: [
+      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "caption", status: "ok", usage: { input_tokens: 10, output_tokens: 2 }, ms: 7, startedAt: "2026-01-01T00:00:00.000Z", at: "2026-01-01T00:00:01.000Z" },
+      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "generation", status: "error", error: "empty response", usage: { input_tokens: 20, output_tokens: 0 }, ms: 8, startedAt: "2026-01-01T00:00:01.000Z", at: "2026-01-01T00:00:02.000Z" },
+    ] });
+    expect(traces).toHaveLength(2);
+    expect(traces.map((t) => t.purpose)).toEqual(["caption", "generation"]);
+    expect(traces[1]).toMatchObject({ status: "error", error: "empty response", inputTokens: 20 });
+  });
   it("normalizes each job with usage/cost into a trace, keyed to the manifest's runId", () => {
     const traces = runTraces({
       runId: "run-1",

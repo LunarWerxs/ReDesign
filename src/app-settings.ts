@@ -7,8 +7,14 @@
  * tracked repo.
  */
 import path from "node:path";
+import {
+  AUTO_UPDATE_INTERVAL_DEFAULT_S,
+  setAutoUpdateEnabled,
+  setAutoUpdateIntervalSecs,
+  setUpdateNotifyEnabled,
+} from "./auto-update";
+import { updateInstanceInfo } from "./instance";
 import { ROOT, readJSON, writeJSON } from "./util";
-import { AUTO_UPDATE_INTERVAL_DEFAULT_S } from "./auto-update";
 
 const SETTINGS_FILE = path.join(ROOT, "output", ".reimagine-settings.json");
 
@@ -56,6 +62,9 @@ export interface AppSettings {
 }
 
 let cached: AppSettings | null = null;
+type SettingsSource = "local" | "remote";
+type LocalChangeListener = () => void;
+let scheduleLocalSync: LocalChangeListener | null = null;
 
 /** Load the persisted settings (cached in-memory after the first read). */
 export function loadAppSettings(): AppSettings {
@@ -80,6 +89,54 @@ export function saveAppSettings(settings: AppSettings): void {
  */
 export function resetAppSettingsCache(): void {
   cached = null;
+}
+
+/** Register the Connections outbound scheduler without coupling this state owner to its transport. */
+export function setAppSettingsSyncScheduler(listener: LocalChangeListener | null): void {
+  scheduleLocalSync = listener;
+}
+
+/**
+ * The one transition for all daemon preferences. It validates the values, persists once, applies
+ * live runtime effects, refreshes the tray pointer and asks Connections to coalesce an outbound
+ * write for local changes. Remote application takes this same route with echo suppression.
+ */
+export function applyAppSettings(
+  patch: unknown,
+  options: { source?: SettingsSource; onLocalChange?: LocalChangeListener } = {},
+): AppSettings {
+  const incoming = patch && typeof patch === "object" ? (patch as Record<string, unknown>) : {};
+  const settings = { ...loadAppSettings() };
+  let changed = false;
+  const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    if (Object.is(settings[key], value)) return;
+    settings[key] = value;
+    changed = true;
+  };
+
+  if (typeof incoming.autoUpdate === "boolean") set("autoUpdate", incoming.autoUpdate);
+  if (typeof incoming.updateNotify === "boolean") set("updateNotify", incoming.updateNotify);
+  if (typeof incoming.portableMode === "boolean") set("portableMode", incoming.portableMode);
+  if (typeof incoming.hideTrayIcon === "boolean") set("hideTrayIcon", incoming.hideTrayIcon);
+  if (typeof incoming.autoUpdateIntervalSecs === "number" && Number.isFinite(incoming.autoUpdateIntervalSecs)) {
+    set("autoUpdateIntervalSecs", Math.min(604_800, Math.max(900, Math.round(incoming.autoUpdateIntervalSecs))));
+  }
+  if (typeof incoming.outputRetentionDays === "number" && Number.isFinite(incoming.outputRetentionDays)) {
+    const days = Math.floor(incoming.outputRetentionDays);
+    set("outputRetentionDays", days > 0 ? Math.min(3650, Math.max(1, days)) : 0);
+  }
+
+  if (!changed) return settings;
+  saveAppSettings(settings);
+  setAutoUpdateEnabled(settings.autoUpdate === true);
+  setUpdateNotifyEnabled(settings.updateNotify !== false);
+  setAutoUpdateIntervalSecs(settings.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
+  updateInstanceInfo({ portableMode: settings.portableMode === true, hideTrayIcon: settings.hideTrayIcon === true });
+  if ((options.source ?? "local") === "local") {
+    options.onLocalChange?.();
+    scheduleLocalSync?.();
+  }
+  return settings;
 }
 
 // ── what travels to a Connections account ────────────────────────────────────────
@@ -149,18 +206,19 @@ export function readSyncedPrefs(): Record<string, unknown> {
 export function applySyncedPrefs(prefs: unknown): boolean {
   if (!prefs || typeof prefs !== "object") return false;
   const incoming = prefs as Record<string, unknown>;
-  const settings = loadAppSettings();
-  const target = settings as Record<string, unknown>;
-  let changed = false;
+  const before = loadAppSettings();
+  const allowed: Record<string, unknown> = {};
+  let offered = false;
   for (const key of SYNCED_PREF_KEYS) {
     const value = incoming[key];
-    if (value === undefined || Object.is(value, target[key])) continue;
-    target[key] = value;
-    changed = true;
+    if (value === undefined || Object.is(value, before[key])) continue;
+    allowed[key] = value;
+    offered = true;
   }
-  if (changed) saveAppSettings(settings);
-  return changed;
+  if (!offered) return false;
+  const beforeJson = JSON.stringify(before);
+  applyAppSettings(allowed, { source: "remote" });
+  return JSON.stringify(loadAppSettings()) !== beforeJson;
 }
 
-export { AUTO_UPDATE_INTERVAL_DEFAULT_S };
-export { SETTINGS_FILE };
+export { AUTO_UPDATE_INTERVAL_DEFAULT_S, SETTINGS_FILE };

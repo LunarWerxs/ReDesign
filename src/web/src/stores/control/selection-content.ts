@@ -1,7 +1,13 @@
 import { toast } from 'vue-sonner';
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 import { t } from '@/i18n';
-import { filesToUploadImages, uploadableImageFiles } from '@/composables/useImageUpload';
+import {
+  filesToUploadImages,
+  MAX_UPLOAD_BODY_BYTES,
+  MAX_UPLOAD_IMAGE_BYTES,
+  type UploadLimits,
+  uploadableImageFiles,
+} from '@/composables/useImageUpload';
 import { readTextAttachment, textAttachableFiles } from '@/composables/useTextAttachments';
 import { toggleIn } from '@/lib/array';
 import type {
@@ -20,6 +26,36 @@ function nextBrandAttachmentId(): string {
 }
 
 export function createSelectionContentActions(state: ControlState) {
+  // The daemon saves each batch atomically but returns a complete catalog snapshot. Keep calls
+  // ordered per collection so an older snapshot can never replace the result of a newer upload.
+  let inputUploadTail: Promise<void> = Promise.resolve();
+  let referenceUploadTail: Promise<void> = Promise.resolve();
+  let uploadLimits: UploadLimits | null = null;
+
+  async function currentUploadLimits(): Promise<UploadLimits> {
+    if (uploadLimits) return uploadLimits;
+    try {
+      const received = await api.uploadLimits();
+      uploadLimits = received;
+      return received;
+    } catch (error) {
+      // A daemon from before this client has no limits endpoint. Its historical defaults are
+      // safe to use; every other failed lookup must stop before a potentially huge FileReader.
+      if (error instanceof ApiError && error.status === 404) {
+        uploadLimits = {
+          bodyLimitBytes: MAX_UPLOAD_BODY_BYTES,
+          imageLimitBytes: MAX_UPLOAD_IMAGE_BYTES,
+        };
+        return uploadLimits;
+      }
+      throw error;
+    }
+  }
+
+  function enqueueUpload(tail: Promise<void>, work: () => Promise<void>): Promise<void> {
+    const next = tail.catch(() => undefined).then(work);
+    return next;
+  }
   function toggleInput(id: string) {
     state.selInputs.value = toggleIn(state.selInputs.value, id);
   }
@@ -79,8 +115,8 @@ export function createSelectionContentActions(state: ControlState) {
       toast(t('content.dropHint'));
       return;
     }
-    try {
-      const images = await filesToUploadImages(accepted, source);
+    const work = async () => {
+      const images = await filesToUploadImages(accepted, source, await currentUploadLimits());
       const r = await api.uploadInputs(images);
       state.inputs.value = r.inputs || [];
       const ids = new Set(state.inputs.value.map((it) => it.id));
@@ -93,7 +129,9 @@ export function createSelectionContentActions(state: ControlState) {
         : state.selInputs.value.filter((id) => ids.has(id));
       const n = (r.saved || []).length || accepted.length;
       toast.success(t('content.added', { count: n }, n));
-    } catch (e) {
+    };
+    inputUploadTail = enqueueUpload(inputUploadTail, work);
+    try { await inputUploadTail; } catch (e) {
       toast.error(t('content.uploadFailed'), { description: errMessage(e) });
     }
   }
@@ -104,8 +142,8 @@ export function createSelectionContentActions(state: ControlState) {
       toast(t('content.dropHint'));
       return;
     }
-    try {
-      const images = await filesToUploadImages(accepted, source);
+    const work = async () => {
+      const images = await filesToUploadImages(accepted, source, await currentUploadLimits());
       const r = await api.uploadReferences(images);
       state.references.value = r.references || [];
       const ids = new Set(state.references.value.map((it) => it.id));
@@ -115,7 +153,9 @@ export function createSelectionContentActions(state: ControlState) {
       }
       const n = (r.saved || []).length || accepted.length;
       toast.success(t('content.added', { count: n }, n));
-    } catch (e) {
+    };
+    referenceUploadTail = enqueueUpload(referenceUploadTail, work);
+    try { await referenceUploadTail; } catch (e) {
       toast.error(t('content.uploadFailed'), { description: errMessage(e) });
     }
   }

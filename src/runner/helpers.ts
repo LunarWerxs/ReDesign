@@ -53,16 +53,20 @@ async function withKeyRotation<T>(
     if (!acq.available) return null;
     try {
       const out = await attempt({ apiKey: acq.key as string, attempt: i, mask: acq.mask as string });
-      km.report(pool, acq.keyId as string, { errorClass: CLASS.OK });
+      km.report(pool, acq.keyId as string, { errorClass: CLASS.OK, leaseId: acq.leaseId });
       return out;
     } catch (err) {
-      if (signal?.aborted) return null;
+      if (signal?.aborted) {
+        km.release(pool, acq.keyId, acq.leaseId);
+        return null;
+      }
       const provErr = err as ProviderError;
       const isProvider = provErr && provErr.name === "ProviderError";
       km.report(pool, acq.keyId as string, {
         errorClass: isProvider ? provErr.errorClass : CLASS.BAD_REQUEST, // don't blame the key for our bug
         retryAfterMs: isProvider ? provErr.retryAfterMs : null,
         message: provErr?.message,
+        leaseId: acq.leaseId,
       });
       if (!isProvider || !provErr.retryable) return null;
       // else: the key is now cooling, loop around and acquire the next one

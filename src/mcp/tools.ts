@@ -8,6 +8,7 @@
 // ./mcp-stdio.mjs (part of the shared kit, edit it there, never here); ./stdio.ts wires
 // this tool table into it via a static import (the CJS version bridged with a dynamic import()).
 import type { McpEngineTool } from "../mcp-stdio.mjs";
+import { buildMcpRunBody } from "../run-options";
 
 // ── HTTP client over the running server (mirrors the CLI's serverBase in src/cli/lifecycle.ts) ──
 function base(): string {
@@ -47,27 +48,45 @@ const obj = (properties: Record<string, unknown> = {}, required: string[] = []) 
 });
 const str = (v: unknown): string => String(v ?? "");
 
-/**
- * Parse the `model_quantities` string ("gpt-5=3,claude-opus-5=1") into the per-model copy counts
- * /api/run expects. MCP tool inputs are flat scalars, so the map arrives as text, same as the CLI's
- * --model-quantities. Malformed or non-positive entries are dropped rather than failing the call:
- * an agent typo in one model's count should not throw away the whole run.
- */
-const modelQuantities = (v: unknown): Record<string, number> | undefined => {
-  const raw = str(v).trim();
-  if (!raw) return undefined;
-  const out: Record<string, number> = {};
-  for (const pair of raw.split(",")) {
-    const eq = pair.indexOf("=");
-    if (eq === -1) continue;
-    const id = pair.slice(0, eq).trim();
-    const n = Number.parseInt(pair.slice(eq + 1).trim(), 10);
-    if (id && Number.isFinite(n) && n > 0) out[id] = n;
+function runSubmission(a: Record<string, unknown>, inputName: "input" | "inputs"): Record<string, unknown> {
+  if (a.preflight_id != null) {
+    const token = str(a.preflight_id).trim();
+    if (!token) throw new Error("preflight_id must be a non-empty token");
+    return { preflightId: token };
   }
-  return Object.keys(out).length ? out : undefined;
+  return buildMcpRunBody(a, inputName);
+}
+
+const runProperties = {
+  input: { type: "string", description: '"all" or comma-separated input ids (default all)' },
+  models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
+  prompts: { type: "string", description: '"all" or comma-separated preset ids (default all; ignored if only custom is given)' },
+  custom: { type: "string", description: "a custom prompt to run alongside (or instead of) the presets" },
+  reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
+  reference_note: { type: "string", description: "how the model should use the reference image(s)" },
+  variants: { type: "number", description: "outputs per model/prompt (default 1)" },
+  model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
+  brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
+  mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+  concurrency: { type: "number", description: "max parallel calls across the whole run" },
+  max_images: { type: "number", description: "cap reference images per input group" },
+  max_cost: { type: "number", description: "optional USD ceiling; must be finite and nonnegative" },
+  label: { type: "string", description: "tag added to the run id" },
+  preflight_id: { type: "string", description: "prepared run token from preflight_run; submit this exact recipe once, safely retry after a lost response" },
+};
+const { input: _inputProperty, ...batchRunPropertiesWithoutInput } = runProperties;
+const batchRunProperties = {
+  ...batchRunPropertiesWithoutInput,
+  inputs: { type: "string", description: '"all" or comma-separated input ids (default all)' },
 };
 
 export const TOOLS: McpEngineTool[] = [
+  {
+    name: "preflight_run",
+    description: "Validate and estimate a run without queueing it. Returns preflightId, resolved job count, and estimated cost; submit that token with run or batch_reimagine to avoid duplicate paid batches after a lost response.",
+    inputSchema: obj(batchRunProperties),
+    run: (a) => post("/api/run/preflight", buildMcpRunBody(a, "inputs")),
+  },
   {
     name: "snapshot",
     description: "Full snapshot of the app: models, prompt presets, inputs, references, API key-pool health, and recent runs.",
@@ -103,37 +122,18 @@ export const TOOLS: McpEngineTool[] = [
     description:
       'Queue a reimagine job: send input screenshot(s) through models × prompts and collect reimagined HTML. Returns { runId } immediately, poll get_run for progress. Set mock:true for a no-API-spend dry run.',
     inputSchema: obj({
-      input: { type: "string", description: '"all" or comma-separated input ids (default all)' },
-      models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
-      prompts: { type: "string", description: '"all" or comma-separated preset ids (default all; ignored if only custom is given)' },
-      custom: { type: "string", description: "a custom prompt to run alongside (or instead of) the presets" },
-      reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
-      reference_note: { type: "string", description: "how the model should use the reference image(s)" },
-      variants: { type: "number", description: "outputs per model/prompt (default 1)" },
-      model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
-      brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
-      mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
-      concurrency: { type: "number", description: "max parallel calls across the whole run" },
-      max_images: { type: "number", description: "cap reference images per input group" },
-      label: { type: "string", description: "tag added to the run id" },
+      ...runProperties,
     }),
     // Build the /api/run body the same way the CLI's `run` verb builds its options
     // (src/cli/run.ts), so an agent passes simple fields and the structured prompt/reference
     // objects are assembled here.
-    run: (a) =>
-      post("/api/run", {
-        inputs: a.input || "all",
-        models: a.models || "all",
-        prompts: { presets: a.prompts || (a.custom ? [] : "all"), custom: a.custom || null },
-        reference: a.reference ? { images: a.reference, note: a.reference_note || null } : null,
-        variants: a.variants || 1,
-        modelQuantities: modelQuantities(a.model_quantities),
-        brandStyleGuide: a.brand_style_guide || null,
-        mock: !!a.mock,
-        concurrency: a.concurrency,
-        maxImages: a.max_images,
-        label: a.label,
-      }),
+    run: (a) => post("/api/run", runSubmission(a, "input")),
+  },
+  {
+    name: "repeat_run",
+    description: "Repeat a prior run from its durable original recipe. Returns the new run id without reconstructing selections from current UI state.",
+    inputSchema: obj({ runId: { type: "string", description: "the run to repeat" } }, ["runId"]),
+    run: (a) => post(`/api/runs/${encodeURIComponent(str(a.runId))}/repeat`, {}),
   },
   {
     name: "retry_run",
@@ -165,34 +165,15 @@ export const TOOLS: McpEngineTool[] = [
     description:
       'Composite recipe: queue a reimagine batch and optionally wait for it. wait:false (default) returns { runId, note } immediately, poll get_run yourself. wait:true polls internally (up to timeout_secs, default 120, capped at 300) and returns a structured digest: { runId, status, jobs: [{ input, model, prompt, variant, status, outputFile, caption, error }], captionSummary }. Set mock:true for a no-API-spend dry run.',
     inputSchema: obj({
-      inputs: { type: "string", description: '"all" or comma-separated input ids (default all)' },
-      prompts: { type: "string", description: '"all" or comma-separated preset ids (default all; ignored if only custom is given)' },
-      custom: { type: "string", description: "a custom prompt to run alongside (or instead of) the presets" },
-      models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
-      variants: { type: "number", description: "outputs per model/prompt (default 1)" },
-      model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
-      brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
-      reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
-      reference_note: { type: "string", description: "how the model should use the reference image(s)" },
-      mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+      ...batchRunProperties,
       wait: { type: "boolean", description: "poll until the run finishes (or timeout_secs elapses) and return a digest instead of just { runId } (default false)" },
       timeout_secs: { type: "number", description: "max seconds to poll when wait:true (default 120, capped at 300)" },
       label: { type: "string", description: "tag added to the run id" },
     }),
     run: async (a) => {
-      const { runId } = (await post("/api/run", {
-        inputs: a.inputs || "all",
-        models: a.models || "all",
-        prompts: { presets: a.prompts || (a.custom ? [] : "all"), custom: a.custom || null },
-        reference: a.reference ? { images: a.reference, note: a.reference_note || null } : null,
-        variants: a.variants || 1,
-        modelQuantities: modelQuantities(a.model_quantities),
-        brandStyleGuide: a.brand_style_guide || null,
-        mock: !!a.mock,
-        label: a.label,
-      })) as { runId: string };
+      const { runId } = (await post("/api/run", runSubmission(a, "inputs"))) as { runId: string };
 
-      if (!a.wait) return { runId, note: "queued, poll get_run(runId) for progress, or call batch_reimagine again with wait:true" };
+      if (!a.wait) return { runId, note: "queued, poll get_run with this runId for progress; the existing run is already submitted" };
 
       const timeoutMs = Math.min(Math.max(1, Number(a.timeout_secs) || 120), 300) * 1000;
       const deadline = Date.now() + timeoutMs;

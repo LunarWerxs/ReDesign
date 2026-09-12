@@ -15,11 +15,14 @@
  * load) and the exported checkForUpdate/applyUpdate keep their previous names + async
  * signatures for the /api/updates routes.
  */
+
+import { dirname } from "node:path";
 import {
   applyUpdate as applyReleaseUpdate,
   checkForUpdate as checkReleaseUpdate,
   cleanupStaleUpdateArtifacts as cleanupReleaseArtifacts,
 } from "./github-updater";
+import { acquireUpdateLock } from "./update-lock";
 import { createUpdater, type Updater } from "./updater-engine.mjs";
 import { IS_PACKAGED, ROOT } from "./util";
 
@@ -32,8 +35,12 @@ function engine(): Updater {
       serviceName: "redesign",
       appLabel: "RēDesign",
       updateRepoEnvVar: "REIMAGINE_UPDATE_REPO",
-      installCmd: ["npm", "install"],
-      buildCmd: ["npm", "run", "build"],
+      // The source checkout commits bun.lock. npm install invents package-lock.json and then
+      // makes the next update refuse the now-dirty tree.
+      installCmd: ["bun", "install", "--frozen-lockfile"],
+      // The web app has its own committed npm lock. A source self-update must not resolve it
+      // through the developer's ambient node_modules before declaring the checkout healthy.
+      buildCmd: ["bun", "run", "build:web:locked"],
     });
   }
   return engineInstance;
@@ -43,8 +50,28 @@ async function checkForUpdate() {
   return IS_PACKAGED ? checkReleaseUpdate() : engine().checkForUpdate();
 }
 
+let applying: Promise<Awaited<ReturnType<typeof applyReleaseUpdate>>> | null = null;
+
 async function applyUpdate() {
-  return IS_PACKAGED ? applyReleaseUpdate() : engine().applyUpdate();
+  // The auto-update timer and a manual /api/updates request share this promise, so both callers
+  // observe one transaction rather than racing through staging/swap independently.
+  if (applying) return applying;
+  const installDir = IS_PACKAGED ? dirname(process.execPath) : ROOT;
+  const lock = acquireUpdateLock(installDir);
+  if (!lock) {
+    return {
+      ok: false,
+      message: "An update is already being applied by another RēDesign process.",
+      restartRequired: false,
+      status: await checkForUpdate(),
+      output: [],
+    };
+  }
+  applying = (IS_PACKAGED ? applyReleaseUpdate() : engine().applyUpdate()).finally(() => {
+    lock.release();
+    applying = null;
+  });
+  return applying;
 }
 
 function cleanupStaleUpdateArtifacts(): void {
