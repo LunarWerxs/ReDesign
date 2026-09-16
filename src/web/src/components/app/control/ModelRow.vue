@@ -52,7 +52,7 @@ function onRowKeydown(e: KeyboardEvent) {
       <div
         role="button"
         tabindex="0"
-        class="flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+        class="flex items-center gap-2 rounded-md px-2 py-1 text-start transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         :class="[
           selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/60',
           !runnable ? 'cursor-not-allowed opacity-55' : '',

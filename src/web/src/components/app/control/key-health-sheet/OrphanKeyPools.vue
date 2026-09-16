@@ -53,7 +53,7 @@ function poolName(p: KeyPool) {
     >
       <div class="flex items-center gap-1 bg-muted/40 px-3 py-2.5 text-sm">
         <CollapsibleTrigger as-child>
-          <button type="button" class="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 text-left outline-none">
+          <button type="button" class="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 text-start outline-none">
             <strong>{{ poolName(pool) }}</strong>
             <span class="flex items-center gap-1.5">
               <Tooltip v-for="b in badges(pool)" :key="b.label">
@@ -67,7 +67,7 @@ function poolName(p: KeyPool) {
                 <TooltipContent>{{ b.label }}</TooltipContent>
               </Tooltip>
             </span>
-            <span class="ml-auto text-xs text-muted-foreground" :title="t('keyHealth.totalKeysInPool')">{{ pool.total }}</span>
+            <span class="ms-auto text-xs text-muted-foreground" :title="t('keyHealth.totalKeysInPool')">{{ pool.total }}</span>
           </button>
         </CollapsibleTrigger>
         <Tooltip v-if="poolOpen">

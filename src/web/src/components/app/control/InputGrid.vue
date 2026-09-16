@@ -69,9 +69,9 @@ function onPreviewOpenChange(open: boolean) {
         <div class="flex items-center gap-2.5">
           <div class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {{ t('input.previousSessions') }}
-            <span class="ml-1 font-normal text-muted-foreground/70">{{ previousInputs.length }}</span>
+            <span class="ms-1 font-normal text-muted-foreground/70">{{ previousInputs.length }}</span>
           </div>
-          <div class="ml-auto flex gap-2">
+          <div class="ms-auto flex gap-2">
             <Button variant="ghost" size="sm" @click="store.selectAll('inputs')">{{ t('input.all') }}</Button>
             <Button variant="ghost" size="sm" @click="store.selectNone('inputs')">{{ t('input.none') }}</Button>
           </div>
@@ -104,7 +104,7 @@ function onPreviewOpenChange(open: boolean) {
   <Dialog :open="!!previewInput" @update:open="onPreviewOpenChange">
     <DialogContent class="max-h-[94vh] w-[min(98vw,1500px)] max-w-none gap-0 overflow-hidden p-0">
       <DialogHeader class="border-b px-4 py-3">
-        <DialogTitle class="truncate pr-10 text-sm">{{ previewInput?.name }}</DialogTitle>
+        <DialogTitle class="truncate pe-10 text-sm">{{ previewInput?.name }}</DialogTitle>
       </DialogHeader>
       <div class="max-h-[calc(94vh-49px)] overflow-auto bg-black p-3">
         <img

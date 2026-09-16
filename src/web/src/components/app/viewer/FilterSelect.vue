@@ -80,25 +80,25 @@ function hideAll() {
         :disabled="!items.length"
       >
         <span>{{ label }}</span>
-        <span class="ml-auto text-muted-foreground">{{ visibleCount }}/{{ items.length }}</span>
+        <span class="ms-auto text-muted-foreground">{{ visibleCount }}/{{ items.length }}</span>
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
     <PopoverContent align="start" :collision-padding="12" class="w-[min(340px,calc(100vw-2rem))] p-2">
       <div class="flex items-center gap-2 px-1 pb-2">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ label }}</strong>
-        <div class="ml-auto flex gap-1.5">
+        <div class="ms-auto flex gap-1.5">
           <Button variant="ghost" size="xs" @click="showAll">{{ t('filter.all') }}</Button>
           <Button variant="ghost" size="xs" @click="hideAll">{{ t('filter.none') }}</Button>
         </div>
       </div>
-      <div class="grid max-h-[min(50vh,340px)] gap-1 overflow-y-auto pr-1">
+      <div class="grid max-h-[min(50vh,340px)] gap-1 overflow-y-auto pe-1">
         <div
           v-for="item in items"
           :key="item.id"
           role="button"
           tabindex="0"
-          class="flex items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-colors outline-none"
+          class="flex items-center gap-2 rounded-md border px-2.5 py-2 text-start transition-colors outline-none"
           :class="isVisible(item) ? 'border-primary bg-accent' : 'hover:border-muted-foreground/40 opacity-55'"
           @click="toggle(item.id)"
           @keydown="onRowKeydown($event, item.id)"

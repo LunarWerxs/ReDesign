@@ -131,7 +131,7 @@ function loadDefault() {
         <span
           v-for="a in store.brandAttachments"
           :key="a.id"
-          class="flex max-w-full items-center gap-1.5 rounded-full border bg-muted/40 py-1 pl-2.5 pr-1 text-xs"
+          class="flex max-w-full items-center gap-1.5 rounded-full border bg-muted/40 py-1 ps-2.5 pe-1 text-xs"
         >
           <FileTextIcon class="size-3.5 shrink-0 text-muted-foreground" />
           <span class="truncate" :title="a.name">{{ a.name }}</span>

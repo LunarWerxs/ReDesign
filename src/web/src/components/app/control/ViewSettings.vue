@@ -299,7 +299,7 @@ function selectCustomInput(event: FocusEvent) {
       </p>
       <button
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent"
         :title="t('viewSettings.switchRunTitle')"
         @click="openRunPicker"
       >
@@ -319,7 +319,7 @@ function selectCustomInput(event: FocusEvent) {
       <button
         v-if="canRepeatOriginal"
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
         :disabled="store.isLive || repeatingOriginal"
         :title="store.isLive ? t('viewer.repeatOriginalWaitTitle') : t('viewer.repeatOriginalTitle')"
         @click="repeatOriginal"
@@ -330,7 +330,7 @@ function selectCustomInput(event: FocusEvent) {
       <button
         v-if="hasRetryableJobs"
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
         :disabled="store.isLive || retryingAll"
         :title="store.isLive ? t('viewSettings.retryFailedWaitTitle') : t('viewSettings.retryFailedTitle')"
         @click="retryFailed"
@@ -341,7 +341,7 @@ function selectCustomInput(event: FocusEvent) {
       <a
         v-if="hasSuccessfulOutputs"
         :href="downloadAllUrl"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-left outline-none transition-colors hover:bg-accent"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent"
         :title="t('viewSettings.downloadAllTitle')"
       >
         <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.downloadAll') }}</span>

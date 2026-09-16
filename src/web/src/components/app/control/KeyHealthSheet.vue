@@ -384,7 +384,7 @@ async function confirmDeleteKey() {
       <span class="text-sm font-semibold text-foreground">{{ t('keyHealth.settings') }}</span>
       <!-- Theme, refresh and shutdown are ACTIONS, not settings: they belong on the header rail
            next to the theme toggle, not as a "Server" card buried at the bottom of a tab. -->
-      <div class="ml-auto flex items-center">
+      <div class="ms-auto flex items-center">
         <Tooltip>
           <TooltipTrigger as-child>
             <Button

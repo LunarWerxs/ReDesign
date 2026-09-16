@@ -41,7 +41,7 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
   <div
     role="button"
     tabindex="0"
-    class="group relative overflow-hidden rounded-lg border bg-card text-left transition-colors"
+    class="group relative overflow-hidden rounded-lg border bg-card text-start transition-colors"
     :class="selected ? 'border-primary ring-1 ring-primary' : 'hover:border-muted-foreground/40'"
     @click="emit('toggle')"
     @keydown="onKeydown"

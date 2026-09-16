@@ -186,12 +186,12 @@ watch(
 <template>
   <Dialog v-model:open="dialogOpen">
     <DialogContent class="max-h-[min(86vh,760px)] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-      <DialogHeader class="border-b px-5 pb-4 pt-5 pr-14">
+      <DialogHeader class="border-b px-5 pb-4 pt-5 pe-14">
         <div class="flex min-w-0 items-start justify-between gap-3">
           <div class="min-w-0">
             <DialogTitle class="truncate">
               {{ title }}
-              <span class="ml-1 font-normal text-muted-foreground">{{ runs.length }}</span>
+              <span class="ms-1 font-normal text-muted-foreground">{{ runs.length }}</span>
             </DialogTitle>
             <DialogDescription>{{ description }}</DialogDescription>
           </div>
@@ -248,7 +248,7 @@ watch(
         <div
           v-for="run in runs"
           :key="run.runId"
-          class="group/run flex items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-2 text-left transition-colors hover:border-muted-foreground/40 hover:bg-accent/60 focus-visible:border-primary focus-visible:outline-none"
+          class="group/run flex items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 py-2 text-start transition-colors hover:border-muted-foreground/40 hover:bg-accent/60 focus-visible:border-primary focus-visible:outline-none"
           :class="[
             run.runId === currentRunId && !editMode ? 'border-primary/40 bg-accent' : '',
             isSelected(run.runId) ? 'border-primary bg-accent' : '',

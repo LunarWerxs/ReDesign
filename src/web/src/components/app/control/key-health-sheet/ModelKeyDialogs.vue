@@ -140,7 +140,7 @@ const emit = defineEmits<{
             <Switch v-model="modelForm.supportsTemperature" />
             <span>{{ t('keyModel.temperature') }}</span>
           </label>
-          <div v-if="modelForm.supportsTemperature" class="ml-auto flex min-w-32 items-center gap-2">
+          <div v-if="modelForm.supportsTemperature" class="ms-auto flex min-w-32 items-center gap-2">
             <Label for="model-temperature" class="text-sm">{{ t('keyModel.temp') }}</Label>
             <Input
               id="model-temperature"
@@ -170,7 +170,7 @@ const emit = defineEmits<{
             <Trash2Icon class="size-4" />
             {{ t('keyModel.remove') }}
           </Button>
-          <div class="ml-auto flex items-center gap-2">
+          <div class="ms-auto flex items-center gap-2">
             <Button type="button" variant="ghost" @click="modelDialogOpen = false">{{ t('keyModel.cancel') }}</Button>
             <Button type="submit" :disabled="modelSaving">
               <Loader2Icon v-if="modelSaving" class="size-4 animate-spin" />

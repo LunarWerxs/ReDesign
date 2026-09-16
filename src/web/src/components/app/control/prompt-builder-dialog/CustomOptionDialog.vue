@@ -242,7 +242,7 @@ defineExpose({ openCreateOption, openEditOption, optionBusy });
             v-if="optionIsEditing"
             type="button"
             variant="destructive"
-            class="mr-auto"
+            class="me-auto"
             :disabled="optionBusy"
             @click="optionDeleteConfirmOpen = true"
           >

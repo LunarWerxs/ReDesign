@@ -117,7 +117,7 @@ function pick(id: string) {
                 >
                   <ZapIcon class="size-3.5 text-muted-foreground" />
                   <span class="truncate">{{ m.label }}</span>
-                  <span v-if="m.label !== m.id" class="ml-auto truncate text-muted-foreground">{{ m.id }}</span>
+                  <span v-if="m.label !== m.id" class="ms-auto truncate text-muted-foreground">{{ m.id }}</span>
                 </CommandItem>
               </CommandGroup>
               <CommandGroup v-if="catalogOptions.length" :heading="t('keyModel.fromCatalog')">
@@ -129,7 +129,7 @@ function pick(id: string) {
                 >
                   <CloudIcon class="size-3.5 text-muted-foreground" />
                   <span class="truncate">{{ m.label }}</span>
-                  <span v-if="m.label !== m.id" class="ml-auto truncate text-muted-foreground">{{ m.id }}</span>
+                  <span v-if="m.label !== m.id" class="ms-auto truncate text-muted-foreground">{{ m.id }}</span>
                 </CommandItem>
               </CommandGroup>
             </template>

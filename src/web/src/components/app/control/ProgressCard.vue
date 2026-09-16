@@ -144,7 +144,7 @@ const {
     <CardHeader class="flex flex-row items-start gap-2.5 border-b">
       <CardTitle class="min-w-0 flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('progress.runProgress') }}
-        <span class="ml-1 inline-block max-w-full truncate align-bottom font-normal normal-case text-muted-foreground/70" :title="store.runId || ''">
+        <span class="ms-1 inline-block max-w-full truncate align-bottom font-normal normal-case text-muted-foreground/70" :title="store.runId || ''">
           {{ store.runTitle }}
         </span>
       </CardTitle>
@@ -171,7 +171,7 @@ const {
           <span v-if="store.progress.error" class="text-destructive">{{ t('progress.errorCount', { count: store.progress.error }) }}</span>
           <span v-if="store.progress.skipped">{{ t('progress.skippedCount', { count: store.progress.skipped }) }}</span>
           <span v-if="runStatusLabel">{{ runStatusLabel }}</span>
-          <span v-if="runningCostLabel" class="ml-auto font-mono">{{ runningCostLabel }}</span>
+          <span v-if="runningCostLabel" class="ms-auto font-mono">{{ runningCostLabel }}</span>
         </template>
       </div>
       <!-- The whole pipeline as a list of batches: what's generating and everything queued
@@ -185,7 +185,7 @@ const {
           <!-- running batch: static (its Cancel/View live in the card header) -->
           <span
             v-if="runningRun"
-            class="flex items-center gap-1.5 rounded-full border py-0.5 pl-2 pr-2.5"
+            class="flex items-center gap-1.5 rounded-full border py-0.5 ps-2 pe-2.5"
             :class="runningRun.runId === store.runId ? 'border-primary/50 bg-accent' : 'bg-muted/30'"
           >
             <span class="size-2 shrink-0 rounded-full" :class="runDot(runningRun.status)" />
@@ -205,7 +205,7 @@ const {
             <span
               v-for="run in queueList"
               :key="run.runId"
-              class="flex items-center gap-1 rounded-full border py-0.5 pl-1 pr-0.5"
+              class="flex items-center gap-1 rounded-full border py-0.5 ps-1 pe-0.5"
               :class="run.runId === store.runId ? 'border-primary/50 bg-accent' : 'bg-muted/30'"
             >
               <button

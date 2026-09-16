@@ -244,9 +244,9 @@ watch(
         <span v-if="runs.length" class="text-xs text-muted-foreground/70">{{ runs.length }}</span>
       </div>
 
-      <div v-if="runs.length" class="ml-auto flex items-center gap-1.5">
+      <div v-if="runs.length" class="ms-auto flex items-center gap-1.5">
         <template v-if="selectionMode">
-          <span class="mr-1 text-xs text-muted-foreground">
+          <span class="me-1 text-xs text-muted-foreground">
             {{ t('runFlyout.selectedCount', { count: selectedRunIds.length }, selectedRunIds.length) }}
           </span>
           <Button
@@ -286,7 +286,7 @@ watch(
 
     <div v-if="runs.length" class="relative mb-4">
       <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input v-model="search" :placeholder="t('runGallery.searchPlaceholder')" class="h-8 pl-8" />
+      <Input v-model="search" :placeholder="t('runGallery.searchPlaceholder')" class="h-8 ps-8" />
     </div>
 
     <p v-if="!runs.length" class="py-16 text-center text-sm text-muted-foreground">
@@ -306,7 +306,7 @@ watch(
         :key="run.runId"
         data-run-card
         :data-run-id="run.runId"
-        class="group relative flex flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors focus-within:border-primary"
+        class="group relative flex flex-col overflow-hidden rounded-lg border bg-card text-start transition-colors focus-within:border-primary"
         :class="[
           isSelected(run.runId) ? 'border-primary bg-primary/5 ring-1 ring-primary/20' : 'hover:border-primary/50',
           selectionMode && !canDelete(run) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',

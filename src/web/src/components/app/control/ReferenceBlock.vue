@@ -101,7 +101,7 @@ function onPaste(e: ClipboardEvent) {
               <span class="text-xs text-muted-foreground">
                 {{ t('reference.selectedCount', { selected: selectedCount, total: store.references.length }) }}
               </span>
-              <div class="ml-auto flex gap-1.5">
+              <div class="ms-auto flex gap-1.5">
                 <Button
                   variant="ghost"
                   size="xs"

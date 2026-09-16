@@ -90,7 +90,7 @@ async function runImport() {
           <span class="font-mono text-muted-foreground">{{ r.mask }}</span>
           <span v-if="r.label" class="font-medium">{{ r.label }}</span>
           <span v-if="r.probed" class="text-[10px] text-muted-foreground/70">· {{ t('keyImport.verified') }}</span>
-          <span class="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium" :class="STATUS_META[r.status].cls">
+          <span class="ms-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium" :class="STATUS_META[r.status].cls">
             {{ t(STATUS_META[r.status].label) }}
           </span>
         </div>

@@ -96,7 +96,7 @@ function confirmShutdown() {
 
 const destructiveClass = 'text-destructive hover:bg-destructive/10 hover:text-destructive';
 const menuItemClass =
-  'flex h-9 w-full items-center gap-3 px-3.5 text-left text-[13px] font-medium outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50';
+  'flex h-9 w-full items-center gap-3 px-3.5 text-start text-[13px] font-medium outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50';
 const menuIconClass = 'size-4 shrink-0 text-muted-foreground';
 const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10';
 </script>
@@ -163,7 +163,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <RefreshCwIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
+      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.refresh') }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.refreshDescription') }}</span>
       </TooltipContent>
@@ -174,7 +174,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <KeyRoundIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
+      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.apiKeys') }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.apiKeysDescription') }}</span>
       </TooltipContent>
@@ -190,7 +190,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <component :is="themeIcon" class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
+      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.theme', { mode: themeLabel }) }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.themeSwitch', { mode: nextThemeLabel }) }}</span>
       </TooltipContent>
@@ -208,7 +208,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <SquareIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
+      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.cancelRun') }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.cancelRunDescription') }}</span>
       </TooltipContent>
@@ -225,7 +225,7 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <PowerIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-left leading-snug shadow-lg">
+      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
         <span class="text-xs font-semibold">{{ t('actions.shutdown') }}</span>
         <span class="text-[11px] text-muted-foreground">{{ t('actions.shutdownDescription') }}</span>
       </TooltipContent>

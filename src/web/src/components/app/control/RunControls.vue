@@ -90,7 +90,7 @@ const estimateTitle = computed(() => {
         :aria-label="t('runControls.costCeiling')"
       />
     </label>
-    <span class="basis-full text-right text-[11px] text-muted-foreground">
+    <span class="basis-full text-end text-[11px] text-muted-foreground">
       {{ t('runControls.costCeilingHint') }}
     </span>
     <Button v-if="store.running" variant="destructive" :title="t('runControls.stopRun')" @click="store.cancelRun()">
@@ -116,7 +116,7 @@ const estimateTitle = computed(() => {
            "Run queue (N)" label here would misrepresent it as running only the parked ones —
            that lives in the ▾ menu below (runQueue), which never adds the current selection. -->
       <Button
-        class="rounded-r-none"
+        class="rounded-e-none"
         :disabled="busy"
         :title="heldCount ? t('runControls.runNowWithQueueHint', { count: heldCount }) : t('runControls.runNowHint')"
         @click="store.runNow()"
@@ -128,7 +128,7 @@ const estimateTitle = computed(() => {
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
           <Button
-            class="rounded-l-none border-l border-l-primary-foreground/25 px-2"
+            class="rounded-s-none border-s border-l-primary-foreground/25 px-2"
             :disabled="busy"
             :aria-label="t('runControls.moreRunOptions')"
             :title="t('runControls.moreRunOptions')"

@@ -100,7 +100,7 @@ async function restoreModel(model: Model) {
   <div class="mb-2 flex items-center gap-2">
     <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.modelsAndKeys') }}</h3>
     <span class="text-xs text-muted-foreground">{{ activeModels.length }}</span>
-    <div class="ml-auto flex items-center gap-1">
+    <div class="ms-auto flex items-center gap-1">
       <Tooltip>
         <TooltipTrigger as-child>
           <Button variant="ghost" size="icon-xs" :aria-label="t('keyModel.refreshApiKeys')" @click="store.refreshKeys()">
@@ -145,7 +145,7 @@ async function restoreModel(model: Model) {
   <button
     v-if="!hasAnyKeys && activeModels.length"
     type="button"
-    class="mb-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-3 text-left transition-colors hover:bg-primary/10"
+    class="mb-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-3 text-start transition-colors hover:bg-primary/10"
     @click="emit('import-keys')"
   >
     <SparklesIcon class="size-5 shrink-0 text-primary" />
@@ -153,7 +153,7 @@ async function restoreModel(model: Model) {
       <span class="text-sm font-semibold">{{ t('keyModel.noKeysYet') }}</span>
       <span class="text-xs text-muted-foreground">{{ t('keyModel.noKeysYetHint') }}</span>
     </span>
-    <span class="ml-auto shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground">
+    <span class="ms-auto shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground">
       {{ t('keyModel.pasteKeysCta') }}
     </span>
   </button>
@@ -172,7 +172,7 @@ async function restoreModel(model: Model) {
           <TooltipTrigger as-child>
             <button
               type="button"
-              class="model-drag -ml-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
+              class="model-drag -ms-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
               :aria-label="t('keyModel.dragToReorder')"
             >
               <GripVerticalIcon class="size-3.5" />
@@ -253,7 +253,7 @@ async function restoreModel(model: Model) {
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
-                class="ml-auto"
+                class="ms-auto"
                 variant="ghost"
                 size="icon-xs"
                 :aria-label="t('keyModel.addApiKey')"

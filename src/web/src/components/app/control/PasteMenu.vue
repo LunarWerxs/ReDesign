@@ -72,7 +72,7 @@ defineExpose({ openAt, close });
       >
         <button
           type="button"
-          class="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
+          class="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground"
           @click="pasteFromClipboard"
         >
           <ClipboardPasteIcon class="size-4" /> {{ t('input.paste') }}

@@ -308,7 +308,7 @@ watch(
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogScrollContent class="max-h-[min(90vh,860px)] gap-0 p-0 sm:max-w-3xl">
-      <DialogHeader class="border-b px-6 pb-4 pt-6 pr-14">
+      <DialogHeader class="border-b px-6 pb-4 pt-6 pe-14">
         <div class="flex items-center gap-2">
           <span class="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
             <SparklesIcon class="size-4" />
@@ -335,7 +335,7 @@ watch(
               v-for="scope in scopes"
               :key="scope.id"
               type="button"
-              class="relative grid min-h-28 content-start gap-1 rounded-lg border p-3 text-left outline-none transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="relative grid min-h-28 content-start gap-1 rounded-lg border p-3 text-start outline-none transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40"
               :class="recipe.scope === scope.id ? 'border-primary bg-primary/5' : ''"
               :aria-pressed="recipe.scope === scope.id"
               @click="setScope(scope.id)"
@@ -384,7 +384,7 @@ watch(
               v-for="option in category.builtIns"
               :key="option.id"
               type="button"
-              class="flex min-h-20 items-start gap-3 rounded-lg border p-3 text-left outline-none transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="flex min-h-20 items-start gap-3 rounded-lg border p-3 text-start outline-none transition-colors hover:border-primary/50 hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/40"
               :class="selectedBuiltInSet.has(option.id) ? 'border-primary bg-primary/5' : ''"
               :aria-pressed="selectedBuiltInSet.has(option.id)"
               @click="toggleBuiltIn(option.id)"
@@ -417,7 +417,7 @@ watch(
             >
               <button
                 type="button"
-                class="flex min-w-0 flex-1 items-start gap-3 rounded-lg p-3 pr-11 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                class="flex min-w-0 flex-1 items-start gap-3 rounded-lg p-3 pe-11 text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                 :aria-pressed="selectedCustomMap.has(option.id)"
                 @click="toggleCustomOption(option)"
               >
@@ -486,7 +486,7 @@ watch(
               v-for="option in orphanedCustomOptions"
               :key="option.id"
               type="button"
-              class="flex min-h-20 items-start gap-3 rounded-lg border border-primary bg-primary/5 p-3 text-left outline-none transition-colors hover:border-primary/70 focus-visible:ring-2 focus-visible:ring-ring/40"
+              class="flex min-h-20 items-start gap-3 rounded-lg border border-primary bg-primary/5 p-3 text-start outline-none transition-colors hover:border-primary/70 focus-visible:ring-2 focus-visible:ring-ring/40"
               :aria-pressed="true"
               @click="removeSavedOption(option.id)"
             >
@@ -554,7 +554,7 @@ watch(
           v-if="isEditing"
           type="button"
           variant="destructive"
-          class="mr-auto"
+          class="me-auto"
           :disabled="busy"
           @click="deleteConfirmOpen = true"
         >

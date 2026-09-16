@@ -81,7 +81,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
     <PopoverTrigger as-child>
       <Button variant="outline" class="min-w-[150px] justify-between" :title="t('modelSelect.chooseModelsTitle')">
         <span>{{ t('modelSelect.models') }}</span>
-        <span class="ml-auto text-muted-foreground"
+        <span class="ms-auto text-muted-foreground"
           >{{ store.selModels.length }}/{{ store.runnableModelIds.length }}</span
         >
         <ChevronDownIcon class="size-4 text-muted-foreground" />
@@ -90,7 +90,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
     <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))] p-2">
       <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('modelSelect.models') }}</strong>
-        <div class="ml-auto flex gap-1.5">
+        <div class="ms-auto flex gap-1.5">
           <Button variant="ghost" size="xs" @click="store.selectAll('models')">{{ t('modelSelect.all') }}</Button>
           <Button variant="ghost" size="xs" @click="store.selectNone('models')">{{ t('modelSelect.none') }}</Button>
         </div>
@@ -99,11 +99,11 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
       <div class="px-1 pb-1.5">
         <div class="relative">
           <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input v-model="search" :placeholder="t('modelSelect.searchPlaceholder')" class="h-8 pl-8" />
+          <Input v-model="search" :placeholder="t('modelSelect.searchPlaceholder')" class="h-8 ps-8" />
         </div>
       </div>
 
-      <div class="grid max-h-[min(50vh,380px)] gap-0.5 overflow-y-auto pr-1">
+      <div class="grid max-h-[min(50vh,380px)] gap-0.5 overflow-y-auto pe-1">
         <p v-if="!filtered.length" class="px-1 py-3 text-center text-xs text-muted-foreground">
           {{ t('modelSelect.noMatches') }}
         </p>
