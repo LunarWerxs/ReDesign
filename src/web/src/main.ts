@@ -6,6 +6,12 @@ import App from './App.vue';
 import router from './router';
 import { i18n } from './i18n';
 import { startSignInNudgeSession } from './lib/sign-in-nudge';
+import { installImeCompositionGuard } from './lib/ime-composition-guard';
+
+// Keep input-method (IME) composition keystrokes away from every @keydown.enter handler: on
+// Safari and Chrome-on-macOS the Enter that commits a CJK candidate otherwise submits half-typed
+// text. One document-level guard (kit-synced) instead of a check at ~every Enter handler.
+installImeCompositionGuard();
 
 // Recover from stale-chunk errors. When the daemon ships a new build, its hashed chunk names
 // change; a tab still running the old build then lazy-imports a chunk that no longer exists on
