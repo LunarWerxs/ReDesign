@@ -6,12 +6,18 @@ import type { Manifest } from "../src/store";
 import * as store from "../src/store";
 
 describe("store: stale run manifests", () => {
-  const staleNow = new Date("2026-07-01T12:00:00Z");
+  // This suite's timeline is anchored to the real clock rather than to literals. `readManifest`
+  // takes an injected `now` (src/store/stale.ts), so `staleNow` stands in for the wall clock at the
+  // moment of the check and every run record hangs a fixed number of days behind it - the same
+  // "an old run" shape the literals encoded, minus the drift that would carry them across the
+  // staleness window as the suite ages.
+  const staleNow = new Date();
+  const ago = (days: number): string => new Date(staleNow.getTime() - days * 86_400_000).toISOString();
   const staleRunId = `20990101-000000-stale-${process.pid}`;
   const activeRunId = `20990101-000001-active-${process.pid}`;
   const runningManifest = (runId: string) => ({
     runId,
-    createdAt: "2026-06-01T00:00:00Z",
+    createdAt: ago(30),
     finishedAt: null,
     status: "running",
     counts: { total: 2, done: 1, ok: 1, error: 0, skipped: 0 },
@@ -19,8 +25,8 @@ describe("store: stale run manifests", () => {
     prompts: [],
     models: [],
     jobs: [
-      { id: "complete", status: "ok", finishedAt: "2026-06-01T00:01:00Z" },
-      { id: "unfinished", status: "running", startedAt: "2026-06-01T00:02:00Z", finishedAt: null },
+      { id: "complete", status: "ok", finishedAt: ago(29) },
+      { id: "unfinished", status: "running", startedAt: ago(28), finishedAt: null },
     ],
   });
 
@@ -77,6 +83,11 @@ describe("store: stale run manifests", () => {
 
 describe("store: per-run ownership", () => {
   const runId = `20990101-000003-owner-${process.pid}`;
+  // Both uses below need a parseable instant in the past: the manifest of a run that has been
+  // "running" for a while, and a lease heartbeat that is late (HEARTBEAT_MS is 5s,
+  // src/store/ownership.ts). Computed off the clock so neither ages across the default 24h
+  // staleness window; what actually decides ownership is PID liveness, never these stamps.
+  const anHourAgo = new Date(Date.now() - 3_600_000).toISOString();
 
   afterAll(() => {
     fs.rmSync(store.runDir(runId), { recursive: true, force: true });
@@ -85,7 +96,7 @@ describe("store: per-run ownership", () => {
   it("keeps a live owned run from being settled even with a zero stale window", () => {
     store.writeManifest(runId, {
       runId,
-      createdAt: "2026-06-01T00:00:00Z",
+      createdAt: anHourAgo,
       finishedAt: null,
       status: "running",
       jobs: [],
@@ -102,7 +113,7 @@ describe("store: per-run ownership", () => {
   it("reclaims a dead owner and reports a live collision as 409", () => {
     const ownerFile = path.join(store.runDir(runId), ".owner.json");
     fs.mkdirSync(store.runDir(runId), { recursive: true });
-    fs.writeFileSync(ownerFile, JSON.stringify({ pid: 2147483647, token: "dead-owner", createdAt: "2026-01-01T00:00:00.000Z", heartbeatAt: "2026-01-01T00:00:00.000Z" }));
+    fs.writeFileSync(ownerFile, JSON.stringify({ pid: 2147483647, token: "dead-owner", createdAt: anHourAgo, heartbeatAt: anHourAgo }));
     expect(store.isRunOwned(runId)).toBe(false);
 
     const first = store.claimRunOwnership(runId);
@@ -136,8 +147,8 @@ describe("store: per-run ownership", () => {
     fs.writeFileSync(ownerFile, JSON.stringify({
       pid: process.pid,
       token: "busy-process-token",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      heartbeatAt: "2026-01-01T00:00:00.000Z",
+      createdAt: anHourAgo,
+      heartbeatAt: anHourAgo,
     }));
     expect(store.isRunOwned(runId)).toBe(true);
     fs.unlinkSync(ownerFile);

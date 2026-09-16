@@ -2,13 +2,18 @@ import { afterEach, expect, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+// ROOT is the repo's own root resolver (src/util.ts walks up to the package.json marker). Used here
+// instead of process.cwd(), which is merely whichever directory the runner was invoked from: a
+// `bun test` started anywhere but the repo root resolved the fixture paths below against the wrong
+// base, doubling them into an ENOENT at module scope that killed the whole file.
+import { ROOT } from "../src/util";
 
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach((root) => { fs.rmSync(root, { recursive: true, force: true }); }));
 
 function boot(root: string): void {
   const result = Bun.spawnSync([process.execPath, "-e", 'import "./src/config/shared.ts"'], {
-    cwd: process.cwd(), env: { ...process.env, REDESIGN_HOME: root }, stderr: "pipe", stdout: "pipe",
+    cwd: ROOT, env: { ...process.env, REDESIGN_HOME: root }, stderr: "pipe", stdout: "pipe",
   });
   expect(result.exitCode).toBe(0);
 }
@@ -52,7 +57,7 @@ test("a baseline-free 1.6.6 profile upgrades exact shipped records and preserves
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "redesign-config-legacy-")); roots.push(root);
   boot(root);
   const config = path.join(root, "config");
-  const legacy = JSON.parse(fs.readFileSync(path.join(process.cwd(), "src/config/legacy-shipped.json"), "utf8"));
+  const legacy = JSON.parse(fs.readFileSync(path.join(ROOT, "src/config/legacy-shipped.json"), "utf8"));
   const modelsPath = path.join(config, "models.json");
   const legacyModels = legacy.models;
   legacyModels.models[1] = { ...legacyModels.models[1], label: "Personal label" };

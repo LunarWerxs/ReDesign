@@ -42,8 +42,8 @@ function registerUnloadFlush(key: string, read: () => string): void {
       /* private mode / quota: the debounced write is still the normal path */
     }
   };
-  window.addEventListener('pagehide', flush);
-  window.addEventListener('beforeunload', flush);
+  // arkitect-allow: side-effect-teardown - app-lifetime singleton: these fire as the page is torn down (that is the moment they exist for), so there is no later point at which an unsubscribe could run; the store is created once for the process.
+  for (const event of ['pagehide', 'beforeunload'] as const) window.addEventListener(event, flush);
 }
 
 /** A run the client is watching: the one in flight plus anything queued behind it. */
@@ -189,6 +189,7 @@ export function createControlState() {
     focusedRunId.value ? trackedRuns.get(focusedRunId.value) || null : null,
   );
 
+  // arkitect-allow: no-bandaids - permanent read-only projections of focusedRun (derived from that one source, never written back): ProgressCard, RunControls, AppActionsBar and App.vue read them by name and web/test/stores/controlState.test.ts asserts them, so this is the store's public view of the focused run rather than a shim awaiting removal.
   // Back-compat views of the focused run, so every existing consumer
   // (ProgressCard, RunControls, ViewSettings) keeps reading the same names.
   const runId = computed(() => focusedRun.value?.runId ?? null);

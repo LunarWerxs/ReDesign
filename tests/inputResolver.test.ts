@@ -59,6 +59,7 @@ describe("inputResolver", () => {
     try {
       const uploaded = inputResolver.saveUploadedImages(
         [{ name: "Clipboard Shot.png", mime: "image/png", data: `data:image/png;base64,${TINY_PNG.toString("base64")}` }],
+        // arkitect-allow: spec-drifting-date-fixture - an injected upload timestamp: saveUploadedImages only formats it into the fallback filename (uploadTimestamp, src/inputResolver.ts) and never compares it against a clock, so the fixed instant is what makes the saved name deterministic.
         { inputDir: tmpUpload, now: new Date("2026-06-25T12:00:00Z") }
       );
       expect(uploaded.saved.length).toBe(1);

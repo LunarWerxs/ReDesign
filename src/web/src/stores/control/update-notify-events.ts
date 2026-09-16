@@ -60,6 +60,7 @@ export function createUpdateNotifyEventsActions(deps: { applyUpdate: () => Promi
   /** Open the connection once. Safe to call again (e.g. from a remounted root component). */
   function connect(): void {
     if (source || typeof EventSource === 'undefined') return;
+    // arkitect-allow: side-effect-teardown - app-lifetime singleton: App.vue calls connect() once for the process and the daemon-wide update channel must outlive every view, since an update can be announced with nothing running (see the module doc above). Closing it would only stop announcements.
     source = new EventSource(daemonEventsUrl);
     source.onmessage = handleMessage;
     // No onerror handler on purpose: EventSource reconnects on its own using the browser's

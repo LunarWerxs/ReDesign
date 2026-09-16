@@ -16,7 +16,10 @@ describe("GET /api/runs/:id/events for externally owned work", () => {
   it("replays a live snapshot instead of settling or reporting the run done", async () => {
     store.writeManifest(runId, {
       runId,
-      createdAt: "2026-01-01T00:00:00.000Z",
+      // A week old: past the 24h default staleness window, so this is exactly the kind of manifest
+      // the owner lease has to protect. Computed off the clock rather than pinned to a literal so
+      // it stays past that window instead of aging relative to it.
+      createdAt: new Date(Date.now() - 7 * 86_400_000).toISOString(),
       finishedAt: null,
       status: "running",
       jobs: [],

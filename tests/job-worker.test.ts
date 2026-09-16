@@ -2,9 +2,13 @@ import { describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { ROOT } from "../src/util";
 
-const appRoot = path.resolve(import.meta.dir, "..");
-const fixture = path.join(appRoot, "tests", "fixtures", "job-worker-boundary.fixture.ts");
+// ROOT is the repo's own resolver (src/util.ts walks up to the package.json marker) rather than a
+// hop-count from this file's own directory, which rots silently if the file or tests/ moves: the
+// fixture would then not be found, the spawn would report nothing, and a bare exit code would read
+// as a pass.
+const fixture = path.join(ROOT, "tests", "fixtures", "job-worker-boundary.fixture.ts");
 
 interface FixtureResult {
   calls: number;
@@ -19,7 +23,7 @@ function runFixture(mode: "missing-caption" | "prose" | "fragment" | "cancelled-
   try {
     const proc = Bun.spawnSync({
       cmd: [process.execPath, fixture, mode],
-      cwd: appRoot,
+      cwd: ROOT,
       env: {
         ...process.env,
         REDESIGN_TEST_ROOT: path.join(temp, "root"),

@@ -7,6 +7,17 @@ import { loadPricing, priceForModel, pricingLastUpdated } from "../src/config/pr
 const KNOWN_MODEL = "claude-opus-4-8"; // present in src/config/pricing.json
 const UNPRICED_MODEL = "not-a-real-model-id";
 
+// Ledger timestamps for the fixtures below. runTraces()/recentTraces() only parse these and order
+// rows by them (newest finishedAt first, src/runner/cost.ts) - none is ever compared against the
+// clock - so they hang off one fixed base plus offsets: the relative order the assertions depend on
+// is preserved, while the absolute literals they used to be would drift across the "now" line as
+// the suite ages.
+// arkitect-allow: spec-drifting-date-fixture - single fixed record-timestamp base for this file; every stamp derived from it is parsed and ordered, never compared against the real clock.
+const STAMP_BASE = Date.parse("2026-01-01T00:00:00.000Z");
+const DAY_MS = 86_400_000;
+/** A ledger timestamp `offsetMs` after the fixed fixture base. */
+const stamp = (offsetMs = 0): string => new Date(STAMP_BASE + offsetMs).toISOString();
+
 describe("cost: pricing table loading", () => {
   it("loads pricing.json with a lastUpdated stamp and priced entries", () => {
     const data = loadPricing();
@@ -215,8 +226,8 @@ describe("cost: spendToDate + estimateRunCost use real stored runs", () => {
 describe("cost: runTraces flattens a manifest into per-generation trace rows", () => {
   it("uses provider ledger rows for helpers and billed errors instead of jobs", () => {
     const traces = runTraces({ runId: "ledger", jobs: [{ modelId: KNOWN_MODEL, status: "ok", usage: { input_tokens: 999, output_tokens: 999 } }], providerCalls: [
-      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "caption", status: "ok", usage: { input_tokens: 10, output_tokens: 2 }, ms: 7, startedAt: "2026-01-01T00:00:00.000Z", at: "2026-01-01T00:00:01.000Z" },
-      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "generation", status: "error", error: "empty response", usage: { input_tokens: 20, output_tokens: 0 }, ms: 8, startedAt: "2026-01-01T00:00:01.000Z", at: "2026-01-01T00:00:02.000Z" },
+      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "caption", status: "ok", usage: { input_tokens: 10, output_tokens: 2 }, ms: 7, startedAt: stamp(), at: stamp(1000) },
+      { modelId: KNOWN_MODEL, provider: "anthropic", purpose: "generation", status: "error", error: "empty response", usage: { input_tokens: 20, output_tokens: 0 }, ms: 8, startedAt: stamp(1000), at: stamp(2000) },
     ] });
     expect(traces).toHaveLength(2);
     expect(traces.map((t) => t.purpose)).toEqual(["caption", "generation"]);
@@ -234,8 +245,8 @@ describe("cost: runTraces flattens a manifest into per-generation trace rows", (
           ms: 1234,
           usage: { input_tokens: 1000, output_tokens: 2000 },
           cost: costForUsage(KNOWN_MODEL, { input_tokens: 1000, output_tokens: 2000 }),
-          startedAt: "2026-01-01T00:00:00.000Z",
-          finishedAt: "2026-01-01T00:00:02.000Z",
+          startedAt: stamp(),
+          finishedAt: stamp(2000),
         },
       ],
     });
@@ -323,8 +334,8 @@ describe("cost: recentTraces scans stored runs into a flat, newest-first trace l
       prompts: [],
       models: [],
       jobs: [
-        { id: "j1", modelId: traceModel, status: "ok", ms: 100, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z" },
-        { id: "j2", modelId: traceModel, status: "ok", ms: 200, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: "2026-01-02T00:00:00.000Z", finishedAt: "2026-01-02T00:00:01.000Z" },
+        { id: "j1", modelId: traceModel, status: "ok", ms: 100, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: stamp(), finishedAt: stamp(1000) },
+        { id: "j2", modelId: traceModel, status: "ok", ms: 200, usage: { input_tokens: 10, output_tokens: 20 }, startedAt: stamp(DAY_MS), finishedAt: stamp(DAY_MS + 1000) },
       ],
     } as store.Manifest);
 

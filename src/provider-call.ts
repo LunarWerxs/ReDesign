@@ -80,8 +80,7 @@ function budgetRejected(error: unknown): Error {
 async function acquireSerial(tailMap: Map<string, Promise<void>>, key: string, signal: AbortSignal | null | undefined): Promise<() => void> {
   if (signal?.aborted) throw aborted();
   const previous = tailMap.get(key) || Promise.resolve();
-  let release!: () => void;
-  const mine = new Promise<void>((resolve) => { release = resolve; });
+  const { promise: mine, resolve: release } = Promise.withResolvers<void>();
   const tail = previous.then(() => mine);
   tailMap.set(key, tail);
   try {

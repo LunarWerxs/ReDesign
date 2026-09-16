@@ -19,6 +19,7 @@ installImeCompositionGuard();
 // 404 for missing /assets/ files, see src/server/fileServing.js serveFile). Reload once to pull
 // the fresh build instead of showing a dead view. A short timestamp guard prevents a reload loop
 // if the new build is genuinely broken (chunk truly missing). Mirrors RepoYeti/DevWebUI.
+// arkitect-allow: side-effect-teardown - app-lifetime singleton: this is the boot entry (there is no component to unmount) and the handler must stay armed for as long as the page lives, since a stale chunk can be imported at any moment.
 window.addEventListener('vite:preloadError', (event) => {
   const KEY = 'reimagine:last-chunk-reload';
   const now = Date.now();

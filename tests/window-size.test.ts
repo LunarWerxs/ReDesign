@@ -8,7 +8,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
 import {
   formatWindowSizeHint,
   rememberedPlacement,
@@ -19,9 +19,25 @@ import {
 const DASH = "http://localhost:5178/";
 const INITIAL = { width: 840, height: 760 };
 
+// The ONE scratch directory this file roots in the OS temp dir, reaped by afterAll whatever the
+// outcome. Every other scratch directory nests inside it (mkdirSync below) rather than rooting its
+// own mkdtemp, so there is a single unambiguous path to remove and a failing assertion can never
+// leave an orphaned profile behind.
+const ROOT = mkdtempSync(join(tmpdir(), "rd-winsize-"));
+let scratchSeq = 0;
+
+afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
+
+/** A fresh (empty) scratch directory inside ROOT, named so failures stay identifiable. */
+function scratchDir(name: string): string {
+  const dir = join(ROOT, `${name}-${++scratchSeq}`);
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 /** A scratch profile whose Preferences hold the given app_window_placement dict. */
 function profileWith(placements: unknown): string {
-  const dir = mkdtempSync(join(tmpdir(), "rd-winsize-"));
+  const dir = scratchDir("profile");
   mkdirSync(join(dir, "Default"), { recursive: true });
   writeFileSync(
     join(dir, "Default", "Preferences"),
@@ -78,7 +94,7 @@ test("rememberedPlacement carries Chromium's maximized flag (restore bounds)", (
 });
 
 test("windowSizeHintFor: remembered beats first-run, junk falls back, maximized sends NO hint", () => {
-  const fresh = mkdtempSync(join(tmpdir(), "rd-winsize-"));
+  const fresh = scratchDir("fresh");
   try {
     expect(windowSizeHintFor(fresh, DASH, INITIAL)).toBe("840x760");
   } finally {
