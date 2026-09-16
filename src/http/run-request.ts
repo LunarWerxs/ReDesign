@@ -47,21 +47,39 @@ function validateRunRequest(value: unknown): RunBody {
   if (!isObject(value)) badRequest("request body must be a JSON object");
   const body = value as RunBody;
 
+  validateBooleanFlags(body);
+  if (Object.hasOwn(body, "preflightId")) {
+    validatePreflightToken(body);
+    return body;
+  }
+  validateScalarFields(body);
+  validateSelections(body);
+  return body;
+}
+
+/** `mock` and `autoStart` are the only booleans the queue reads directly. */
+function validateBooleanFlags(body: RunBody): void {
   for (const key of ["mock", "autoStart"] as const) {
     if (Object.hasOwn(body, key) && typeof body[key] !== "boolean") badRequest(`${key} must be a boolean`);
   }
-  if (Object.hasOwn(body, "preflightId")) {
-    if (typeof body.preflightId !== "string" || !body.preflightId.trim()) badRequest("invalid preflight token");
-    if (Object.keys(body).some((key) => key !== "preflightId" && key !== "autoStart")) badRequest("A prepared run cannot be changed; prepare a new recipe instead.");
-    return body;
-  }
+}
+
+/** A prepared run is immutable: its token must be usable and nothing else may accompany it. */
+function validatePreflightToken(body: RunBody): void {
+  if (typeof body.preflightId !== "string" || !body.preflightId.trim()) badRequest("invalid preflight token");
+  if (Object.keys(body).some((key) => key !== "preflightId" && key !== "autoStart")) badRequest("A prepared run cannot be changed; prepare a new recipe instead.");
+}
+
+function validateScalarFields(body: RunBody): void {
   if (Object.hasOwn(body, "maxCostUsd") && (typeof body.maxCostUsd !== "number" || !Number.isFinite(body.maxCostUsd) || body.maxCostUsd < 0)) badRequest("maxCostUsd must be a finite nonnegative number");
   if (body.reference != null && !isObject(body.reference)) badRequest("reference must be an object");
   if (body.modelQuantities != null && !isObject(body.modelQuantities)) badRequest("modelQuantities must be an object");
   for (const key of ["label", "brandStyleGuide"] as const) {
     if (body[key] != null && typeof body[key] !== "string") badRequest(`${key} must be a string`);
   }
+}
 
+function validateSelections(body: RunBody): void {
   if (Object.hasOwn(body, "inputs")) {
     const inputs = listInputs();
     validateExplicitSelection(body.inputs, "input", new Set(inputs.flatMap((input) => [input.id, input.name])));
@@ -69,24 +87,25 @@ function validateRunRequest(value: unknown): RunBody {
   if (Object.hasOwn(body, "models")) {
     validateExplicitSelection(body.models, "model", new Set(loadModels().filter((model) => model.enabled !== false).map((model) => model.id)));
   }
-  if (Object.hasOwn(body, "prompts")) {
-    if (!isObject(body.prompts)) badRequest("prompts must be an object");
-    const prompts = body.prompts;
-    if (Object.hasOwn(prompts, "presets")) {
-      const ids = explicitPromptPresetIds(prompts.presets, prompts.custom);
-      const validIds = new Set(loadPrompts().prompts.map((prompt) => prompt.id));
-      // The prompt resolver expands only the literal string sentinel. An array/CSV item
-      // named "all" is an explicit preset ID, and must pass the same existence check.
-      if (prompts.presets !== "all" && prompts.presets !== "*") {
-        const unknown = ids.find((id) => !validIds.has(id));
-        if (unknown) badRequest(`unknown prompt preset: ${unknown}`);
-      }
-    }
-    if (Object.hasOwn(prompts, "custom") && prompts.custom != null && typeof prompts.custom !== "string") {
-      badRequest("custom prompt must be a string");
+  if (Object.hasOwn(body, "prompts")) validatePromptsSelection(body.prompts);
+}
+
+function validatePromptsSelection(value: unknown): void {
+  if (!isObject(value)) badRequest("prompts must be an object");
+  const prompts = value;
+  if (Object.hasOwn(prompts, "presets")) {
+    const ids = explicitPromptPresetIds(prompts.presets, prompts.custom);
+    const validIds = new Set(loadPrompts().prompts.map((prompt) => prompt.id));
+    // The prompt resolver expands only the literal string sentinel. An array/CSV item
+    // named "all" is an explicit preset ID, and must pass the same existence check.
+    if (prompts.presets !== "all" && prompts.presets !== "*") {
+      const unknown = ids.find((id) => !validIds.has(id));
+      if (unknown) badRequest(`unknown prompt preset: ${unknown}`);
     }
   }
-  return body;
+  if (Object.hasOwn(prompts, "custom") && prompts.custom != null && typeof prompts.custom !== "string") {
+    badRequest("custom prompt must be a string");
+  }
 }
 
 export { validateRunRequest };

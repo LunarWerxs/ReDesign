@@ -103,43 +103,110 @@ function providerDetails(bodyText: string | null | undefined): Pick<Classificati
   }
 }
 
+type ProviderDetails = Pick<Classification, "providerCode" | "providerType">;
+
+function mentionsIn(body: string, ...words: string[]): boolean {
+  return words.some((w) => body.includes(w));
+}
+
+// Statuses whose class is fixed by the code alone, with no body inspection.
+function fixedStatusClass(status: number): ErrorClass | null {
+  if (status === 401) return CLASS.AUTH;
+  if (status === 402) return CLASS.NO_BALANCE;
+  if (status === 404) return CLASS.BAD_REQUEST; // model not found etc.
+  if (status === 529) return CLASS.RATE_LIMIT; // anthropic overloaded
+  return null;
+}
+
+function looksLikeInvalidCredential(body: string, details: ProviderDetails): boolean {
+  if (mentionsIn(body, ...INVALID_CREDENTIAL_HINTS)) return true;
+  const type = (details.providerType || "").toLowerCase();
+  const code = (details.providerCode || "").toLowerCase();
+  return INVALID_CREDENTIAL_TYPES.has(type) || INVALID_CREDENTIAL_TYPES.has(code);
+}
+
+// Providers use 403 for model/resource entitlement failures. Those can vary
+// by key and model, but do not prove the credential is invalid. Keep AUTH
+// for explicit invalid/revoked-key evidence only.
+function forbiddenClass(body: string, details: ProviderDetails): ErrorClass {
+  if (mentionsIn(body, "quota", "exceeded", "exhausted", ...BALANCE_HINTS)) return CLASS.NO_BALANCE;
+  if (looksLikeInvalidCredential(body, details)) return CLASS.AUTH;
+  return CLASS.PERMISSION;
+}
+
+// Daily/credit exhaustion -> long cooldown. Generic 429 (per-minute rate)
+// stays RATE_LIMIT so a still-good key isn't benched for an hour.
+function rateLimitClass(body: string): ErrorClass {
+  if (mentionsIn(body, ...BALANCE_HINTS)) return CLASS.NO_BALANCE;
+  return CLASS.RATE_LIMIT;
+}
+
+// Account/billing failures dressed up as a 400 are key-specific → retry elsewhere.
+function badRequestClass(body: string): ErrorClass {
+  if (mentionsIn(body, ...BALANCE_HINTS)) return CLASS.NO_BALANCE;
+  if (mentionsIn(body, ...ACCOUNT_DEAD_HINTS)) return CLASS.AUTH;
+  return CLASS.BAD_REQUEST;
+}
+
+function classifyStatus(status: number, body: string, details: ProviderDetails): ErrorClass {
+  const fixed = fixedStatusClass(status);
+  if (fixed !== null) return fixed;
+  if (status === 403) return forbiddenClass(body, details);
+  if (status === 429) return rateLimitClass(body);
+  if (status === 400) return badRequestClass(body);
+  if (status >= 500) return CLASS.SERVER;
+  return CLASS.UNKNOWN;
+}
+
 // Map an HTTP response (status + headers + body text) to a key-manager class.
 function classifyHttp(status: number, headers: Headers | null | undefined, bodyText: string | null | undefined): Classification {
   const body = (bodyText || "").toLowerCase();
   const retryAfterMs = parseRetryAfter(headers);
   const details = providerDetails(bodyText);
-  const mentions = (...words: string[]) => words.some((w) => body.includes(w));
-  const invalidCredential = () =>
-    mentions(...INVALID_CREDENTIAL_HINTS) ||
-    INVALID_CREDENTIAL_TYPES.has((details.providerType || "").toLowerCase()) ||
-    INVALID_CREDENTIAL_TYPES.has((details.providerCode || "").toLowerCase());
+  const errorClass = classifyStatus(status, body, details);
+  return { errorClass, retryAfterMs, ...details };
+}
 
-  if (status === 401) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
-  if (status === 403) {
-    if (mentions("quota", "exceeded", "exhausted", ...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
-    // Providers use 403 for model/resource entitlement failures. Those can vary
-    // by key and model, but do not prove the credential is invalid. Keep AUTH
-    // for explicit invalid/revoked-key evidence only.
-    if (invalidCredential()) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
-    return { errorClass: CLASS.PERMISSION, retryAfterMs, ...details };
+// A transport failure under the shared abort scope: an external cancellation
+// wins over the timeout, which wins over the underlying error's own message.
+// `phase` names the timed-out step ("request" / "body read") and `errLabel` is
+// the prefix of the message for a failure that was neither.
+function networkFailure(err: unknown, phase: string, errLabel: string, timeoutMs: number | null | undefined, ctrl: AbortController, externalSignal: AbortSignal | null | undefined): ProviderError {
+  if (externalSignal?.aborted) return new ProviderError("cancelled", { errorClass: CLASS.NETWORK });
+  if (ctrl.signal.aborted) return new ProviderError(`${phase} timed out after ${timeoutMs}ms`, { errorClass: CLASS.NETWORK });
+  return new ProviderError(`${errLabel}${(err as Error).message}`, { errorClass: CLASS.NETWORK });
+}
+
+async function fetchResponse(url: string, options: RequestInit, ctrl: AbortController, timeoutMs: number | null | undefined, externalSignal: AbortSignal | null | undefined): Promise<Response> {
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } catch (err) {
+    throw networkFailure(err, "request", "network error: ", timeoutMs, ctrl, externalSignal);
   }
-  if (status === 402) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
-  if (status === 429) {
-    // Daily/credit exhaustion -> long cooldown. Generic 429 (per-minute rate)
-    // stays RATE_LIMIT so a still-good key isn't benched for an hour.
-    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
-    return { errorClass: CLASS.RATE_LIMIT, retryAfterMs, ...details };
+}
+
+async function readResponseBody(res: Response, ctrl: AbortController, timeoutMs: number | null | undefined, externalSignal: AbortSignal | null | undefined): Promise<string> {
+  try {
+    return await res.text();
+  } catch (err) {
+    throw networkFailure(err, "body read", "network error reading body: ", timeoutMs, ctrl, externalSignal);
   }
-  if (status === 400) {
-    // Account/billing failures dressed up as a 400 are key-specific → retry elsewhere.
-    if (mentions(...BALANCE_HINTS)) return { errorClass: CLASS.NO_BALANCE, retryAfterMs, ...details };
-    if (mentions(...ACCOUNT_DEAD_HINTS)) return { errorClass: CLASS.AUTH, retryAfterMs, ...details };
-    return { errorClass: CLASS.BAD_REQUEST, retryAfterMs, ...details };
+}
+
+// Non-2xx: classify for the key manager, then report a redacted snippet of the
+// provider's own words. classifyHttp runs before redaction, as it always has.
+function httpStatusError(res: Response, text: string): ProviderError {
+  const { errorClass, retryAfterMs, providerCode, providerType } = classifyHttp(res.status, res.headers, text);
+  const snippet = redactSecrets(text.replace(/\s+/g, " ").slice(0, 300));
+  return new ProviderError(`HTTP ${res.status}: ${snippet || res.statusText}`, { errorClass, status: res.status, retryAfterMs, providerMessage: snippet, providerCode, providerType });
+}
+
+function parseJSONBody<T>(text: string, status: number): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    throw new ProviderError(`invalid JSON from provider: ${(err as Error).message}`, { errorClass: CLASS.SERVER, status });
   }
-  if (status === 404) return { errorClass: CLASS.BAD_REQUEST, retryAfterMs, ...details }; // model not found etc.
-  if (status === 529) return { errorClass: CLASS.RATE_LIMIT, retryAfterMs, ...details }; // anthropic overloaded
-  if (status >= 500) return { errorClass: CLASS.SERVER, retryAfterMs, ...details };
-  return { errorClass: CLASS.UNKNOWN, retryAfterMs, ...details };
 }
 
 /**
@@ -157,34 +224,10 @@ async function requestJSON<T = unknown>(url: string, options: RequestInit, timeo
   }
   const timer = setTimeout(() => ctrl.abort(), timeoutMs || 120000);
   try {
-    let res: Response;
-    try {
-      res = await fetch(url, { ...options, signal: ctrl.signal });
-    } catch (err) {
-      if (externalSignal?.aborted) throw new ProviderError("cancelled", { errorClass: CLASS.NETWORK });
-      const timedOut = ctrl.signal.aborted;
-      throw new ProviderError(timedOut ? `request timed out after ${timeoutMs}ms` : `network error: ${(err as Error).message}`, { errorClass: CLASS.NETWORK });
-    }
-
-    let text = "";
-    try {
-      text = await res.text();
-    } catch (err) {
-      if (externalSignal?.aborted) throw new ProviderError("cancelled", { errorClass: CLASS.NETWORK });
-      const timedOut = ctrl.signal.aborted;
-      throw new ProviderError(timedOut ? `body read timed out after ${timeoutMs}ms` : `network error reading body: ${(err as Error).message}`, { errorClass: CLASS.NETWORK });
-    }
-
-    if (!res.ok) {
-      const { errorClass, retryAfterMs, providerCode, providerType } = classifyHttp(res.status, res.headers, text);
-      const snippet = redactSecrets(text.replace(/\s+/g, " ").slice(0, 300));
-      throw new ProviderError(`HTTP ${res.status}: ${snippet || res.statusText}`, { errorClass, status: res.status, retryAfterMs, providerMessage: snippet, providerCode, providerType });
-    }
-    try {
-      return JSON.parse(text);
-    } catch (err) {
-      throw new ProviderError(`invalid JSON from provider: ${(err as Error).message}`, { errorClass: CLASS.SERVER, status: res.status });
-    }
+    const res = await fetchResponse(url, options, ctrl, timeoutMs, externalSignal);
+    const text = await readResponseBody(res, ctrl, timeoutMs, externalSignal);
+    if (!res.ok) throw httpStatusError(res, text);
+    return parseJSONBody<T>(text, res.status);
   } finally {
     clearTimeout(timer);
     if (externalSignal) externalSignal.removeEventListener("abort", onAbort);

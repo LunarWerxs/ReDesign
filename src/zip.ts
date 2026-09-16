@@ -88,65 +88,17 @@ export function buildZipStream(entries: AsyncIterable<ZipInputEntry> | Iterable<
   const abort = () => cancellation.abort();
   opts.signal?.addEventListener("abort", abort, { once: true });
   if (opts.signal?.aborted) abort();
+  const state: ZipWriteState = { encoder, signal: cancellation.signal, maxInputBytes, centrals: [], offset: 0, declaredInput: 0, observedInput: 0 };
   const iterator = (async function* () {
-    const centrals: Uint8Array[] = [];
-    let offset = 0;
-    let declaredInput = 0;
-    let observedInput = 0;
     let count = 0;
     for await (const entry of entries) {
-      if (cancellation.signal.aborted) throw new Error("export cancelled");
+      if (state.signal.aborted) throw new Error("export cancelled");
       if (++count > maxEntries) throw new Error(`too many files for export (${count} > ${maxEntries})`);
-      const nameBytes = encoder.encode(entry.name);
-      if (!nameBytes.length || nameBytes.length > 0xffff) throw new Error("invalid zip entry name");
-      const { time, date } = dosDateTime(entry.modified ?? new Date());
-      if ("data" in entry) {
-        declaredInput += entry.data.length;
-        observedInput += entry.data.length;
-        if (declaredInput > maxInputBytes || observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
-        const compressed = new Uint8Array(await deflate(entry.data));
-        if (cancellation.signal.aborted) throw new Error("export cancelled");
-        const payload = compressed.length < entry.data.length ? compressed : entry.data;
-        const method = payload === compressed ? 8 : 0;
-        const crc = crc32(entry.data);
-        const local = zipLocal(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length);
-        yield local; yield nameBytes; yield payload;
-        centrals.push(zipCentral(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length, offset), nameBytes);
-        offset += local.length + nameBytes.length + payload.length;
-      } else {
-        const knownSize = entry.size;
-        if (knownSize !== undefined && (!Number.isSafeInteger(knownSize) || knownSize < 0)) throw new Error("invalid zip entry size");
-        declaredInput += knownSize ?? 0;
-        if (declaredInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
-        // Store streamed entries: unknown CRC and sizes require the PKZIP data-descriptor flag.
-        const local = zipLocal(nameBytes.length, 0x0808, 0, time, date, 0, 0, 0);
-        yield local; yield nameBytes;
-        let crc = 0xffffffff;
-        let size = 0;
-        for await (const chunk of entry.open(cancellation.signal)) {
-          if (cancellation.signal.aborted) throw new Error("export cancelled");
-          size += chunk.length;
-          observedInput += chunk.length;
-          if (size >= MAX_TOTAL_BYTES || observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
-          crc = crc32Update(crc, chunk);
-          yield chunk;
-        }
-        crc = (crc ^ 0xffffffff) >>> 0;
-        const descriptor = new DataView(new ArrayBuffer(16));
-        descriptor.setUint32(0, 0x08074b50, true); descriptor.setUint32(4, crc, true);
-        descriptor.setUint32(8, size, true); descriptor.setUint32(12, size, true);
-        yield new Uint8Array(descriptor.buffer);
-        centrals.push(zipCentral(nameBytes.length, 0x0808, 0, time, date, crc, size, size, offset), nameBytes);
-        offset += local.length + nameBytes.length + size + 16;
-      }
-      if (offset >= MAX_TOTAL_BYTES) throw new Error("archive too large for a non-ZIP64 zip (4 GB limit)");
+      if ("data" in entry) yield* writeBufferedEntry(state, entry);
+      else yield* writeStreamedEntry(state, entry);
+      if (state.offset >= MAX_TOTAL_BYTES) throw new Error("archive too large for a non-ZIP64 zip (4 GB limit)");
     }
-    const centralSize = centrals.reduce((n, part) => n + part.length, 0);
-    for (const part of centrals) yield part;
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true); end.setUint16(8, count, true); end.setUint16(10, count, true);
-    end.setUint32(12, centralSize, true); end.setUint32(16, offset, true);
-    yield new Uint8Array(end.buffer);
+    yield* zipTrailer(state, count);
   })();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -170,6 +122,82 @@ export function buildZipStream(entries: AsyncIterable<ZipInputEntry> | Iterable<
       opts.signal?.removeEventListener("abort", abort);
     },
   });
+}
+
+/** Counters a single entry write carries between the stream loop and the entry helpers. */
+interface ZipWriteState {
+  encoder: TextEncoder;
+  signal: AbortSignal;
+  maxInputBytes: number;
+  /** Central-directory records retained until the trailer is emitted. */
+  centrals: Uint8Array[];
+  /** Running byte offset of the next local header within the archive. */
+  offset: number;
+  /** Bytes claimed by entry metadata up front; streamed entries may declare none. */
+  declaredInput: number;
+  /** Bytes actually read; streamed entries are re-checked here because a file can grow. */
+  observedInput: number;
+}
+
+/** DEFLATE a fully-buffered entry, falling back to STORE when compression would expand it. */
+async function* writeBufferedEntry(state: ZipWriteState, entry: ZipEntry): AsyncGenerator<Uint8Array> {
+  const { encoder, signal, maxInputBytes } = state;
+  const nameBytes = encoder.encode(entry.name);
+  if (!nameBytes.length || nameBytes.length > 0xffff) throw new Error("invalid zip entry name");
+  const { time, date } = dosDateTime(entry.modified ?? new Date());
+  state.declaredInput += entry.data.length;
+  state.observedInput += entry.data.length;
+  if (state.declaredInput > maxInputBytes || state.observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+  const compressed = new Uint8Array(await deflate(entry.data));
+  if (signal.aborted) throw new Error("export cancelled");
+  const payload = compressed.length < entry.data.length ? compressed : entry.data;
+  const method = payload === compressed ? 8 : 0;
+  const crc = crc32(entry.data);
+  const local = zipLocal(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length);
+  yield local; yield nameBytes; yield payload;
+  state.centrals.push(zipCentral(nameBytes.length, 0x0800, method, time, date, crc, payload.length, entry.data.length, state.offset), nameBytes);
+  state.offset += local.length + nameBytes.length + payload.length;
+}
+
+/** Store a source-produced entry: unknown CRC and sizes require the PKZIP data-descriptor flag. */
+async function* writeStreamedEntry(state: ZipWriteState, entry: ZipStreamEntry): AsyncGenerator<Uint8Array> {
+  const { encoder, signal, maxInputBytes } = state;
+  const nameBytes = encoder.encode(entry.name);
+  if (!nameBytes.length || nameBytes.length > 0xffff) throw new Error("invalid zip entry name");
+  const { time, date } = dosDateTime(entry.modified ?? new Date());
+  const knownSize = entry.size;
+  if (knownSize !== undefined && (!Number.isSafeInteger(knownSize) || knownSize < 0)) throw new Error("invalid zip entry size");
+  state.declaredInput += knownSize ?? 0;
+  if (state.declaredInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+  const local = zipLocal(nameBytes.length, 0x0808, 0, time, date, 0, 0, 0);
+  yield local; yield nameBytes;
+  let crc = 0xffffffff;
+  let size = 0;
+  for await (const chunk of entry.open(signal)) {
+    if (signal.aborted) throw new Error("export cancelled");
+    size += chunk.length;
+    state.observedInput += chunk.length;
+    if (size >= MAX_TOTAL_BYTES || state.observedInput > maxInputBytes) throw new Error(`export exceeds ${maxInputBytes} byte limit`);
+    crc = crc32Update(crc, chunk);
+    yield chunk;
+  }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const descriptor = new DataView(new ArrayBuffer(16));
+  descriptor.setUint32(0, 0x08074b50, true); descriptor.setUint32(4, crc, true);
+  descriptor.setUint32(8, size, true); descriptor.setUint32(12, size, true);
+  yield new Uint8Array(descriptor.buffer);
+  state.centrals.push(zipCentral(nameBytes.length, 0x0808, 0, time, date, crc, size, size, state.offset), nameBytes);
+  state.offset += local.length + nameBytes.length + size + 16;
+}
+
+/** Emit the retained central directory, then the end-of-central-directory record. */
+function* zipTrailer(state: ZipWriteState, count: number): Generator<Uint8Array> {
+  const centralSize = state.centrals.reduce((n, part) => n + part.length, 0);
+  for (const part of state.centrals) yield part;
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, count, true); end.setUint16(10, count, true);
+  end.setUint32(12, centralSize, true); end.setUint32(16, state.offset, true);
+  yield new Uint8Array(end.buffer);
 }
 
 function crc32Update(crc: number, buf: Uint8Array): number {

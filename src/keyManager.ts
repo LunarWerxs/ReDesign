@@ -117,6 +117,50 @@ interface Snapshot {
 }
 
 /**
+ * The status a failure class writes onto a key. `null` means "leave the key's
+ * status alone": request/content/resource permission problems are not key
+ * health signals.
+ */
+function failureStatus(errorClass: ErrorClass): string | null {
+  if (errorClass === CLASS.AUTH) return "dead";
+  if (errorClass === CLASS.NO_BALANCE) return "no_balance";
+  if (errorClass === CLASS.BAD_REQUEST || errorClass === CLASS.PERMISSION) return null;
+  return "cooldown";
+}
+
+/** Success path of report(): the credential answered, so clear its penalty. */
+function applyReportSuccess(e: KeyEntry, now: number): void {
+  e.successes++;
+  e.status = "ok";
+  e.cooldownUntil = 0;
+  e.lastSuccessAt = now;
+  e.lastError = null;
+}
+
+/** Failure path of report(): count it, save the redacted error, and set the penalty. */
+function applyReportFailure(
+  e: KeyEntry,
+  cooldowns: Record<ErrorClass, number>,
+  errorClass: ErrorClass,
+  retryAfterMs: number | null,
+  message: string | null,
+  now: number,
+): void {
+  e.failures++;
+  e.lastError = redactSecrets(message ? String(message).slice(0, 300) : errorClass) ?? null;
+  e.lastErrorAt = now;
+  const base = cooldowns[errorClass] != null ? cooldowns[errorClass] : cooldowns[CLASS.UNKNOWN];
+  // Only honor a provider's Retry-After for transient classes. For AUTH /
+  // NO_BALANCE the full long cooldown must stand, otherwise a tiny
+  // Retry-After would revive a known-dead/out-of-balance key in seconds.
+  const honorRetry = errorClass === CLASS.RATE_LIMIT || errorClass === CLASS.SERVER || errorClass === CLASS.NETWORK;
+  const cd = honorRetry && retryAfterMs != null ? Math.max(retryAfterMs, 1000) : base;
+  if (cd > 0) e.cooldownUntil = now + cd;
+  const status = failureStatus(errorClass);
+  if (status) e.status = status;
+}
+
+/**
  * Manages pools of API keys with round-robin selection, automatic cooldown of
  * failing keys, and persistent health tracking. State is keyed by a non-secret
  * fingerprint so the secret never touches disk.
@@ -317,29 +361,8 @@ class KeyManager {
     const e = pool.entries.find((x) => x.id === kid);
     if (!e) return;
     const now = Date.now();
-    if (errorClass === CLASS.OK) {
-      e.successes++;
-      e.status = "ok";
-      e.cooldownUntil = 0;
-      e.lastSuccessAt = now;
-      e.lastError = null;
-    } else {
-      e.failures++;
-      e.lastError = redactSecrets(message ? String(message).slice(0, 300) : errorClass) ?? null;
-      e.lastErrorAt = now;
-      const base = this.cooldowns[errorClass] != null ? this.cooldowns[errorClass] : this.cooldowns[CLASS.UNKNOWN];
-      // Only honor a provider's Retry-After for transient classes. For AUTH /
-      // NO_BALANCE the full long cooldown must stand, otherwise a tiny
-      // Retry-After would revive a known-dead/out-of-balance key in seconds.
-      const honorRetry = errorClass === CLASS.RATE_LIMIT || errorClass === CLASS.SERVER || errorClass === CLASS.NETWORK;
-      const cd = honorRetry && retryAfterMs != null ? Math.max(retryAfterMs, 1000) : base;
-      if (cd > 0) e.cooldownUntil = now + cd;
-      if (errorClass === CLASS.AUTH) e.status = "dead";
-      else if (errorClass === CLASS.NO_BALANCE) e.status = "no_balance";
-      else if (errorClass === CLASS.BAD_REQUEST || errorClass === CLASS.PERMISSION) {
-        /* request/content/resource permission problems do not affect key health */
-      } else e.status = "cooldown";
-    }
+    if (errorClass === CLASS.OK) applyReportSuccess(e, now);
+    else applyReportFailure(e, this.cooldowns, errorClass, retryAfterMs, message, now);
     this._mirror(e);
     // A physical key can live in two pools (Gemini flash + pro). Any cooldown
     // applies to the credential, not the model alias, so mirror it everywhere.

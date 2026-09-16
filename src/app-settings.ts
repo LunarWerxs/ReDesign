@@ -101,19 +101,10 @@ export function setAppSettingsSyncScheduler(listener: LocalChangeListener | null
  * live runtime effects, refreshes the tray pointer and asks Connections to coalesce an outbound
  * write for local changes. Remote application takes this same route with echo suppression.
  */
-export function applyAppSettings(
-  patch: unknown,
-  options: { source?: SettingsSource; onLocalChange?: LocalChangeListener } = {},
-): AppSettings {
-  const incoming = patch && typeof patch === "object" ? (patch as Record<string, unknown>) : {};
-  const settings = { ...loadAppSettings() };
-  let changed = false;
-  const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (Object.is(settings[key], value)) return;
-    settings[key] = value;
-    changed = true;
-  };
+type SettingsSetter = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
 
+/** Decode the fields a patch may carry. Values of the wrong type, or non-finite, are ignored. */
+function decodeSettingsPatch(incoming: Record<string, unknown>, set: SettingsSetter): void {
   if (typeof incoming.autoUpdate === "boolean") set("autoUpdate", incoming.autoUpdate);
   if (typeof incoming.updateNotify === "boolean") set("updateNotify", incoming.updateNotify);
   if (typeof incoming.portableMode === "boolean") set("portableMode", incoming.portableMode);
@@ -125,13 +116,34 @@ export function applyAppSettings(
     const days = Math.floor(incoming.outputRetentionDays);
     set("outputRetentionDays", days > 0 ? Math.min(3650, Math.max(1, days)) : 0);
   }
+}
 
-  if (!changed) return settings;
-  saveAppSettings(settings);
+/** Push persisted settings into the live runtime effects and the tray pointer. */
+function applySettingsRuntime(settings: AppSettings): void {
   setAutoUpdateEnabled(settings.autoUpdate === true);
   setUpdateNotifyEnabled(settings.updateNotify !== false);
   setAutoUpdateIntervalSecs(settings.autoUpdateIntervalSecs ?? AUTO_UPDATE_INTERVAL_DEFAULT_S);
   updateInstanceInfo({ portableMode: settings.portableMode === true, hideTrayIcon: settings.hideTrayIcon === true });
+}
+
+export function applyAppSettings(
+  patch: unknown,
+  options: { source?: SettingsSource; onLocalChange?: LocalChangeListener } = {},
+): AppSettings {
+  const incoming = patch && typeof patch === "object" ? (patch as Record<string, unknown>) : {};
+  const settings = { ...loadAppSettings() };
+  let changed = false;
+  const set: SettingsSetter = (key, value) => {
+    if (Object.is(settings[key], value)) return;
+    settings[key] = value;
+    changed = true;
+  };
+
+  decodeSettingsPatch(incoming, set);
+
+  if (!changed) return settings;
+  saveAppSettings(settings);
+  applySettingsRuntime(settings);
   if ((options.source ?? "local") === "local") {
     options.onLocalChange?.();
     scheduleLocalSync?.();

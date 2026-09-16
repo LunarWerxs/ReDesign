@@ -338,6 +338,122 @@ async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manif
   }
 }
 
+/**
+ * Everything `runSpecBatch` needs, assembled once by `executeRunSpec`. The memoizing closures
+ * (imagesFor/describeInput/describeReference) are passed through by reference so each stays a
+ * single shared cache for the whole run.
+ */
+interface RunExecState {
+  opts: RunReimagineOptions;
+  spec: RunSpec;
+  runId: string;
+  manifest: store.Manifest;
+  mock: boolean;
+  signal: AbortSignal | null;
+  timeoutMs: number;
+  km: KeyManager;
+  systemContract: string;
+  brandStyleGuide: string;
+  referenceNote: string;
+  visionHelper: Model | null;
+  referenceImages: LoadedImage[];
+  referenceRels: string[];
+  summary: RunSummaryInfo;
+  inputItems: InputItem[];
+  models: Model[];
+  jobs: Job[];
+  poolLimits: ReturnType<typeof buildPoolLimits>;
+  concurrency: number;
+  poolConcurrency: number;
+  modelById: Map<string, Model>;
+  promptById: Map<string, RunSpec["prompts"][number]>;
+  inputById: Map<string, InputItem>;
+  imagesFor: (input: InputItem) => LoadedImage[];
+  describeInput: (input: InputItem) => Promise<string | null>;
+  describeReference: () => Promise<string | null>;
+  onProgress: (event: Record<string, unknown>) => void;
+  markManifestDirty: () => void;
+  flushTimer: ReturnType<typeof setInterval>;
+}
+
+/** Admit no further paid calls once the run's own spend ceiling is reached or unboundable. */
+function assertSpendCeiling(manifest: store.Manifest, spec: RunSpec, mock: boolean): void {
+  const limit = spec.settings.maxCostUsd;
+  if (limit == null || mock) return;
+  if ((manifest.cost?.totalCost ?? 0) >= limit) throw new Error(`Run spend ceiling ($${limit}) reached; no further calls admitted.`);
+  if (manifest.cost?.anyUnpriced || manifest.cost?.anyPartialUsage || manifest.cost?.anyCacheAccountingPartial) throw new Error("Run spend cannot be bounded because a provider returned unpriced or incomplete usage; no further calls admitted.");
+}
+
+/** The job phase: enrich the summary, schedule every job, then finalize and persist the manifest. */
+async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
+  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer } = state;
+  const describeCtx: RunSummaryDescribeCtx = { opts: { ...opts, label: spec.label }, mock, visionHelper, km, timeoutMs, signal, imagesFor };
+  const summaryPromise = describeRunSummary(summary, inputItems[0] as InputItem, describeCtx)
+    .then((next) => {
+      if (!next || (next.title === (manifest.summary as RunSummaryInfo).title && next.source === (manifest.summary as RunSummaryInfo).source)) return;
+      manifest.summary = next;
+      markManifestDirty();
+      store.writeManifest(runId, manifest);
+      onProgress({ type: "snapshot", runId, manifest });
+    })
+    // Best-effort title/source enrichment, the run already has its default summary;
+    // a failure here just means it keeps that default, so nothing needs to surface.
+    .catch(() => {});
+
+  // Pre-warm captions so the first jobs don't stall on them. Every job is grounded now, so
+  // every input needs one, and firing all of them at once would put one concurrent vision
+  // request per input against a single helper pool — a burst the job scheduler itself would
+  // never allow (it caps each pool at poolConcurrency). Warm the same number the scheduler
+  // would run, then let the rest be pulled in lazily: describeInput caches its promise, so a
+  // job that arrives before its input is warmed simply starts the call itself and every
+  // later job for that input shares it.
+  for (const input of inputItems.slice(0, poolConcurrency)) describeInput(input);
+  const anyTextOnly = models.some((m) => m.vision === false);
+  if (anyTextOnly && referenceImages.length) describeReference();
+
+  // Everything the per-job worker used to close over, assembled once. See runner/job-worker.ts:
+  // the worker body moved there unchanged, so these field names are the originals.
+  const jobContext: JobWorkerContext = {
+    runId,
+    manifest,
+    mock,
+    signal,
+    timeoutMs,
+    systemContract,
+    brandStyleGuide,
+    km,
+    modelById,
+    promptById,
+    inputById,
+    imagesFor,
+    describeInput,
+    describeReference,
+    describer: visionHelper,
+    referenceImages,
+    referenceRels,
+    referenceNote,
+    onProgress,
+    markManifestDirty,
+  };
+
+  const scheduledResults = await runJobsByPool<Job>(jobs, {
+    totalConcurrency: concurrency,
+    poolLimits,
+    keyFor: (job) => (modelById.get(job.modelId) || ({} as Model)).keyEnv || "default",
+    worker: (job) => runOneJob(job, jobContext),
+  });
+  if (applyScheduledResults(scheduledResults, manifest, onProgress)) markManifestDirty();
+
+  await summaryPromise;
+  clearInterval(flushTimer);
+  manifest.status = signal?.aborted ? "cancelled" : "done";
+  manifest.finishedAt = new Date().toISOString();
+  store.writeManifest(runId, manifest);
+  km.save();
+  onProgress({ type: "done", runId, manifest });
+  return manifest;
+}
+
 async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: RunSpec): Promise<store.Manifest> {
   const ro = resolveRunOptions({ ...opts, ...spec.settings, modelQuantities: spec.settings.variantsByModel });
   const { km, mock, concurrency, poolConcurrency, timeoutMs, onProgress, signal } = ro;
@@ -411,86 +527,23 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
   const flushTimer = setInterval(flushManifest, 750);
   if (flushTimer.unref) flushTimer.unref();
 
+  const markManifestDirty = () => {
+    manifestDirty = true;
+  };
+
+  const state: RunExecState = {
+    opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide,
+    referenceNote: rs.referenceNote, visionHelper, referenceImages, referenceRels, summary,
+    inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById,
+    inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer,
+  };
+
   try {
     return await withProviderRun({
       concurrency, poolConcurrency,
-      beforeCall: () => {
-        const limit = spec.settings.maxCostUsd;
-        if (limit != null && !mock) {
-          if ((manifest.cost?.totalCost ?? 0) >= limit) throw new Error(`Run spend ceiling ($${limit}) reached; no further calls admitted.`);
-          if (manifest.cost?.anyUnpriced || manifest.cost?.anyPartialUsage || manifest.cost?.anyCacheAccountingPartial) throw new Error("Run spend cannot be bounded because a provider returned unpriced or incomplete usage; no further calls admitted.");
-        }
-      },
-      recordUsage: (entry) => { recordProviderUsage(manifest, entry); manifestDirty = true; },
-    }, async () => {
-      const describeCtx: RunSummaryDescribeCtx = { opts: { ...opts, label: spec.label }, mock, visionHelper, km, timeoutMs, signal, imagesFor };
-      const summaryPromise = describeRunSummary(summary, inputItems[0] as InputItem, describeCtx)
-        .then((next) => {
-          if (!next || (next.title === (manifest.summary as RunSummaryInfo).title && next.source === (manifest.summary as RunSummaryInfo).source)) return;
-          manifest.summary = next;
-          manifestDirty = true;
-          store.writeManifest(runId, manifest);
-          onProgress({ type: "snapshot", runId, manifest });
-        })
-        // Best-effort title/source enrichment, the run already has its default summary;
-        // a failure here just means it keeps that default, so nothing needs to surface.
-        .catch(() => {});
-
-      // Pre-warm captions so the first jobs don't stall on them. Every job is grounded now, so
-      // every input needs one, and firing all of them at once would put one concurrent vision
-      // request per input against a single helper pool — a burst the job scheduler itself would
-      // never allow (it caps each pool at poolConcurrency). Warm the same number the scheduler
-      // would run, then let the rest be pulled in lazily: describeInput caches its promise, so a
-      // job that arrives before its input is warmed simply starts the call itself and every
-      // later job for that input shares it.
-      for (const input of inputItems.slice(0, poolConcurrency)) describeInput(input);
-      const anyTextOnly = models.some((m) => m.vision === false);
-      if (anyTextOnly && referenceImages.length) describeReference();
-
-      // Everything the per-job worker used to close over, assembled once. See runner/job-worker.ts:
-      // the worker body moved there unchanged, so these field names are the originals.
-      const jobContext: JobWorkerContext = {
-        runId,
-        manifest,
-        mock,
-        signal,
-        timeoutMs,
-        systemContract,
-        brandStyleGuide,
-        km,
-        modelById,
-        promptById,
-        inputById,
-        imagesFor,
-        describeInput,
-        describeReference,
-        describer: visionHelper,
-        referenceImages,
-        referenceRels,
-        referenceNote: rs.referenceNote,
-        onProgress,
-        markManifestDirty: () => {
-          manifestDirty = true;
-        },
-      };
-
-      const scheduledResults = await runJobsByPool<Job>(jobs, {
-        totalConcurrency: concurrency,
-        poolLimits,
-        keyFor: (job) => (modelById.get(job.modelId) || ({} as Model)).keyEnv || "default",
-        worker: (job) => runOneJob(job, jobContext),
-      });
-      if (applyScheduledResults(scheduledResults, manifest, onProgress)) manifestDirty = true;
-
-      await summaryPromise;
-      clearInterval(flushTimer);
-      manifest.status = signal?.aborted ? "cancelled" : "done";
-      manifest.finishedAt = new Date().toISOString();
-      store.writeManifest(runId, manifest);
-      km.save();
-      onProgress({ type: "done", runId, manifest });
-      return manifest;
-    });
+      beforeCall: () => assertSpendCeiling(manifest, spec, mock),
+      recordUsage: (entry) => { recordProviderUsage(manifest, entry); markManifestDirty(); },
+    }, () => runSpecBatch(state));
   } finally {
     clearInterval(flushTimer);
     flushManifest();

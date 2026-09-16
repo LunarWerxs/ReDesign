@@ -63,81 +63,77 @@ interface PromptBuild {
 // screenshot (and, for a text-only model, the reference) before the first call goes out.
 // Pulled out of runOneJob so this branching scores against this small function instead of
 // the job loop's — see this file's header for why the body itself is otherwise unchanged.
+// The two branches live in the sibling helpers below, so this stays a dispatcher.
 async function buildJobPrompt(ctx: JobWorkerContext, job: Job, prompt: ResolvedPrompt, input: InputItem, hasVision: boolean, t0: number): Promise<PromptBuild> {
-  const { runId, brandStyleGuide, describer, referenceImages, referenceNote, imagesFor, describeInput, describeReference, onProgress } = ctx;
-  let images: LoadedImage[] = [];
+  const built = hasVision
+    ? await prepareVisionPrompt(ctx, job, prompt, input)
+    : await prepareTextOnlyPrompt(ctx, job, prompt, input, t0);
+  if (ctx.brandStyleGuide) built.effectivePrompt += brandStyleGuideBlock(ctx.brandStyleGuide);
+  return built;
+}
+
+// Vision-capable model: the screenshot (plus any style reference) rides along with the
+// prompt, and its caption is one shared, cached description per input.
+async function prepareVisionPrompt(ctx: JobWorkerContext, job: Job, prompt: ResolvedPrompt, input: InputItem): Promise<PromptBuild> {
+  const { describer, referenceImages, referenceNote, imagesFor, describeInput } = ctx;
+  let images = imagesFor(input);
+  if (!images.length) job.note = "no images loaded";
+  // Grounding: a full written inventory of the screenshot rides along with the
+  // image so the model reimagines every element instead of dropping or inventing
+  // content. One shared caption per input (cached); its wait is charged to prepMs,
+  // not to generation time, so a job's reported speed stays comparable to a
+  // text-only model's, which pays the same wait.
+  const capStart = Date.now();
+  const caption = await describeInput(input);
+  const prepMs = Date.now() - capStart;
   let effectivePrompt = prompt.user;
-  let caption: string | null = null;
-  let refCaption: string | null = null;
-  let prepMs = 0;
+  if (caption) {
+    effectivePrompt += groundingBlock(caption);
+    if (!job.note) job.note = `grounded with a full description of the original${describer ? ` via ${describer.id}` : ""}`;
+  }
+  // Style reference rides along at the END of the image list; the prompt
+  // tells the model those trailing images are direction, not the product.
+  if (referenceImages.length) {
+    images = images.concat(referenceImages);
+    effectivePrompt += visionReferenceBlock(referenceImages.length, referenceNote);
+  }
+  return { effectivePrompt, images, caption, refCaption: null, prepMs };
+}
+
+// Text-only model (e.g. DeepSeek): feed it a vision-model caption of the screenshot so it
+// reimagines the real UI rather than a generic one, and a description for the reference.
+async function prepareTextOnlyPrompt(ctx: JobWorkerContext, job: Job, prompt: ResolvedPrompt, input: InputItem, t0: number): Promise<PromptBuild> {
+  const { runId, describer, referenceImages, referenceNote, describeInput, describeReference, onProgress } = ctx;
 
   // A text-only model must first caption the screenshot (a vision call that can
   // take several seconds). Flip the row to "running" with a note up front so the
   // UI shows motion during that pre-flight instead of a dead "pending".
-  if (!hasVision) {
-    job.status = "running";
-    job.startedAt = new Date().toISOString();
-    job.note = "preparing, describing the screenshot for this text-only model...";
-    onProgress({ type: "job", runId, job });
-  }
-  if (hasVision) {
-    images = imagesFor(input);
-    if (!images.length) job.note = "no images loaded";
-    // Grounding: a full written inventory of the screenshot rides along with the
-    // image so the model reimagines every element instead of dropping or inventing
-    // content. One shared caption per input (cached); its wait is charged to prepMs,
-    // not to generation time, so a job's reported speed stays comparable to a
-    // text-only model's, which pays the same wait.
-    const capStart = Date.now();
-    caption = await describeInput(input);
-    prepMs += Date.now() - capStart;
-    if (caption) {
-      effectivePrompt += groundingBlock(caption);
-      if (!job.note) job.note = `grounded with a full description of the original${describer ? ` via ${describer.id}` : ""}`;
-    }
-    // Style reference rides along at the END of the image list; the prompt
-    // tells the model those trailing images are direction, not the product.
-    if (referenceImages.length) {
-      images = images.concat(referenceImages);
-      effectivePrompt += visionReferenceBlock(referenceImages.length, referenceNote);
-    }
+  job.status = "running";
+  job.startedAt = new Date().toISOString();
+  job.note = "preparing, describing the screenshot for this text-only model...";
+  onProgress({ type: "job", runId, job });
+
+  const caption = await describeInput(input);
+  let effectivePrompt = prompt.user;
+  if (caption) {
+    effectivePrompt = `${prompt.user}\n\n--- You cannot see the image. A detailed description of the interface to reimagine follows: ---\n${caption}`;
+    job.note = `text-only model, fed an auto caption${describer ? ` via ${describer.id}` : ""}`;
   } else {
-    // Text-only model (e.g. DeepSeek): feed it a vision-model caption of the
-    // screenshot so it reimagines the real UI rather than a generic one.
-    caption = await describeInput(input);
-    if (caption) {
-      effectivePrompt = `${prompt.user}\n\n--- You cannot see the image. A detailed description of the interface to reimagine follows: ---\n${caption}`;
-      job.note = `text-only model, fed an auto caption${describer ? ` via ${describer.id}` : ""}`;
-    } else {
-      job.note = "text-only model, no caption available, ran without seeing the UI";
-    }
-    // A text-only model also can't see the reference, feed it a description.
-    if (referenceImages.length) {
-      refCaption = await describeReference();
-      if (refCaption) effectivePrompt += textReferenceBlock(refCaption, referenceNote);
-    }
-    prepMs = Date.now() - t0;
+    job.note = "text-only model, no caption available, ran without seeing the UI";
   }
-  if (brandStyleGuide) effectivePrompt += brandStyleGuideBlock(brandStyleGuide);
-  return { effectivePrompt, images, caption, refCaption, prepMs };
+  // A text-only model also can't see the reference, feed it a description.
+  let refCaption: string | null = null;
+  if (referenceImages.length) {
+    refCaption = await describeReference();
+    if (refCaption) effectivePrompt += textReferenceBlock(refCaption, referenceNote);
+  }
+  return { effectivePrompt, images: [], caption, refCaption, prepMs: Date.now() - t0 };
 }
 
-// Records provider usage/cost and writes the output + its sidecar .meta.json for one
-// successful call. Pulled out of the attempt loop so a write failure (disk full, AV lock,
-// unparseable payload — none of them the key's fault) scores against this function alone.
-async function finalizeJobResult(
-  ctx: JobWorkerContext,
-  job: Job,
-  model: Model,
-  prompt: ResolvedPrompt,
-  input: InputItem,
-  result: Awaited<ReturnType<ReturnType<typeof getAdapter>["call"]>>,
-  built: PromptBuild,
-  keyMask: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { runId, manifest, referenceImages, referenceRels, referenceNote, describer } = ctx;
-  const { caption, refCaption } = built;
+type AdapterCallResult = Awaited<ReturnType<ReturnType<typeof getAdapter>["call"]>>;
 
+// What one successful call was billed, recorded BEFORE anything touches the disk.
+function recordJobUsageAndCost(manifest: store.Manifest, job: Job, model: Model, result: AdapterCallResult): void {
   // Record what the provider has ALREADY billed before touching the disk. Everything
   // below this point can fail locally, and when it does the call still happened and
   // still cost money, so the run's cost meter and spend-to-date have to reflect it.
@@ -156,12 +152,27 @@ async function finalizeJobResult(
     if (job.cost.estimate) rc.anyEstimatePricing = true;
     if (!job.cost.priced) rc.anyUnpriced = true;
   }
+}
 
+// Writes the output plus its sidecar .meta.json. A write failure (disk full, AV lock,
+// unparseable payload — none of them the key's fault) comes back as `ok: false` rather
+// than a throw, so it scores against this function alone.
+async function saveJobOutput(
+  ctx: JobWorkerContext,
+  job: Job,
+  model: Model,
+  prompt: ResolvedPrompt,
+  input: InputItem,
+  result: AdapterCallResult,
+  built: PromptBuild,
+  keyMask: string,
+): Promise<{ ok: true; extracted: ReturnType<typeof extractHtml>; rel: string } | { ok: false; error: string }> {
+  const { runId, referenceImages, referenceRels, referenceNote, describer } = ctx;
+  const { caption, refCaption } = built;
   const rel = path.join(job.inputId, `${model.id}__${prompt.id}__v${job.variant}.html`);
   const abs = path.join(store.runDir(runId), rel);
-  let extracted: ReturnType<typeof extractHtml>;
   try {
-    extracted = extractHtml(result.text);
+    const extracted = extractHtml(result.text);
     ensureDir(path.dirname(abs));
     // Embed the viewer's height-measurement script now, so /output-raw/* can stream the
     // file straight off disk instead of reading and rewriting it on every gallery card.
@@ -190,13 +201,18 @@ async function finalizeJobResult(
         : null,
       createdAt: new Date().toISOString(),
     });
+    return { ok: true, extracted, rel };
   } catch (writeErr) {
     // The model answered and the key worked, only OUR side failed. Reporting the key
     // here would bench a healthy key, and retrying with the next one would pay a second
     // time for the same output, so do neither: name the real cause and stop.
     return { ok: false, error: `output could not be saved: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}` };
   }
+}
 
+// The post-write half: file bookkeeping, the truncation signal, and whether the payload
+// that was saved actually counts as a redesign.
+function applyOutputOutcome(job: Job, runId: string, rel: string, extracted: ReturnType<typeof extractHtml>, result: AdapterCallResult): { ok: true } | { ok: false; error: string } {
   job.file = path.join(runId, rel).split(path.sep).join("/");
   job.wrapped = extracted.wrapped;
   job.finishReason = result.finishReason || null;
@@ -219,6 +235,26 @@ async function finalizeJobResult(
   job.status = "ok";
   job.error = null;
   return { ok: true };
+}
+
+// Records provider usage/cost and writes the output + its sidecar .meta.json for one
+// successful call. Pulled out of the attempt loop so a write failure (disk full, AV lock,
+// unparseable payload — none of them the key's fault) scores against this function alone.
+// The cost ledger, the disk write and the outcome classification are the siblings above.
+async function finalizeJobResult(
+  ctx: JobWorkerContext,
+  job: Job,
+  model: Model,
+  prompt: ResolvedPrompt,
+  input: InputItem,
+  result: AdapterCallResult,
+  built: PromptBuild,
+  keyMask: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  recordJobUsageAndCost(ctx.manifest, job, model, result);
+  const saved = await saveJobOutput(ctx, job, model, prompt, input, result, built, keyMask);
+  if (!saved.ok) return { ok: false, error: saved.error };
+  return applyOutputOutcome(job, ctx.runId, saved.rel, saved.extracted, result);
 }
 
 type KeyAcquisition = Awaited<ReturnType<KeyManager["acquireOrWait"]>>;

@@ -26,6 +26,63 @@ interface KeyRotationOptions {
   signal?: AbortSignal | null;
 }
 
+/** A leased key as handed back by KeyManager.acquireOrWait(). */
+type KeyLease = Awaited<ReturnType<KeyManager["acquireOrWait"]>>;
+
+/** What one acquire/attempt/report cycle tells the rotation loop to do next. */
+type KeyAttemptOutcome<T> = { kind: "ok"; value: T } | { kind: "stop" } | { kind: "retry" };
+
+/**
+ * Report a failed attempt to the KeyManager and decide whether rotation continues.
+ *
+ * "stop" when the caller aborted (the lease is handed back unused) or when the failure
+ * was NOT the key's fault (a 400 / content problem — retrying that on a different key
+ * just burns quota to get the same answer). "retry" when the key was blamed and is now
+ * cooling, so the caller may acquire a DIFFERENT key.
+ */
+function reportFailedAttempt(
+  km: KeyManager,
+  pool: string,
+  acq: KeyLease,
+  err: unknown,
+  signal: AbortSignal | null,
+): "stop" | "retry" {
+  if (signal?.aborted) {
+    km.release(pool, acq.keyId, acq.leaseId);
+    return "stop";
+  }
+  const provErr = err as ProviderError;
+  const isProvider = provErr && provErr.name === "ProviderError";
+  km.report(pool, acq.keyId as string, {
+    errorClass: isProvider ? provErr.errorClass : CLASS.BAD_REQUEST, // don't blame the key for our bug
+    retryAfterMs: isProvider ? provErr.retryAfterMs : null,
+    message: provErr?.message,
+    leaseId: acq.leaseId,
+  });
+  if (!isProvider || !provErr.retryable) return "stop";
+  return "retry";
+}
+
+/** Acquire a key for attempt `i`, run `attempt` on it, and report the outcome. */
+async function runKeyAttempt<T>(
+  km: KeyManager,
+  pool: string,
+  attempt: (ctx: KeyAttemptContext) => Promise<T>,
+  i: number,
+  waitMs: number,
+  signal: AbortSignal | null,
+): Promise<KeyAttemptOutcome<T>> {
+  const acq = await km.acquireOrWait(pool, waitMs, signal);
+  if (!acq.available) return { kind: "stop" };
+  try {
+    const out = await attempt({ apiKey: acq.key as string, attempt: i, mask: acq.mask as string });
+    km.report(pool, acq.keyId as string, { errorClass: CLASS.OK, leaseId: acq.leaseId });
+    return { kind: "ok", value: out };
+  } catch (err) {
+    return reportFailedAttempt(km, pool, acq, err, signal) === "retry" ? { kind: "retry" } : { kind: "stop" };
+  }
+}
+
 /**
  * Run `attempt` against a key pool, rotating to a DIFFERENT key whenever the provider
  * fails in a way a key could be responsible for (401 dead, 402 out of balance, 429,
@@ -49,28 +106,10 @@ async function withKeyRotation<T>(
   const budget = km.attemptBudget(pool, opts.maxAttempts);
   for (let i = 1; i <= budget; i++) {
     if (signal?.aborted) return null;
-    const acq = await km.acquireOrWait(pool, waitMs, signal);
-    if (!acq.available) return null;
-    try {
-      const out = await attempt({ apiKey: acq.key as string, attempt: i, mask: acq.mask as string });
-      km.report(pool, acq.keyId as string, { errorClass: CLASS.OK, leaseId: acq.leaseId });
-      return out;
-    } catch (err) {
-      if (signal?.aborted) {
-        km.release(pool, acq.keyId, acq.leaseId);
-        return null;
-      }
-      const provErr = err as ProviderError;
-      const isProvider = provErr && provErr.name === "ProviderError";
-      km.report(pool, acq.keyId as string, {
-        errorClass: isProvider ? provErr.errorClass : CLASS.BAD_REQUEST, // don't blame the key for our bug
-        retryAfterMs: isProvider ? provErr.retryAfterMs : null,
-        message: provErr?.message,
-        leaseId: acq.leaseId,
-      });
-      if (!isProvider || !provErr.retryable) return null;
-      // else: the key is now cooling, loop around and acquire the next one
-    }
+    const outcome = await runKeyAttempt(km, pool, attempt, i, waitMs, signal);
+    if (outcome.kind === "ok") return outcome.value;
+    if (outcome.kind === "stop") return null;
+    // "retry": the key is now cooling, loop around and acquire the next one
   }
   return null;
 }

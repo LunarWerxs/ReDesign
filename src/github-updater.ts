@@ -293,6 +293,55 @@ async function readResponseWithLimit(response: Response, maxBytes: number): Prom
   return result;
 }
 
+/** Reject a published asset size we must never stream: non-integer, non-positive, or over the ceiling. */
+function assertSafeExpectedBytes(expectedBytes: number, maximumBytes: number): void {
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > maximumBytes) {
+    throw new Error("release asset has an invalid or unsafe published size");
+  }
+}
+
+/** Reject a response whose own content-length disagrees with the published asset size. */
+function assertContentLengthMatches(response: Response, expectedBytes: number): void {
+  const lengthHeader = response.headers.get("content-length");
+  const contentLength = lengthHeader === null ? Number.NaN : Number(lengthHeader);
+  if (Number.isFinite(contentLength) && contentLength !== expectedBytes) {
+    throw new Error("download size does not match the published asset size");
+  }
+}
+
+/** Backpressure: wait for the write stream to drain (or to error) before handing it another chunk. */
+function waitForDrain(writer: ReturnType<typeof createWriteStream>): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    writer.once("drain", resolve);
+    writer.once("error", reject);
+  });
+}
+
+/** Close the write stream, surfacing a late write error the way `end` reports it. */
+function closeWriter(writer: ReturnType<typeof createWriteStream>): Promise<void> {
+  return new Promise<void>((resolve, reject) =>
+    writer.end((error?: Error | null) => (error ? reject(error) : resolve())),
+  );
+}
+
+/** Pump the body into `writer`, returning the byte count; overruns throw as soon as they are seen. */
+async function pumpBodyToWriter(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  writer: ReturnType<typeof createWriteStream>,
+  expectedBytes: number,
+  maximumBytes: number,
+): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > expectedBytes || total > maximumBytes) throw new Error("download is larger than expected");
+    if (!writer.write(value)) await waitForDrain(writer);
+  }
+  return total;
+}
+
 /**
  * Stream a release asset to disk while enforcing both GitHub's published size and an absolute
  * safety ceiling. Failure always removes the partial file, so cleanup is not deferred to a
@@ -304,31 +353,15 @@ export async function downloadResponseToFile(
   expectedBytes: number,
   maximumBytes = MAX_ARCHIVE_BYTES,
 ): Promise<void> {
-  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > maximumBytes) {
-    throw new Error("release asset has an invalid or unsafe published size");
-  }
-  const lengthHeader = response.headers.get("content-length");
-  const contentLength = lengthHeader === null ? Number.NaN : Number(lengthHeader);
-  if (Number.isFinite(contentLength) && contentLength !== expectedBytes) {
-    throw new Error("download size does not match the published asset size");
-  }
+  assertSafeExpectedBytes(expectedBytes, maximumBytes);
+  assertContentLengthMatches(response, expectedBytes);
   const reader = response.body?.getReader();
   if (!reader) throw new Error("download has no response body");
   const writer = createWriteStream(destination, { flags: "wx", mode: 0o600 });
-  let total = 0;
   try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > expectedBytes || total > maximumBytes) throw new Error("download is larger than expected");
-      if (!writer.write(value)) await new Promise<void>((resolve, reject) => {
-        writer.once("drain", resolve);
-        writer.once("error", reject);
-      });
-    }
+    const total = await pumpBodyToWriter(reader, writer, expectedBytes, maximumBytes);
     if (total !== expectedBytes) throw new Error("download size does not match the published asset size");
-    await new Promise<void>((resolve, reject) => writer.end((error?: Error | null) => (error ? reject(error) : resolve())));
+    await closeWriter(writer);
   } catch (error) {
     writer.destroy();
     rmSync(destination, { force: true });

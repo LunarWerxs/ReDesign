@@ -398,41 +398,90 @@ function hasActiveRun(): boolean {
   return store.listRuns().some((run) => (run.status === "running" || run.status === "queued") && store.isRunOwned(run.runId));
 }
 
+/** How one persisted queued run fared when recovery tried to adopt it. */
+type QueueRecoveryOutcome =
+  | { kind: "recovered"; assetBytes: number }
+  | { kind: "skipped" }
+  | { kind: "failed" };
+
+/** Bytes every live entry has already claimed — the budget recovery has to fit inside. */
+function activeAssetBytes(): number {
+  return [...activeRuns.values()].reduce((total, entry) => total + entry.spec.assetBytes, 0);
+}
+
+/** Persisted queued runs in the order they were queued: saved position first, creation
+ *  time as the tie-break, and a missing position sorted last so a half-written manifest
+ *  cannot jump the line. */
+function queuedRecoveryCandidates(): store.RunSummary[] {
+  return store
+    .listRuns()
+    .filter((run) => run.status === "queued")
+    .sort(
+      (a, b) =>
+        (a.queuePosition ?? Number.MAX_SAFE_INTEGER) - (b.queuePosition ?? Number.MAX_SAFE_INTEGER) ||
+        String(a.createdAt).localeCompare(String(b.createdAt)),
+    );
+}
+
+/** Record that a saved queued run could not be adopted: its jobs are marked as needing an
+ *  explicit retry, so it reads as actionable rather than merely stalled. */
+function recordQueuedRecoveryFailure(runId: string, error: unknown): void {
+  const existing = store.readManifest(runId);
+  if (!existing) return;
+  const jobs = (existing.jobs || []).map((job) => ({ ...job, status: "error", error: "Queue recovery requires an explicit retry." }));
+  store.writeManifest(runId, { ...existing, status: "error", jobs, counts: { total: jobs.length, done: jobs.length, ok: 0, error: jobs.length, skipped: 0 }, queue: null, finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
+}
+
+/** Claim one persisted queued run and park it here as held.
+ *
+ *  "skipped" means recovery did not take it on — another live process owns it, the claim
+ *  was lost, or it stopped being queued underneath us; nothing was written. "failed" means
+ *  it was claimed but its saved recipe is unusable, and the error manifest is already
+ *  persisted. `bytes` is the running total the new entry must fit alongside. */
+function adoptQueuedRun(runId: string, bytes: number): QueueRecoveryOutcome {
+  let ownership: store.RunOwnershipClaim;
+  try {
+    ownership = store.claimRunOwnership(runId);
+  } catch (_) {
+    return { kind: "skipped" };
+  }
+  try {
+    const existing = store.readManifest(runId);
+    if (existing?.status !== "queued") {
+      ownership.release();
+      return { kind: "skipped" };
+    }
+    const spec = readRunSpec(store.runDir(runId));
+    if (!spec) throw new Error("Queued run cannot be recovered: its saved specification or assets are missing or corrupt.");
+    if (activeRuns.size >= MAX_QUEUED_RUNS || bytes + spec.assetBytes > MAX_QUEUED_BYTES) {
+      throw new Error("Queue recovery reached its resource limit; retry this saved run after the queue drains.");
+    }
+    const entry: RunEntry = {
+      clients: new Set(), controller: new AbortController(), lastManifest: existing, finished: false,
+      status: "queued", released: false, body: { autoStart: false }, spec, ownership,
+    };
+    activeRuns.set(runId, entry);
+    runQueue.push(runId);
+    startHeartbeat(entry);
+    return { kind: "recovered", assetBytes: spec.assetBytes };
+  } catch (error) {
+    recordQueuedRecoveryFailure(runId, error);
+    ownership.release();
+    return { kind: "failed" };
+  }
+}
+
 /** Recover persisted recipes, including previously released waiting work, as held.
  * Ownership prevents a second daemon from adopting another process's live queue. */
 function recoverQueuedRuns(): number {
   let recovered = 0;
-  let bytes = [...activeRuns.values()].reduce((total, entry) => total + entry.spec.assetBytes, 0);
-  const candidates = store.listRuns().filter((run) => run.status === "queued").sort((a, b) =>
-    (a.queuePosition ?? Number.MAX_SAFE_INTEGER) - (b.queuePosition ?? Number.MAX_SAFE_INTEGER) || String(a.createdAt).localeCompare(String(b.createdAt)));
-  for (const run of candidates) {
+  let bytes = activeAssetBytes();
+  for (const run of queuedRecoveryCandidates()) {
     if (activeRuns.has(run.runId) || store.isRunOwned(run.runId)) continue;
-    let ownership: store.RunOwnershipClaim;
-    try { ownership = store.claimRunOwnership(run.runId); } catch (_) { continue; }
-    try {
-      const existing = store.readManifest(run.runId);
-      if (existing?.status !== "queued") { ownership.release(); continue; }
-      const spec = readRunSpec(store.runDir(run.runId));
-      if (!spec) throw new Error("Queued run cannot be recovered: its saved specification or assets are missing or corrupt.");
-      if (activeRuns.size >= MAX_QUEUED_RUNS || bytes + spec.assetBytes > MAX_QUEUED_BYTES) {
-        throw new Error("Queue recovery reached its resource limit; retry this saved run after the queue drains.");
-      }
-      const entry: RunEntry = {
-        clients: new Set(), controller: new AbortController(), lastManifest: existing, finished: false,
-        status: "queued", released: false, body: { autoStart: false }, spec, ownership,
-      };
-      activeRuns.set(run.runId, entry);
-      runQueue.push(run.runId);
-      startHeartbeat(entry);
-      bytes += spec.assetBytes;
+    const outcome = adoptQueuedRun(run.runId, bytes);
+    if (outcome.kind === "recovered") {
+      bytes += outcome.assetBytes;
       recovered++;
-    } catch (error) {
-      const existing = store.readManifest(run.runId);
-      if (existing) {
-        const jobs = (existing.jobs || []).map((job) => ({ ...job, status: "error", error: "Queue recovery requires an explicit retry." }));
-        store.writeManifest(run.runId, { ...existing, status: "error", jobs, counts: { total: jobs.length, done: jobs.length, ok: 0, error: jobs.length, skipped: 0 }, queue: null, finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) });
-      }
-      ownership.release();
     }
   }
   updateQueuedManifests();

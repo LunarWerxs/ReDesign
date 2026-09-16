@@ -128,41 +128,79 @@ function matchesAsset(file: string, asset: RunSpec["assets"][number]): boolean {
   return bytes === asset.bytes && hash.digest("hex") === asset.sha256;
 }
 
-function validateSpec(spec: unknown, dir: string): RunSpec | null {
-  if (!spec || typeof spec !== "object") return null;
-  const value = spec as RunSpec;
-  if (value.version !== 1 || !Array.isArray(value.assets) || !Array.isArray(value.jobs) || !Array.isArray(value.inputs) || !Array.isArray(value.models) || !Array.isArray(value.prompts)) return null;
-  if (value.assets.length > RUN_LIMITS.assets || !Number.isFinite(value.assetBytes) || value.assetBytes < 0 || value.assetBytes > RUN_LIMITS.assetBytes) return null;
-  if (value.jobs.length > RUN_LIMITS.jobs || !value.settings || typeof value.settings !== "object") return null;
+/** Version tag plus the five collections every later check indexes into. */
+function hasSpecShape(value: RunSpec): boolean {
+  return value.version === 1 && Array.isArray(value.assets) && Array.isArray(value.jobs) && Array.isArray(value.inputs) && Array.isArray(value.models) && Array.isArray(value.prompts);
+}
+
+/** Collection sizes and the shape of `settings`, checked before any element is dereferenced. */
+function hasBoundedCollections(value: RunSpec): boolean {
+  if (value.assets.length > RUN_LIMITS.assets) return false;
+  if (!Number.isFinite(value.assetBytes) || value.assetBytes < 0 || value.assetBytes > RUN_LIMITS.assetBytes) return false;
+  if (value.jobs.length > RUN_LIMITS.jobs || !value.settings || typeof value.settings !== "object") return false;
+  return true;
+}
+
+function hasValidSettings(value: RunSpec): boolean {
   const settings = value.settings;
-  if (!Number.isInteger(settings.variants) || settings.variants < 1 || settings.variants > RUN_LIMITS.quantity || !Number.isInteger(settings.concurrency) || settings.concurrency < 1 || settings.concurrency > RUN_LIMITS.concurrency || !Number.isInteger(settings.poolConcurrency) || settings.poolConcurrency < 1 || settings.poolConcurrency > RUN_LIMITS.poolConcurrency || !Number.isFinite(settings.timeoutMs) || settings.timeoutMs <= 0 || (settings.maxCostUsd != null && (!Number.isFinite(settings.maxCostUsd) || settings.maxCostUsd < 0))) return null;
-  const paths = new Set(value.assets.map((asset) => asset.path));
-  const modelIds = new Set(value.models.map((model) => model.id));
-  const promptIds = new Set(value.prompts.map((prompt) => prompt.id));
-  const inputIds = new Set(value.inputs.map((input) => input.id));
-  if (value.inputs.some((input) => !Array.isArray(input.images) || !input.images.length || !input.images.every((image) => paths.has(image)) || !paths.has(input.preview)) || !value.referenceRels.every((rel) => paths.has(rel))) return null;
+  return Number.isInteger(settings.variants) && settings.variants >= 1 && settings.variants <= RUN_LIMITS.quantity
+    && Number.isInteger(settings.concurrency) && settings.concurrency >= 1 && settings.concurrency <= RUN_LIMITS.concurrency
+    && Number.isInteger(settings.poolConcurrency) && settings.poolConcurrency >= 1 && settings.poolConcurrency <= RUN_LIMITS.poolConcurrency
+    && Number.isFinite(settings.timeoutMs) && settings.timeoutMs > 0
+    && (settings.maxCostUsd == null || (Number.isFinite(settings.maxCostUsd) && settings.maxCostUsd >= 0));
+}
+
+/** Every input image, preview and reference must name an asset the spec actually carries. */
+function hasResolvableAssetRefs(value: RunSpec, paths: Set<string>): boolean {
+  const inputsResolve = value.inputs.every((input) => Array.isArray(input.images) && input.images.length && input.images.every((image) => paths.has(image)) && paths.has(input.preview));
+  return inputsResolve && value.referenceRels.every((rel) => paths.has(rel));
+}
+
+/** Job ids must be well formed and unique, and every foreign key must resolve. */
+function hasValidJobs(value: RunSpec, inputIds: Set<string>, modelIds: Set<string>, promptIds: Set<string>): boolean {
   const expectedIds = new Set<string>();
   for (const job of value.jobs) {
-    if (!job || !inputIds.has(job.inputId) || !modelIds.has(job.modelId) || !promptIds.has(job.promptId) || !Number.isInteger(job.variant) || job.variant < 1 || job.variant > RUN_LIMITS.quantity || !/^[A-Za-z0-9._-]+(?:__[A-Za-z0-9._-]+)+__v\d+$/.test(job.id) || expectedIds.has(job.id)) return null;
+    if (!job || !inputIds.has(job.inputId) || !modelIds.has(job.modelId) || !promptIds.has(job.promptId) || !Number.isInteger(job.variant) || job.variant < 1 || job.variant > RUN_LIMITS.quantity || !/^[A-Za-z0-9._-]+(?:__[A-Za-z0-9._-]+)+__v\d+$/.test(job.id) || expectedIds.has(job.id)) return false;
     expectedIds.add(job.id);
   }
+  return true;
+}
+
+/** Re-hash every referenced asset from disk and confirm the total matches the declared size. */
+function assetsMatch(value: RunSpec, dir: string): boolean {
   let total = 0;
   try {
     const rootReal = fs.realpathSync(dir);
     for (const asset of value.assets) {
       const rel = safeRel(asset.path);
-      if (!rel.startsWith("assets/")) return null;
+      if (!rel.startsWith("assets/")) return false;
       const file = resolveInside(dir, rel, { allowBaseItself: false }).full;
       const fileReal = fs.realpathSync(file);
-      if (!fileReal.startsWith(rootReal + path.sep)) return null;
-      if (!matchesAsset(file, asset)) return null;
+      if (!fileReal.startsWith(rootReal + path.sep)) return false;
+      if (!matchesAsset(file, asset)) return false;
       total += asset.bytes;
     }
-  } catch (_) { return null; }
-  return total === value.assetBytes ? value : null;
+  } catch (_) { return false; }
+  return total === value.assetBytes;
 }
 
-async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): Promise<RunSpec> {
+function validateSpec(spec: unknown, dir: string): RunSpec | null {
+  if (!spec || typeof spec !== "object") return null;
+  const value = spec as RunSpec;
+  if (!hasSpecShape(value)) return null;
+  if (!hasBoundedCollections(value)) return null;
+  if (!hasValidSettings(value)) return null;
+  const paths = new Set(value.assets.map((asset) => asset.path));
+  const modelIds = new Set(value.models.map((model) => model.id));
+  const promptIds = new Set(value.prompts.map((prompt) => prompt.id));
+  const inputIds = new Set(value.inputs.map((input) => input.id));
+  if (!hasResolvableAssetRefs(value, paths)) return null;
+  if (!hasValidJobs(value, inputIds, modelIds, promptIds)) return null;
+  return assetsMatch(value, dir) ? value : null;
+}
+
+/** Coerce and range-check every scalar option before any selection is resolved. */
+function resolveRunSettings(options: RunReimagineOptions) {
   const variants = numberIn(options.variants, 1, 1, RUN_LIMITS.quantity, "variants");
   const concurrency = numberIn(options.concurrency, clampedEnv("MAX_CONCURRENCY", 12, RUN_LIMITS.concurrency), 1, RUN_LIMITS.concurrency, "concurrency");
   const poolConcurrency = numberIn(options.poolConcurrency, clampedEnv("MAX_POOL_CONCURRENCY", 4, RUN_LIMITS.poolConcurrency), 1, RUN_LIMITS.poolConcurrency, "pool concurrency");
@@ -173,6 +211,11 @@ async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): 
   if (maxCostUsd != null && (!Number.isFinite(maxCostUsd) || maxCostUsd < 0)) throw invalid("max cost must be a finite nonnegative number");
   const variantsByModel: Record<string, number> = {};
   for (const [modelId, quantity] of Object.entries(options.modelQuantities || {})) variantsByModel[modelId] = numberIn(quantity, variants, 1, RUN_LIMITS.quantity, `quantity for ${modelId}`);
+  return { variants, concurrency, poolConcurrency, timeoutMs, requestedCap, maxCostUsd, variantsByModel };
+}
+
+/** Resolve inputs, models, prompts and references, then reject an empty or over-large combination. */
+function resolveRunSelection(options: RunReimagineOptions, variants: number, variantsByModel: Record<string, number>) {
   const inputs = resolveSelection(listInputs(), options.inputs);
   const models = resolveModels(options.models);
   const prompts = resolvePrompts(options.prompts || {});
@@ -188,6 +231,11 @@ async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): 
   if (reference && reference.enabled !== false && (reference.images != null || reference.rels != null || reference.ids != null)) {
     assertResolvedSelection((reference.images ?? reference.rels ?? reference.ids) as SelectionInput, selectedRefs, "reference");
   }
+  return { inputs, models, prompts, selectedRefs };
+}
+
+/** Copy every selected image into the run directory and record its hash and size. */
+function snapshotRunAssets(inputs: ReturnType<typeof resolveRunSelection>["inputs"], selectedRefs: string[], requestedCap: number | undefined, targetDir: string) {
   const cap = (rels: string[]) => requestedCap == null ? rels : rels.slice(0, requestedCap);
   const selectedAssetCount = inputs.reduce((count, input) => count + cap(input.images).length, 0) + cap(selectedRefs).length;
   if (selectedAssetCount > RUN_LIMITS.assets) throw invalid(`run exceeds ${RUN_LIMITS.assets} selected images`, 413);
@@ -202,14 +250,27 @@ async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): 
   if (assetList.length > RUN_LIMITS.assets) throw invalid(`run exceeds ${RUN_LIMITS.assets} assets`, 413);
   const assetBytes = assetList.reduce((sum, asset) => sum + asset.bytes, 0);
   if (assetBytes > RUN_LIMITS.assetBytes) throw invalid("run assets exceed 512 MiB", 413);
-  const jobs = buildJobs({ inputItems: durableInputs, models, prompts, variants, variantsByModel });
-  if (jobs.length > RUN_LIMITS.jobs) throw new Error(`run exceeds ${RUN_LIMITS.jobs} jobs`);
+  return { durableInputs, referenceRels, assetList, assetBytes };
+}
+
+/** Register every key pool the run may touch and pick the vision model that captions inputs. */
+function pickVisionHelper(options: RunReimagineOptions, models: Model[]): Model | null {
   const km = options.keyManager || getKeyManager();
   for (const model of models) km.registerPool(model.keyEnv);
   const helperCandidates = [...models, ...loadModels().filter((model) => model.enabled !== false)].filter((model, index, all) => all.findIndex((other) => other.id === model.id) === index && model.vision !== false);
   for (const model of helperCandidates) km.registerPool(model.keyEnv);
-  const visionHelper = helperCandidates.find((model) => km.availableCount(model.keyEnv) > 0) || helperCandidates.find((model) => km.poolSize(model.keyEnv) > 0) || null;
-  const spec: RunSpec = { version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }) }, jobs, assets: assetList, assetBytes };
+  return helperCandidates.find((model) => km.availableCount(model.keyEnv) > 0) || helperCandidates.find((model) => km.poolSize(model.keyEnv) > 0) || null;
+}
+
+async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): Promise<RunSpec> {
+  const { variants, concurrency, poolConcurrency, timeoutMs, requestedCap, maxCostUsd, variantsByModel } = resolveRunSettings(options);
+  const { inputs, models, prompts, selectedRefs } = resolveRunSelection(options, variants, variantsByModel);
+  const { durableInputs, referenceRels, assetList, assetBytes } = snapshotRunAssets(inputs, selectedRefs, requestedCap, targetDir);
+  const jobs = buildJobs({ inputItems: durableInputs, models, prompts, variants, variantsByModel });
+  if (jobs.length > RUN_LIMITS.jobs) throw new Error(`run exceeds ${RUN_LIMITS.jobs} jobs`);
+  const visionHelper = pickVisionHelper(options, models);
+  const reference = options.reference;
+  const spec: RunSpec ={ version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }) }, jobs, assets: assetList, assetBytes };
   writeSpec(targetDir, spec);
   return spec;
 }

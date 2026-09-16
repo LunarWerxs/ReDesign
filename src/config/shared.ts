@@ -37,42 +37,57 @@ type ShippedBaseline = {
 
 const CONFIG_LOCK_FILE = path.join(CONFIG_ROOT, ".reimagine-config.lock");
 let configLockDepth = 0;
-function withConfigLock<T>(work: () => T): T {
-  if (configLockDepth) {
-    configLockDepth += 1;
-    try { return work(); } finally { configLockDepth -= 1; }
-  }
-  let fd: number | undefined;
+/** Take the lock file, retrying until the deadline; throws 409 if another live process holds it. */
+function acquireConfigLock(): { fd: number; token: string } {
   const token = randomUUID();
   const pause = new Int32Array(new SharedArrayBuffer(4));
   const deadline = Date.now() + 2_000;
+  let fd: number | undefined;
   while (fd === undefined && Date.now() < deadline) {
     try {
       fd = fs.openSync(CONFIG_LOCK_FILE, "wx", 0o600);
       fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { pid?: number };
-        if (Number.isInteger(owner.pid) && (owner.pid || 0) > 0) {
-          try { process.kill(owner.pid as number, 0); } catch (probe) {
-            if ((probe as NodeJS.ErrnoException).code === "ESRCH") fs.rmSync(CONFIG_LOCK_FILE, { force: true });
-          }
-        }
-      } catch { /* lock owner may have released it */ }
+      reclaimStaleConfigLock();
       Atomics.wait(pause, 0, 0, 20);
     }
   }
   if (fd === undefined) throw Object.assign(new Error("Configuration is busy in another process; retry the change."), { status: 409 });
+  return { fd, token };
+}
+
+/** Drop a lock only when its recorded owner is no longer alive; a live owner keeps it. */
+function reclaimStaleConfigLock(): void {
+  try {
+    const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { pid?: number };
+    if (!Number.isInteger(owner.pid) || (owner.pid || 0) <= 0) return;
+    try { process.kill(owner.pid as number, 0); } catch (probe) {
+      if ((probe as NodeJS.ErrnoException).code === "ESRCH") fs.rmSync(CONFIG_LOCK_FILE, { force: true });
+    }
+  } catch { /* lock owner may have released it */ }
+}
+
+/** Close the descriptor and remove the lock file, but only if this holder still owns it. */
+function releaseConfigLock(fd: number, token: string): void {
+  try {
+    fs.closeSync(fd);
+    const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { token?: string };
+    if (owner.token === token) fs.rmSync(CONFIG_LOCK_FILE, { force: true });
+  } catch { /* best effort */ }
+}
+
+function withConfigLock<T>(work: () => T): T {
+  if (configLockDepth) {
+    configLockDepth += 1;
+    try { return work(); } finally { configLockDepth -= 1; }
+  }
+  const { fd, token } = acquireConfigLock();
   configLockDepth = 1;
   try { return work(); }
   finally {
     configLockDepth = 0;
-    try {
-      fs.closeSync(fd);
-      const owner = JSON.parse(fs.readFileSync(CONFIG_LOCK_FILE, "utf8")) as { token?: string };
-      if (owner.token === token) fs.rmSync(CONFIG_LOCK_FILE, { force: true });
-    } catch { /* best effort */ }
+    releaseConfigLock(fd, token);
   }
 }
 function jsonText(data: unknown): string { return `${JSON.stringify(data, null, 2)}\n`; }
@@ -95,6 +110,32 @@ function migrateShippedConfig(): void {
     if (!fs.existsSync(MODELS_FILE) || !fs.existsSync(PROMPTS_FILE)) throw error;
   }
 }
+/** Baseline-tracked profile: apply shipped corrections to untouched records, keep edits and archives. */
+function applyBaselineMigration(modelsData: Record<string, unknown>, promptsData: Record<string, unknown>, baseline: ShippedBaseline, seedModels: ShippedRecord[], seedPrompts: ShippedRecord[], systemContract: unknown): void {
+  const archive = records(modelsData.modelArchive);
+  modelsData.models = mergeShippedRecords(records(modelsData.models), baseline.models, seedModels, archive.map((m) => String(m.id || "")));
+  const currentPrompts = records(promptsData.prompts);
+  promptsData.prompts = mergeShippedRecords(currentPrompts, baseline.prompts, seedPrompts, baseline.prompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
+  if (baseline.systemContract !== undefined && promptsData.systemContract === baseline.systemContract) {
+    promptsData.systemContract = systemContract;
+  }
+}
+
+/**
+ * Profiles created by the immediately preceding 1.6.6 build have no baseline file. Its tracked
+ * catalog is embedded here so exact old shipped records receive corrections while edits, explicit
+ * prompt deletions and archived models remain untouched.
+ */
+function applyLegacyMigration(modelsData: Record<string, unknown>, promptsData: Record<string, unknown>, seedModels: ShippedRecord[], seedPrompts: ShippedRecord[], systemContract: unknown): void {
+  const legacyModels = records((legacyShipped.models as { models?: unknown }).models);
+  const legacyPrompts = records((legacyShipped.prompts as { prompts?: unknown }).prompts);
+  const archive = records(modelsData.modelArchive);
+  modelsData.models = mergeShippedRecords(records(modelsData.models), legacyModels, seedModels, archive.map((m) => String(m.id || "")));
+  const currentPrompts = records(promptsData.prompts);
+  promptsData.prompts = mergeShippedRecords(currentPrompts, legacyPrompts, seedPrompts, legacyPrompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
+  if (promptsData.systemContract === legacyShipped.prompts.systemContract) promptsData.systemContract = systemContract;
+}
+
 function migrateShippedConfigLocked(): void {
   const hadModels = fs.existsSync(MODELS_FILE);
   const hadPrompts = fs.existsSync(PROMPTS_FILE);
@@ -109,24 +150,9 @@ function migrateShippedConfigLocked(): void {
   if (hadModels && hadPrompts && fs.existsSync(PROMPTS_DEFAULTS_FILE) && baseline?.version === 1 && baseline.revision === nextBaseline.revision) return;
 
   if (baseline?.version === 1) {
-    const archive = records(modelsData.modelArchive);
-    modelsData.models = mergeShippedRecords(records(modelsData.models), baseline.models, seedModels, archive.map((m) => String(m.id || "")));
-    const currentPrompts = records(promptsData.prompts);
-    promptsData.prompts = mergeShippedRecords(currentPrompts, baseline.prompts, seedPrompts, baseline.prompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
-    if (baseline.systemContract !== undefined && promptsData.systemContract === baseline.systemContract) {
-      promptsData.systemContract = (promptsSeed as { systemContract?: unknown }).systemContract;
-    }
+    applyBaselineMigration(modelsData, promptsData, baseline, seedModels, seedPrompts, systemContract);
   } else if (hadModels || hadPrompts) {
-    // Profiles created by the immediately preceding 1.6.6 build have no baseline file. Its
-    // tracked catalog is embedded here so exact old shipped records receive corrections while
-    // edits, explicit prompt deletions and archived models remain untouched.
-    const legacyModels = records((legacyShipped.models as { models?: unknown }).models);
-    const legacyPrompts = records((legacyShipped.prompts as { prompts?: unknown }).prompts);
-    const archive = records(modelsData.modelArchive);
-    modelsData.models = mergeShippedRecords(records(modelsData.models), legacyModels, seedModels, archive.map((m) => String(m.id || "")));
-    const currentPrompts = records(promptsData.prompts);
-    promptsData.prompts = mergeShippedRecords(currentPrompts, legacyPrompts, seedPrompts, legacyPrompts.filter((old) => !currentPrompts.some((p) => p.id === old.id)).map((p) => String(p.id || "")));
-    if (promptsData.systemContract === legacyShipped.prompts.systemContract) promptsData.systemContract = systemContract;
+    applyLegacyMigration(modelsData, promptsData, seedModels, seedPrompts, systemContract);
   } else {
     // A fresh profile gets exact shipped content. Existing pre-baseline profiles are deliberately
     // left alone on this first bootstrap: guessing whether an absent item was deleted loses data.

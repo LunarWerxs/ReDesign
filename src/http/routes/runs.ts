@@ -208,12 +208,16 @@ async function submitRetryRuns(
   return runIds;
 }
 
-// POST /api/runs/:id/retry — re-run only the jobs that failed or were skipped, instead of
-// paying for the whole fan-out again because one key was dead. Body: { jobIds?: string[],
-// autoStart?: boolean }; with no jobIds every non-ok job is retried. Pulled out of register(),
-// see handleRunEvents above.
-async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
-  const id = c.req.param("id");
+// A run another process still owns, or one this server holds an unfinished in-memory entry for,
+// must not be retried on top of itself.
+function isRunStillGoing(id: string): boolean {
+  if (store.isRunOwned(id)) return true;
+  return Boolean(activeRuns.get(id) && !activeRuns.get(id)?.finished);
+}
+
+// The manifest a retry targets, or the route's own response when the id cannot be resolved by
+// store.resolveRunDir (its status, defaulting to 400) or names no run at all.
+function loadRetryManifest(c: Context<Env, "/api/runs/:id/retry">, id: string): store.Manifest | Response {
   let m: store.Manifest | null;
   try {
     m = store.readManifest(id, runStoreOptions());
@@ -222,43 +226,83 @@ async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
     return c.json({ error: "invalid run id" }, status as 400 | 404);
   }
   if (!m) return c.json({ error: "run not found" }, 404);
-  if (store.isRunOwned(id) || (activeRuns.get(id) && !activeRuns.get(id)?.finished)) {
-    return c.json({ error: "this run is still going; wait for it to finish or cancel it first" }, 409);
-  }
+  return m;
+}
 
+// The retry body, or the route's 400 when it is not an object with an optional list of string
+// jobIds. A body that is not a JSON object at all throws out of readActionBody, as before.
+async function readRetryBody(c: Context<Env, "/api/runs/:id/retry">): Promise<Record<string, unknown> | Response> {
   const body = await readActionBody(c);
   if (!body || typeof body !== "object" || Array.isArray(body) || (body.jobIds != null && (!Array.isArray(body.jobIds) || body.jobIds.some((value: unknown) => typeof value !== "string")))) {
     return c.json({ error: "retry requires an object with optional string jobIds" }, 400);
   }
+  return body;
+}
+
+// The jobs this retry will redo: every non-ok job, or only the requested ids when the body named
+// some. store.Job is deliberately loose (a status plus an index signature) because store.ts doesn't
+// own the job shape; narrow it here to the fields the runner actually writes and this route
+// needs to rebuild a submission.
+function selectRetryTargets(m: store.Manifest, body: Record<string, unknown>): RetryJob[] {
   const wanted = Array.isArray(body.jobIds) ? new Set(body.jobIds.map((x) => String(x))) : null;
-  // store.Job is deliberately loose (a status plus an index signature) because store.ts doesn't
-  // own the job shape; narrow it here to the fields the runner actually writes and this route
-  // needs to rebuild a submission.
   const retryable = ((m.jobs || []) as unknown as RetryJob[]).filter(
     (j) => j.status === "error" || j.status === "skipped" || j.status === "cancelled",
   );
-  const targets = wanted ? retryable.filter((j) => wanted.has(String(j.id))) : retryable;
+  return wanted ? retryable.filter((j) => wanted.has(String(j.id))) : retryable;
+}
+
+// A model that has since been deleted or disabled is silently dropped by resolveModels rather
+// than raising, so a retry could report "3 jobs" and quietly submit 2. Work out up front which
+// models are still runnable, and hand the caller the dropped ids so the UI can say what will not
+// come back.
+function partitionRunnableTargets(targets: RetryJob[]): { runnable: RetryJob[]; droppedModels: string[] } {
+  const liveModelIds = new Set(loadModels().filter((mo) => mo.enabled !== false).map((mo) => mo.id));
+  const droppedModels = [...new Set(targets.map((j) => j.modelId).filter((mid) => !liveModelIds.has(mid)))];
+  return { runnable: targets.filter((j) => liveModelIds.has(j.modelId)), droppedModels };
+}
+
+// The spec-version-1 replay path, which rebuilds the run from its saved spec rather than from
+// manifest fields. null means "not a spec run, fall through to the manifest-derived path".
+async function retrySpecRun(
+  c: Context<Env, "/api/runs/:id/retry">,
+  m: store.Manifest,
+  id: string,
+  targets: RetryJob[],
+  body: Record<string, unknown>,
+): Promise<Response | null> {
+  if (m.specVersion !== 1) return null;
+  if (!readRunSpec(store.runDir(id))) return c.json({ error: "Saved run assets or specification are missing or corrupt; restore them before retrying." }, 409);
+  const prepared = await prepareReplay(id, targets.map((job) => job.id));
+  const runId = await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false });
+  return c.json({ runIds: [runId], jobCount: targets.length });
+}
+
+// POST /api/runs/:id/retry — re-run only the jobs that failed or were skipped, instead of
+// paying for the whole fan-out again because one key was dead. Body: { jobIds?: string[],
+// autoStart?: boolean }; with no jobIds every non-ok job is retried. Pulled out of register(),
+// see handleRunEvents above.
+async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
+  const id = c.req.param("id");
+  const m = loadRetryManifest(c, id);
+  if (m instanceof Response) return m;
+  if (isRunStillGoing(id)) {
+    return c.json({ error: "this run is still going; wait for it to finish or cancel it first" }, 409);
+  }
+
+  const body = await readRetryBody(c);
+  if (body instanceof Response) return body;
+  const targets = selectRetryTargets(m, body);
   if (!targets.length) return c.json({ error: "nothing to retry in this run" }, 400);
 
-  if (m.specVersion === 1) {
-    if (!readRunSpec(store.runDir(id))) return c.json({ error: "Saved run assets or specification are missing or corrupt; restore them before retrying." }, 409);
-    const prepared = await prepareReplay(id, targets.map((job) => job.id));
-    const runId = await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false });
-    return c.json({ runIds: [runId], jobCount: targets.length });
-  }
+  const specResponse = await retrySpecRun(c, m, id, targets, body);
+  if (specResponse) return specResponse;
 
   const config = (m.config || {}) as Record<string, unknown>;
   const manifestPrompts = (Array.isArray(m.prompts) ? m.prompts : []) as ManifestPrompt[];
   const promptById = new Map(manifestPrompts.map((p) => [p.id, p]));
   const reference = config.reference as { images?: unknown; note?: string | null } | null | undefined;
 
-  // A model that has since been deleted or disabled is silently dropped by resolveModels rather
-  // than raising, so a retry could report "3 jobs" and quietly submit 2. Work out up front which
-  // models are still runnable, count only those, and hand the caller the dropped ids so the UI
-  // can say what will not come back.
-  const liveModelIds = new Set(loadModels().filter((mo) => mo.enabled !== false).map((mo) => mo.id));
-  const droppedModels = [...new Set(targets.map((j) => j.modelId).filter((mid) => !liveModelIds.has(mid)))];
-  const runnable = targets.filter((j) => liveModelIds.has(j.modelId));
+  const { runnable, droppedModels } = partitionRunnableTargets(targets);
   if (!runnable.length) {
     return c.json({ error: `none of these jobs' models are still available: ${droppedModels.join(", ")}`, droppedModels }, 400);
   }
@@ -268,21 +312,91 @@ async function handleRunRetry(c: Context<Env, "/api/runs/:id/retry">) {
   return c.json({ runIds, jobCount: runnable.length, ...(droppedModels.length ? { droppedModels } : {}) });
 }
 
+// The route bodies register() used to hold inline. Same reason as handleRunEvents/handleRunThumbnail
+// above: pulled out to module level so each handler's branching scores against its own small
+// function instead of register's. Bodies are unchanged, only their names moved.
+function handleRunList(c: Context<Env, "/api/runs">) {
+  const rawLimit = Number(c.req.query("limit") || 50);
+  return c.json(store.listRunsPage({ cursor: c.req.query("cursor"), limit: rawLimit, options: runStoreOptions() }));
+}
+
+async function handleRunDelete(c: Context<Env, "/api/runs/delete">) {
+  const body = await c.req.json().catch(() => ({}));
+  const ids = normalizeRunDeleteIds(body);
+  if (!ids.length) return c.json({ error: "ids are required" }, 400);
+  return c.json(deleteRuns(ids));
+}
+
+async function handleRunRepeat(c: Context<Env, "/api/runs/:id/repeat">) {
+  const id = c.req.param("id");
+  if (store.isRunOwned(id)) return c.json({ error: "This run is still active." }, 409);
+  if (!store.readManifest(id)) return c.json({ error: "run not found" }, 404);
+  const body = await readActionBody(c);
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body.autoStart != null && typeof body.autoStart !== "boolean")) return c.json({ error: "invalid repeat request" }, 400);
+  const prepared = await prepareReplay(id);
+  return c.json({ runId: await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false }) });
+}
+
+function handleRunGet(c: Context<Env, "/api/runs/:id">) {
+  const id = c.req.param("id");
+  let m: store.Manifest | null;
+  try {
+    m = store.readManifest(id, runStoreOptions());
+  } catch (err) {
+    // Invalid/traversal id rejected by store.resolveRunDir — return its status (400).
+    const status = (err as { status?: number })?.status ?? 400;
+    return c.json({ error: "invalid run id" }, status as 400 | 404);
+  }
+  return m ? c.json(m) : c.json({ error: "run not found" }, 404);
+}
+
+async function handleRunSubmit(c: Context<Env, "/api/run">) {
+  let rawBody: unknown;
+  try {
+    rawBody = await c.req.json();
+  } catch (_) {
+    return c.json({ error: "invalid JSON request body" }, 400);
+  }
+  const body = validateRunRequest(rawBody);
+  const runId = await enqueueRun(body);
+  return c.json({ runId });
+}
+
+async function handleRunPreflight(c: Context<Env, "/api/run/preflight">) {
+  let rawBody: unknown;
+  try { rawBody = await c.req.json(); } catch (_) { return c.json({ error: "invalid JSON request body" }, 400); }
+  const body = validateRunRequest(rawBody);
+  if (body.preflightId) return c.json({ error: "Preflight expects a recipe, not an existing token." }, 400);
+  return c.json(await prepareRun(body));
+}
+
+// Start everything the control panel has parked with `autoStart: false`. Idempotent:
+// pressing it with nothing held simply reports 0 and leaves the running queue alone.
+function handleQueueStart(c: Context<Env, "/api/queue/start">) {
+  const started = releaseQueue();
+  return c.json({ started, held: heldRunCount() });
+}
+
+// Drag-to-reorder the waiting queue. `order` is the desired runId order; only currently-queued
+// runs move (the running one isn't reorderable), and omitted ones keep their place. See
+// runQueue.reorderQueue. Returns the resulting order.
+async function handleQueueReorder(c: Context<Env, "/api/queue/reorder">) {
+  const body = (await c.req.json().catch(() => ({}))) || {};
+  return c.json(reorderQueue((body as { order?: unknown }).order));
+}
+
+function handleRunCancel(c: Context<Env, "/api/runs/:id/cancel">) {
+  const runId = c.req.param("id");
+  return c.json({ ok: cancelRun(runId) });
+}
+
 export function register(app: Hono, _deps: Deps): void {
   // Static segments ("delete") are registered before the "/:id" param routes below, Hono's
   // router resolves a literal segment over a param match regardless of registration order, but
   // keeping this order mirrors server.js's original if/else-if dispatch for readability.
-  app.get("/api/runs", (c) => {
-    const rawLimit = Number(c.req.query("limit") || 50);
-    return c.json(store.listRunsPage({ cursor: c.req.query("cursor"), limit: rawLimit, options: runStoreOptions() }));
-  });
+  app.get("/api/runs", handleRunList);
 
-  app.post("/api/runs/delete", requireSameOrigin(), async (c) => {
-    const body = await c.req.json().catch(() => ({}));
-    const ids = normalizeRunDeleteIds(body);
-    if (!ids.length) return c.json({ error: "ids are required" }, 400);
-    return c.json(deleteRuns(ids));
-  });
+  app.post("/api/runs/delete", requireSameOrigin(), handleRunDelete);
 
   app.get("/api/runs/:id/events", handleRunEvents);
 
@@ -292,66 +406,17 @@ export function register(app: Hono, _deps: Deps): void {
 
   app.post("/api/runs/:id/retry", requireSameOrigin(), handleRunRetry);
 
-  app.post("/api/runs/:id/repeat", requireSameOrigin(), async (c) => {
-    const id = c.req.param("id");
-    if (store.isRunOwned(id)) return c.json({ error: "This run is still active." }, 409);
-    if (!store.readManifest(id)) return c.json({ error: "run not found" }, 404);
-    const body = await readActionBody(c);
-    if (!body || typeof body !== "object" || Array.isArray(body) || (body.autoStart != null && typeof body.autoStart !== "boolean")) return c.json({ error: "invalid repeat request" }, 400);
-    const prepared = await prepareReplay(id);
-    return c.json({ runId: await enqueueRun({ preflightId: prepared.preflightId, autoStart: body.autoStart !== false }) });
-  });
+  app.post("/api/runs/:id/repeat", requireSameOrigin(), handleRunRepeat);
 
-  app.get("/api/runs/:id", (c) => {
-    const id = c.req.param("id");
-    let m: store.Manifest | null;
-    try {
-      m = store.readManifest(id, runStoreOptions());
-    } catch (err) {
-      // Invalid/traversal id rejected by store.resolveRunDir — return its status (400).
-      const status = (err as { status?: number })?.status ?? 400;
-      return c.json({ error: "invalid run id" }, status as 400 | 404);
-    }
-    return m ? c.json(m) : c.json({ error: "run not found" }, 404);
-  });
+  app.get("/api/runs/:id", handleRunGet);
 
-  app.post("/api/run", requireSameOrigin(), async (c) => {
-    let rawBody: unknown;
-    try {
-      rawBody = await c.req.json();
-    } catch (_) {
-      return c.json({ error: "invalid JSON request body" }, 400);
-    }
-    const body = validateRunRequest(rawBody);
-    const runId = await enqueueRun(body);
-    return c.json({ runId });
-  });
+  app.post("/api/run", requireSameOrigin(), handleRunSubmit);
 
-  app.post("/api/run/preflight", requireSameOrigin(), async (c) => {
-    let rawBody: unknown;
-    try { rawBody = await c.req.json(); } catch (_) { return c.json({ error: "invalid JSON request body" }, 400); }
-    const body = validateRunRequest(rawBody);
-    if (body.preflightId) return c.json({ error: "Preflight expects a recipe, not an existing token." }, 400);
-    return c.json(await prepareRun(body));
-  });
+  app.post("/api/run/preflight", requireSameOrigin(), handleRunPreflight);
 
-  // Start everything the control panel has parked with `autoStart: false`. Idempotent:
-  // pressing it with nothing held simply reports 0 and leaves the running queue alone.
-  app.post("/api/queue/start", requireSameOrigin(), (c) => {
-    const started = releaseQueue();
-    return c.json({ started, held: heldRunCount() });
-  });
+  app.post("/api/queue/start", requireSameOrigin(), handleQueueStart);
 
-  // Drag-to-reorder the waiting queue. `order` is the desired runId order; only currently-queued
-  // runs move (the running one isn't reorderable), and omitted ones keep their place. See
-  // runQueue.reorderQueue. Returns the resulting order.
-  app.post("/api/queue/reorder", requireSameOrigin(), async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) || {};
-    return c.json(reorderQueue((body as { order?: unknown }).order));
-  });
+  app.post("/api/queue/reorder", requireSameOrigin(), handleQueueReorder);
 
-  app.post("/api/runs/:id/cancel", requireSameOrigin(), (c) => {
-    const runId = c.req.param("id");
-    return c.json({ ok: cancelRun(runId) });
-  });
+  app.post("/api/runs/:id/cancel", requireSameOrigin(), handleRunCancel);
 }

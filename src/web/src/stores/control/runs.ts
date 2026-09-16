@@ -136,6 +136,166 @@ function notifyIfHidden(status: string | null | undefined, title: string): void 
   }
 }
 
+// ── Submitting a batch (addToQueue) ───────────────────────────────────────────
+// The submit path is three independent pieces: a completeness check, the request body
+// built from the live selection, and the submit itself. The two read-only pieces are
+// module-level so the action reads as the sequence it is.
+
+/**
+ * True — after toasting what is missing — when the current selection is not a complete
+ * batch. The guards are ordered most-fundamental first, so the user is told about the
+ * input before the prompt.
+ */
+function rejectIncompleteSelection(state: ControlState): boolean {
+  if (!state.selInputs.value.length) {
+    toast(t('runs.pickInput'));
+    return true;
+  }
+  if (!state.selModels.value.length) {
+    toast(t('runs.pickModel'));
+    return true;
+  }
+  if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim())) {
+    toast(t('runs.pickPrompt'));
+    return true;
+  }
+  return false;
+}
+
+/** Only per-model quantities that differ from the default of 1 are worth sending. */
+function selectionModelQuantities(state: ControlState): Record<string, number> {
+  const modelQuantities: Record<string, number> = {};
+  for (const id of state.selModels.value) {
+    const q = state.modelQty.value[id];
+    if (q && q > 1) modelQuantities[id] = q;
+  }
+  return modelQuantities;
+}
+
+/**
+ * The run body for the current selection, or null when the one value the user typed —
+ * the optional cost ceiling — is not a non-negative finite number (toasted here, in the
+ * same breath as the check itself).
+ */
+function buildRunRequest(state: ControlState, autoStart: boolean): RunRequest | null {
+  // Only send quantities that differ from the default of 1; the backend defaults
+  // every other selected model to a single copy.
+  const modelQuantities = selectionModelQuantities(state);
+
+  const body: RunRequest = {
+    inputs: { ids: [...state.selInputs.value] },
+    models: { ids: [...state.selModels.value] },
+    prompts: {
+      presets: [...state.selPrompts.value],
+      custom: state.customOn.value ? state.custom.value.trim() || null : null,
+    },
+    mock: state.mock.value,
+    // autoStart:false parks the run (held) until runQueue(); true lets the server run it
+    // now or fall in behind whatever's already generating.
+    autoStart,
+  };
+  const rawMaxCost = state.maxCostUsd.value.trim();
+  if (rawMaxCost) {
+    const maxCostUsd = Number(rawMaxCost);
+    if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) {
+      toast.error(t('runs.invalidCostCeiling'));
+      return null;
+    }
+    body.maxCostUsd = maxCostUsd;
+  }
+  if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
+  if (state.referenceOn.value && state.selReference.value.length) {
+    body.reference = { images: [...state.selReference.value], note: state.refNote.value.trim() || null };
+  }
+  if (state.brandOn.value) {
+    const guideText = state.brandStyleGuide.value.trim();
+    const attachmentBlocks = state.brandAttachments.value.map(
+      (a) => `\n\n--- Attachment: ${a.name} ---\n${a.text}`,
+    );
+    const combined = [guideText, ...attachmentBlocks].join('').trim();
+    if (combined) body.brandStyleGuide = combined;
+  }
+  return body;
+}
+
+// ── Re-attaching after a reload (resumeRuns) ──────────────────────────────────
+// resumeRuns is three independent questions: is the remembered pointer still worth
+// keeping, what is the server still working on, and what should the card show.
+
+/**
+ * The persisted focused-run pointer, expired to null (and cleared) when it names a run
+ * that finished long enough ago that the card would just be showing old news. Only
+ * applies to a run we aren't already tracking in this session — a card the user is
+ * actively looking at is theirs to keep.
+ */
+function focusedRunOrExpired(state: ControlState): string | null {
+  const remembered = state.focusedRunId.value;
+  if (!remembered || state.trackedRuns.has(remembered)) return remembered;
+  // The summary list is a disk read that already carries finishedAt, so this normally
+  // costs no extra request.
+  if (!isStaleFinishedRun(state.runs.value.find((r) => r.runId === remembered))) return remembered;
+  state.focusedRunId.value = null;
+  return null;
+}
+
+/**
+ * Track and stream every run the server is still working on. bootstrap() runs again on
+ * every Control remount, and this summary list is read from disk — staler than what SSE
+ * has already pushed into a run we are streaming. Seed a run only the first time; after
+ * that the stream owns it.
+ */
+function reseedActiveRuns(
+  state: ControlState,
+  isStreaming: (runId: string) => boolean,
+  subscribe: (runId: string) => void,
+): void {
+  for (const summary of state.runs.value) {
+    if (!isActiveStatus(summary.status)) continue;
+    if (!isStreaming(summary.runId)) {
+      state.trackRun(summary.runId, {
+        title: summary.title || summary.summary?.title || summary.runId,
+        status: summary.status,
+        total: summary.counts?.total ?? summary.total ?? 0,
+        // Seed the parked-vs-released state from the summary so the run button doesn't flash
+        // its "queue is live" shape for a resumed queue that's actually just parked, in the
+        // window before this run's first SSE snapshot lands. Only meaningful while queued.
+        queueHeld: summary.status === 'queued' ? summary.queueHeld ?? false : false,
+        queuePosition: summary.queuePosition ?? null,
+      });
+    }
+    subscribe(summary.runId);
+  }
+}
+
+/**
+ * Restore the run the tab was watching when it ended while the tab was away — the
+ * "I refreshed and lost it" fix. The manifest is a fresher read than the summary list,
+ * so it decides both whether the run is too old to show and whether it is still going.
+ */
+async function restoreRememberedRun(
+  state: ControlState,
+  runId: string,
+  subscribe: (runId: string) => void,
+  ingestManifest: (m: Manifest | null | undefined) => void,
+): Promise<void> {
+  try {
+    const manifest = await api.run(runId);
+    // Second staleness gate, for a run the summary list hadn't caught up on. The
+    // manifest is authoritative for both status and finishedAt, so an old finished
+    // run is dropped here rather than ingested into a card nobody asked for.
+    if (isStaleFinishedRun(manifest)) {
+      state.focusedRunId.value = null;
+      return;
+    }
+    ingestManifest(manifest);
+    // The run list is a disk read and can lag the runner by a beat, so a run it
+    // reported as finished may still be going. Attach if this fresher read says so.
+    if (isActiveStatus(manifest?.status)) subscribe(runId);
+  } catch {
+    state.focusedRunId.value = null;
+  }
+}
+
 export function createRunsActions(state: ControlState, deps: RunsDeps) {
   let estimateTimer: ReturnType<typeof setTimeout> | null = null;
   let estimateSeq = 0;
@@ -160,8 +320,13 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     }
   }
 
+  /** Whether a live SSE stream is already open for this run (see `sources`). */
+  function isStreaming(runId: string): boolean {
+    return sources.has(runId);
+  }
+
   function subscribe(runId: string): void {
-    if (sources.has(runId) || typeof EventSource === 'undefined') return;
+    if (isStreaming(runId) || typeof EventSource === 'undefined') return;
     const es = new EventSource(eventsUrl(runId));
     sources.set(runId, es);
     es.onmessage = (e: MessageEvent<string>) => handleEvent(runId, e.data);
@@ -434,37 +599,9 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
    * STALE_CARD_MS.
    */
   async function resumeRuns() {
-    let remembered = state.focusedRunId.value;
-    // Expire the pointer before anything can act on it, if the run it names finished
-    // long enough ago that the card would just be showing old news. The summary list
-    // is a disk read that already carries finishedAt, so this normally costs no extra
-    // request. Only applies to a run we aren't already tracking in this session — a
-    // card the user is actively looking at is theirs to keep.
-    if (remembered && !state.trackedRuns.has(remembered)) {
-      if (isStaleFinishedRun(state.runs.value.find((r) => r.runId === remembered))) {
-        focusRun(null);
-        remembered = null;
-      }
-    }
-    for (const summary of state.runs.value) {
-      if (!isActiveStatus(summary.status)) continue;
-      // bootstrap() runs again on every Control remount, and this summary list is
-      // read from disk — staler than what SSE has already pushed into a run we are
-      // streaming. Seed a run only the first time; after that the stream owns it.
-      if (!sources.has(summary.runId)) {
-        state.trackRun(summary.runId, {
-          title: summary.title || summary.summary?.title || summary.runId,
-          status: summary.status,
-          total: summary.counts?.total ?? summary.total ?? 0,
-          // Seed the parked-vs-released state from the summary so the run button doesn't flash
-          // its "queue is live" shape for a resumed queue that's actually just parked, in the
-          // window before this run's first SSE snapshot lands. Only meaningful while queued.
-          queueHeld: summary.status === 'queued' ? summary.queueHeld ?? false : false,
-          queuePosition: summary.queuePosition ?? null,
-        });
-      }
-      subscribe(summary.runId);
-    }
+    // Expire the pointer before anything can act on it, see focusedRunOrExpired().
+    const remembered = focusedRunOrExpired(state);
+    reseedActiveRuns(state, isStreaming, subscribe);
     // What to show: the run being watched if it's still going, else whatever is
     // generating now (more useful than a finished card), else the remembered run
     // restored from disk — that last case is the "I refreshed and lost it" fix.
@@ -473,19 +610,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     if (live) return focusRun(live.runId);
     if (!remembered) return;
     if (!state.runs.value.some((r) => r.runId === remembered)) return focusRun(null); // deleted since
-    try {
-      const manifest = await api.run(remembered);
-      // Second staleness gate, for a run the summary list hadn't caught up on. The
-      // manifest is authoritative for both status and finishedAt, so an old finished
-      // run is dropped here rather than ingested into a card nobody asked for.
-      if (isStaleFinishedRun(manifest)) return focusRun(null);
-      ingestManifest(manifest);
-      // The run list is a disk read and can lag the runner by a beat, so a run it
-      // reported as finished may still be going. Attach if this fresher read says so.
-      if (isActiveStatus(manifest?.status)) subscribe(remembered);
-    } catch {
-      focusRun(null);
-    }
+    await restoreRememberedRun(state, remembered, subscribe, ingestManifest);
   }
 
   /** Register a held server-side clone immediately, even when Control has already bootstrapped. */
@@ -514,64 +639,14 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
    * (a toast already told the user what's missing) — `runNow()` uses this.
    */
   async function addToQueue(autoStart = false): Promise<boolean> {
-    if (!state.selInputs.value.length) {
-      toast(t('runs.pickInput'));
-      return false;
-    }
-    if (!state.selModels.value.length) {
-      toast(t('runs.pickModel'));
-      return false;
-    }
-    if (!state.selPrompts.value.length && !(state.customOn.value && state.custom.value.trim())) {
-      toast(t('runs.pickPrompt'));
-      return false;
-    }
+    if (rejectIncompleteSelection(state)) return false;
 
     // Past the guards: this submission is actually going out. Lazily ask for notification
     // permission here rather than on page load, see requestNotificationPermissionOnce().
     requestNotificationPermissionOnce();
 
-    // Only send quantities that differ from the default of 1; the backend defaults
-    // every other selected model to a single copy.
-    const modelQuantities: Record<string, number> = {};
-    for (const id of state.selModels.value) {
-      const q = state.modelQty.value[id];
-      if (q && q > 1) modelQuantities[id] = q;
-    }
-
-    const body: RunRequest = {
-      inputs: { ids: [...state.selInputs.value] },
-      models: { ids: [...state.selModels.value] },
-      prompts: {
-        presets: [...state.selPrompts.value],
-        custom: state.customOn.value ? state.custom.value.trim() || null : null,
-      },
-      mock: state.mock.value,
-      // autoStart:false parks the run (held) until runQueue(); true lets the server run it
-      // now or fall in behind whatever's already generating.
-      autoStart,
-    };
-    const rawMaxCost = state.maxCostUsd.value.trim();
-    if (rawMaxCost) {
-      const maxCostUsd = Number(rawMaxCost);
-      if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) {
-        toast.error(t('runs.invalidCostCeiling'));
-        return false;
-      }
-      body.maxCostUsd = maxCostUsd;
-    }
-    if (Object.keys(modelQuantities).length) body.modelQuantities = modelQuantities;
-    if (state.referenceOn.value && state.selReference.value.length) {
-      body.reference = { images: [...state.selReference.value], note: state.refNote.value.trim() || null };
-    }
-    if (state.brandOn.value) {
-      const guideText = state.brandStyleGuide.value.trim();
-      const attachmentBlocks = state.brandAttachments.value.map(
-        (a) => `\n\n--- Attachment: ${a.name} ---\n${a.text}`,
-      );
-      const combined = [guideText, ...attachmentBlocks].join('').trim();
-      if (combined) body.brandStyleGuide = combined;
-    }
+    const body = buildRunRequest(state, autoStart);
+    if (!body) return false; // an unparseable cost ceiling: toasted, nothing submitted
 
     // Runs already in flight stay tracked: the server queues this one behind them
     // and streams its position, so the queue builds up instead of being refused.

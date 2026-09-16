@@ -384,23 +384,29 @@ interface ResolvePromptsOptions {
  * optional custom prompt. A bare run falls back to the first default preset,
  * but an explicit preset list never silently substitutes a different recipe.
  */
+/**
+ * Expand the literal sentinels ("all"/"*"), the CSV string form and a plain array into the list of
+ * requested ids. Anything else resolves to no ids at all, leaving the caller's fallback in charge.
+ */
+function expandPresetSelection(presets: unknown, allIds: string[]): string[] {
+  let ids: unknown = presets;
+  if (ids === "all" || ids === "*") ids = allIds;
+  if (typeof ids === "string") ids = ids.split(",").map((s) => s.trim()).filter(Boolean);
+  return Array.isArray(ids) ? (ids as string[]) : [];
+}
+
 function resolvePrompts({ presets, custom }: ResolvePromptsOptions = {}): ResolvedPrompt[] {
   const { prompts } = loadPrompts();
   const byId = new Map(prompts.map((p) => [p.id, p]));
   const out: ResolvedPrompt[] = [];
 
-  let ids: unknown = presets;
-  if (ids === "all" || ids === "*") ids = prompts.map((p) => p.id);
-  if (typeof ids === "string") ids = ids.split(",").map((s) => s.trim()).filter(Boolean);
-  if (Array.isArray(ids)) {
-    const seen = new Set<string>();
-    for (const id of ids) {
-      const found = byId.get(id);
-      if (!found) throw statusError(`unknown prompt preset: ${String(id)}`, 400);
-      if (found && !seen.has(found.id)) {
-        seen.add(found.id);
-        out.push({ ...found, source: "preset" });
-      }
+  const seen = new Set<string>();
+  for (const id of expandPresetSelection(presets, prompts.map((p) => p.id))) {
+    const found = byId.get(id);
+    if (!found) throw statusError(`unknown prompt preset: ${String(id)}`, 400);
+    if (found && !seen.has(found.id)) {
+      seen.add(found.id);
+      out.push({ ...found, source: "preset" });
     }
   }
 

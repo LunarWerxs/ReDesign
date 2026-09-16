@@ -106,6 +106,85 @@ export function maybeApplyDeferredRestart(): boolean {
   return true;
 }
 
+/** The status one injected check returned, as src/updater.ts's `checkForUpdate` reports it. */
+type UpdateCheckStatus = Awaited<ReturnType<typeof checkForUpdate>>;
+
+/**
+ * Run the injected check, turning a throwing check into the `check-failed` result the caller
+ * returns verbatim. Split out so the one try/catch a failed check needs is scored here rather
+ * than against the whole decision ladder in `runAutoUpdateOnce`.
+ */
+async function safeCheck(): Promise<
+  { ok: true; status: UpdateCheckStatus } | { ok: false; result: AutoUpdateRunResult }
+> {
+  try {
+    return { ok: true, status: await hooks.check() };
+  } catch {
+    return { ok: false, result: { checked: false, applied: false, relaunched: false, reason: "check-failed" } };
+  }
+}
+
+/**
+ * A previous pass already applied an update but deferred the restart: retry the relaunch now
+ * instead of re-checking/re-applying. There is nothing new to fetch; we are just waiting to go
+ * idle, so no check happens on this path.
+ */
+function retryDeferredRestart(): AutoUpdateRunResult {
+  if (hasActiveRun()) return { checked: false, applied: false, relaunched: false, reason: "deferred-active-run" };
+  maybeApplyDeferredRestart();
+  return { checked: false, applied: true, relaunched: true };
+}
+
+/** Announce an available update over the bus; a no-op when the owner turned notify off. */
+function announceAvailable(status: UpdateCheckStatus): void {
+  if (!notifyEnabled) return;
+  broadcast("update_available", {
+    from: status.currentCommit,
+    to: status.remoteCommit,
+    canApply: status.canApply,
+    reason: status.reason ?? null,
+  });
+}
+
+/** Auto-apply off: announce the update (notify permitting) and leave installing to the owner. */
+function notifyOnly(status: UpdateCheckStatus): AutoUpdateRunResult {
+  if (!notifyEnabled) return { checked: true, applied: false, relaunched: false, reason: "notify-off" };
+  announceAvailable(status);
+  return { checked: true, applied: false, relaunched: false, reason: "notified" };
+}
+
+/**
+ * Auto-apply is on but `canApply` is false (dirty tree / detached HEAD / no update remote), so
+ * nothing is installed. Still worth announcing: an update is waiting and something (usually a
+ * dirty tree) is in the way, which is the owner's to resolve — auto-apply being on doesn't mean
+ * silence here.
+ */
+function reportBlocked(status: UpdateCheckStatus): AutoUpdateRunResult {
+  announceAvailable(status);
+  return { checked: true, applied: false, relaunched: false, reason: status.reason ?? "cannot-apply" };
+}
+
+/** Apply the update, then relaunch unless a run is active (in which case the restart is deferred). */
+async function applyAndRelaunch(): Promise<AutoUpdateRunResult> {
+  applying = true;
+  try {
+    const res = await hooks.apply();
+    if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
+    if (!res.restartRequired) return { checked: true, applied: true, relaunched: false };
+    // Never restart out from under an active run; defer and retry once idle.
+    if (hasActiveRun()) {
+      restartPending = true;
+      return { checked: true, applied: true, relaunched: false, reason: "deferred-active-run" };
+    }
+    hooks.relaunch();
+    return { checked: true, applied: true, relaunched: true };
+  } catch {
+    return { checked: true, applied: false, relaunched: false, reason: "apply-threw" };
+  } finally {
+    applying = false;
+  }
+}
+
 /**
  * One check → maybe notify → maybe apply → maybe relaunch. Applies ONLY when auto-apply is on AND
  * the engine reports an update is available AND applicable (`canApply`: clean tree, on a branch
@@ -117,21 +196,12 @@ export function maybeApplyDeferredRestart(): boolean {
  */
 export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   if (applying) return { checked: false, applied: false, relaunched: false, reason: "busy" };
+  if (restartPending) return retryDeferredRestart();
 
-  // A previous pass already applied an update but deferred the restart, retry the relaunch now
-  // instead of re-checking/re-applying (nothing new to fetch; we're just waiting to go idle).
-  if (restartPending) {
-    if (hasActiveRun()) return { checked: false, applied: false, relaunched: false, reason: "deferred-active-run" };
-    maybeApplyDeferredRestart();
-    return { checked: false, applied: true, relaunched: true };
-  }
+  const checked = await safeCheck();
+  if (!checked.ok) return checked.result;
+  const { status } = checked;
 
-  let status: Awaited<ReturnType<typeof checkForUpdate>>;
-  try {
-    status = await hooks.check();
-  } catch {
-    return { checked: false, applied: false, relaunched: false, reason: "check-failed" };
-  }
   if (!status.ok) return { checked: true, applied: false, relaunched: false, reason: status.reason ?? "check-error" };
   if (!status.updateAvailable) return { checked: true, applied: false, relaunched: false, reason: "up-to-date" };
 
@@ -139,53 +209,12 @@ export async function runAutoUpdateOnce(): Promise<AutoUpdateRunResult> {
   // stops: say so (if notify is on) and let them choose via the UI's "Update now". Announced even
   // when `canApply` is false (dirty tree) — "an update is waiting, commit your work to take it" is
   // exactly the useful thing to know at that moment, and the UI shows the reason.
-  if (!enabled) {
-    if (notifyEnabled) {
-      broadcast("update_available", {
-        from: status.currentCommit,
-        to: status.remoteCommit,
-        canApply: status.canApply,
-        reason: status.reason ?? null,
-      });
-      return { checked: true, applied: false, relaunched: false, reason: "notified" };
-    }
-    return { checked: true, applied: false, relaunched: false, reason: "notify-off" };
-  }
+  if (!enabled) return notifyOnly(status);
 
   // Hard gate: canApply is false on a dirty tree / detached HEAD / no update remote, never update then.
-  if (!status.canApply) {
-    // Still worth announcing: an update is waiting and something (usually a dirty tree) is in
-    // the way, which is the owner's to resolve — auto-apply being on doesn't mean silence here.
-    if (notifyEnabled) {
-      broadcast("update_available", {
-        from: status.currentCommit,
-        to: status.remoteCommit,
-        canApply: false,
-        reason: status.reason ?? null,
-      });
-    }
-    return { checked: true, applied: false, relaunched: false, reason: status.reason ?? "cannot-apply" };
-  }
+  if (!status.canApply) return reportBlocked(status);
 
-  applying = true;
-  try {
-    const res = await hooks.apply();
-    if (!res.ok) return { checked: true, applied: false, relaunched: false, reason: "apply-failed" };
-    if (res.restartRequired) {
-      // Never restart out from under an active run; defer and retry once idle.
-      if (hasActiveRun()) {
-        restartPending = true;
-        return { checked: true, applied: true, relaunched: false, reason: "deferred-active-run" };
-      }
-      hooks.relaunch();
-      return { checked: true, applied: true, relaunched: true };
-    }
-    return { checked: true, applied: true, relaunched: false };
-  } catch {
-    return { checked: true, applied: false, relaunched: false, reason: "apply-threw" };
-  } finally {
-    applying = false;
-  }
+  return applyAndRelaunch();
 }
 
 // ── timer plumbing (mirrors RepoYeti's auto-commit.ts / auto-update.ts) ──────────────────────────

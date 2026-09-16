@@ -130,40 +130,47 @@ interface RunCostResult {
   byModel: Record<string, { totalCost: number; inputTokens: number; outputTokens: number }>;
 }
 
+type RunCostEntryLike = ProviderCallUsageLike | RunCostJobLike;
+
+interface CostAccumulator {
+  byModel: RunCostResult["byModel"];
+  totalCost: number;
+  jobCount: number;
+  anyEstimatePricing: boolean;
+  anyUnpriced: boolean;
+  anyPartialUsage: boolean;
+  anyCacheAccountingPartial: boolean;
+}
+
+/** Fold one ledger row (or one job row) into the running totals. */
+function accumulateRunCost(acc: CostAccumulator, job: RunCostEntryLike, isLedger: boolean): void {
+  if (!job?.modelId) return;
+  if (!job?.usage || isMockUsage(job.usage)) {
+    if (isLedger && (job as ProviderCallUsageLike).partial) acc.anyPartialUsage = true;
+    return;
+  }
+  const breakdown = (isLedger ? (job as ProviderCallUsageLike).cost : null) ?? costForUsage(job.modelId, job.usage);
+  acc.jobCount++;
+  acc.totalCost += breakdown.totalCost;
+  if (breakdown.estimate) acc.anyEstimatePricing = true;
+  if (!breakdown.priced) acc.anyUnpriced = true;
+  if (breakdown.cacheAccountingPartial) acc.anyCacheAccountingPartial = true;
+  const entry = acc.byModel[job.modelId] || { totalCost: 0, inputTokens: 0, outputTokens: 0 };
+  entry.totalCost += breakdown.totalCost;
+  entry.inputTokens += breakdown.inputTokens;
+  entry.outputTokens += breakdown.outputTokens;
+  acc.byModel[job.modelId] = entry;
+}
+
 /** Sum cost across every job in a manifest that carries a `usage` blob. */
 function runCost(manifest: RunCostManifestLike | null | undefined): RunCostResult {
-  const byModel: Record<string, { totalCost: number; inputTokens: number; outputTokens: number }> = {};
-  let totalCost = 0;
-  let jobCount = 0;
-  let anyEstimatePricing = false;
-  let anyUnpriced = false;
   // New manifests carry a call ledger, which includes helper calls and billable
   // empty/error responses.  Do not also scan jobs or generation would double-count.
   const calls = Array.isArray(manifest?.providerCalls) ? manifest?.providerCalls as ProviderCallUsageLike[] : null;
   const jobs = calls || (Array.isArray(manifest?.jobs) ? manifest?.jobs : []);
-  let anyPartialUsage = false;
-  let anyCacheAccountingPartial = false;
-
-  for (const job of jobs) {
-    if (!job?.modelId) continue;
-    if (!job?.usage || isMockUsage(job.usage)) {
-      if (calls && (job as ProviderCallUsageLike).partial) anyPartialUsage = true;
-      continue;
-    }
-    const breakdown = (calls ? (job as ProviderCallUsageLike).cost : null) ?? costForUsage(job.modelId, job.usage);
-    jobCount++;
-    totalCost += breakdown.totalCost;
-    if (breakdown.estimate) anyEstimatePricing = true;
-    if (!breakdown.priced) anyUnpriced = true;
-    if (breakdown.cacheAccountingPartial) anyCacheAccountingPartial = true;
-    const entry = byModel[job.modelId] || { totalCost: 0, inputTokens: 0, outputTokens: 0 };
-    entry.totalCost += breakdown.totalCost;
-    entry.inputTokens += breakdown.inputTokens;
-    entry.outputTokens += breakdown.outputTokens;
-    byModel[job.modelId] = entry;
-  }
-
-  return { totalCost, currency: "USD", jobCount, anyEstimatePricing, anyUnpriced, anyPartialUsage, anyCacheAccountingPartial, byModel };
+  const acc: CostAccumulator = { byModel: {}, totalCost: 0, jobCount: 0, anyEstimatePricing: false, anyUnpriced: false, anyPartialUsage: false, anyCacheAccountingPartial: false };
+  for (const job of jobs) accumulateRunCost(acc, job, !!calls);
+  return { totalCost: acc.totalCost, currency: "USD", jobCount: acc.jobCount, anyEstimatePricing: acc.anyEstimatePricing, anyUnpriced: acc.anyUnpriced, anyPartialUsage: acc.anyPartialUsage, anyCacheAccountingPartial: acc.anyCacheAccountingPartial, byModel: acc.byModel };
 }
 
 /** Append one adapter outcome and recompute from the ledger only (never jobs). */
@@ -246,11 +253,17 @@ interface ModelAverageUsage extends NormalizedTokens {
  * computed from the most recent stored runs. Falls back to DEFAULT_AVG_TOKENS
  * (flagged fromHistory:false) for a model with no usage history yet.
  */
-function averageUsageByModel(modelIds: string[], options: store.ReadManifestOptions = {}): Record<string, ModelAverageUsage> {
-  const wanted = new Set(modelIds);
-  const sums = new Map<string, { inputTokens: number; outputTokens: number; count: number; outputMin: number; outputMax: number }>();
-  const runs = store.listRunsPage({ limit: RECENT_RUNS_FOR_ESTIMATE, options }).runs;
+interface UsageSum {
+  inputTokens: number;
+  outputTokens: number;
+  count: number;
+  outputMin: number;
+  outputMax: number;
+}
 
+/** Fold every completed, non-mock job of a wanted model from the most recent runs into `sums`. */
+function accumulateUsage(sums: Map<string, UsageSum>, wanted: Set<string>, options: store.ReadManifestOptions): void {
+  const runs = store.listRunsPage({ limit: RECENT_RUNS_FOR_ESTIMATE, options }).runs;
   for (const run of runs) {
     const manifest = store.readManifest(run.runId, options);
     if (!manifest || !Array.isArray(manifest.jobs)) continue;
@@ -268,31 +281,42 @@ function averageUsageByModel(modelIds: string[], options: store.ReadManifestOpti
       sums.set(modelId, entry);
     }
   }
+}
+
+/** Observed average, with the min/max output spread the estimate UI shows. */
+function historyAverage(modelId: string, entry: UsageSum): ModelAverageUsage {
+  const avgOut = entry.outputTokens / entry.count;
+  return {
+    modelId,
+    inputTokens: entry.inputTokens / entry.count,
+    outputTokens: avgOut,
+    outputTokensLow: Number.isFinite(entry.outputMin) ? entry.outputMin : avgOut,
+    outputTokensHigh: entry.outputMax || avgOut,
+    fromHistory: true,
+    sampleJobs: entry.count,
+  };
+}
+
+function defaultAverage(modelId: string): ModelAverageUsage {
+  return {
+    modelId,
+    ...DEFAULT_AVG_TOKENS,
+    outputTokensLow: DEFAULT_AVG_TOKENS.outputTokens,
+    outputTokensHigh: DEFAULT_AVG_TOKENS.outputTokens,
+    fromHistory: false,
+    sampleJobs: 0,
+  };
+}
+
+function averageUsageByModel(modelIds: string[], options: store.ReadManifestOptions = {}): Record<string, ModelAverageUsage> {
+  const wanted = new Set(modelIds);
+  const sums = new Map<string, UsageSum>();
+  accumulateUsage(sums, wanted, options);
 
   const out: Record<string, ModelAverageUsage> = {};
   for (const modelId of modelIds) {
     const entry = sums.get(modelId);
-    if (entry && entry.count > 0) {
-      const avgOut = entry.outputTokens / entry.count;
-      out[modelId] = {
-        modelId,
-        inputTokens: entry.inputTokens / entry.count,
-        outputTokens: avgOut,
-        outputTokensLow: Number.isFinite(entry.outputMin) ? entry.outputMin : avgOut,
-        outputTokensHigh: entry.outputMax || avgOut,
-        fromHistory: true,
-        sampleJobs: entry.count,
-      };
-    } else {
-      out[modelId] = {
-        modelId,
-        ...DEFAULT_AVG_TOKENS,
-        outputTokensLow: DEFAULT_AVG_TOKENS.outputTokens,
-        outputTokensHigh: DEFAULT_AVG_TOKENS.outputTokens,
-        fromHistory: false,
-        sampleJobs: 0,
-      };
-    }
+    out[modelId] = entry && entry.count > 0 ? historyAverage(modelId, entry) : defaultAverage(modelId);
   }
   return out;
 }
@@ -411,39 +435,30 @@ function str(v: unknown): string | null {
  * yet (still running/pending) still produces a trace row (status carries that instead), so a
  * live run's in-flight jobs show up rather than silently disappearing from the list.
  */
+type TraceCallLike = NonNullable<TraceManifestLike["providerCalls"]>[number];
+
+/** One trace row for a ledger call. Provider calls have no job identity, so those fields stay null. */
+function callTrace(runId: string, call: TraceCallLike): JobTrace {
+  const normalized = normalizeUsage(call.usage);
+  const breakdown = call.cost ?? (call.usage && !isMockUsage(call.usage) ? costForUsage(call.modelId, call.usage) : null);
+  return { runId, jobId: null, modelId: call.modelId, provider: str(call.provider), promptId: null, purpose: str(call.purpose), status: str(call.status) || "ok", latencyMs: typeof call.ms === "number" ? call.ms : null, inputTokens: normalized.inputTokens, outputTokens: normalized.outputTokens, cost: breakdown?.totalCost ?? 0, currency: breakdown?.currency || "USD", priced: breakdown?.priced ?? false, error: str(call.error), startedAt: str(call.startedAt), finishedAt: str(call.at) };
+}
+
+/** One trace row for a job, including one with no usage yet (status carries that instead). */
+function jobTrace(runId: string, job: TraceJobLike): JobTrace {
+  const { inputTokens, outputTokens } = normalizeUsage(job.usage);
+  const breakdown = job.cost ?? (job.usage && !isMockUsage(job.usage) ? costForUsage(job.modelId, job.usage) : null);
+  return { runId, jobId: str(job.id), modelId: job.modelId, provider: str(job.provider), promptId: str(job.promptId), status: str(job.status) || "unknown", latencyMs: typeof job.ms === "number" ? job.ms : null, inputTokens, outputTokens, cost: breakdown?.totalCost ?? 0, currency: breakdown?.currency || "USD", priced: breakdown?.priced ?? false, error: str(job.error), purpose: null, startedAt: str(job.startedAt), finishedAt: str(job.finishedAt) };
+}
+
 function runTraces(manifest: TraceManifestLike | null | undefined): JobTrace[] {
   const runId = str(manifest?.runId) || "";
-  if (Array.isArray(manifest?.providerCalls)) {
-    return manifest.providerCalls.map((call) => {
-      const normalized = normalizeUsage(call.usage);
-      const breakdown = call.cost ?? (call.usage && !isMockUsage(call.usage) ? costForUsage(call.modelId, call.usage) : null);
-      return { runId, jobId: null, modelId: call.modelId, provider: str(call.provider), promptId: null, purpose: str(call.purpose), status: str(call.status) || "ok", latencyMs: typeof call.ms === "number" ? call.ms : null, inputTokens: normalized.inputTokens, outputTokens: normalized.outputTokens, cost: breakdown?.totalCost ?? 0, currency: breakdown?.currency || "USD", priced: breakdown?.priced ?? false, error: str(call.error), startedAt: str(call.startedAt), finishedAt: str(call.at) };
-    });
-  }
+  if (Array.isArray(manifest?.providerCalls)) return manifest.providerCalls.map((call) => callTrace(runId, call));
   const jobs = Array.isArray(manifest?.jobs) ? (manifest?.jobs as TraceJobLike[]) : [];
   const traces: JobTrace[] = [];
   for (const job of jobs) {
     if (!job || typeof job.modelId !== "string" || !job.modelId) continue;
-    const { inputTokens, outputTokens } = normalizeUsage(job.usage);
-    const breakdown = job.cost ?? (job.usage && !isMockUsage(job.usage) ? costForUsage(job.modelId, job.usage) : null);
-    traces.push({
-      runId,
-      jobId: str(job.id),
-      modelId: job.modelId,
-      provider: str(job.provider),
-      promptId: str(job.promptId),
-      status: str(job.status) || "unknown",
-      latencyMs: typeof job.ms === "number" ? job.ms : null,
-      inputTokens,
-      outputTokens,
-      cost: breakdown?.totalCost ?? 0,
-      currency: breakdown?.currency || "USD",
-      priced: breakdown?.priced ?? false,
-      error: str(job.error),
-      purpose: null,
-      startedAt: str(job.startedAt),
-      finishedAt: str(job.finishedAt),
-    });
+    traces.push(jobTrace(runId, job));
   }
   return traces;
 }

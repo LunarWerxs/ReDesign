@@ -83,6 +83,77 @@ function resolvePublicFile(baseDir: string, relPath: unknown): string {
   return full;
 }
 
+/** Stat a resolved path, returning null for a missing entry, a stat failure, or a non-file
+ * (directory/socket), so callers can map every one of those to the same "Not found" response. */
+function statFileOrNull(full: string): fs.Stats | null {
+  try {
+    const st = fs.statSync(full);
+    return st.isFile() ? st : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Build the response headers for a served file, including the MIME lookup with its
+ * octet-stream fallback and the download/sandbox conditional headers. Key insertion order is
+ * significant: it is the order the client sees. */
+function fileHeaders(full: string, st: fs.Stats, opts: ServeFileOptions, etag: string): Record<string, string> {
+  const { download, sandbox, immutable } = opts;
+  const headers: Record<string, string> = {
+    "Content-Type": MIME[path.extname(full).toLowerCase()] || "application/octet-stream",
+    "Cache-Control": download ? "no-store" : immutable ? "public, max-age=31536000, immutable" : "no-cache",
+    ETag: etag,
+    "Last-Modified": st.mtime.toUTCString(),
+  };
+  if (sandbox) headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads";
+  if (download) {
+    const safeName = path.basename(full).replace(/["\\\r\n]/g, "_");
+    headers["Content-Disposition"] = `attachment; filename="${safeName}"`;
+  }
+  return headers;
+}
+
+/** One-time in-place migration of an older measured output: if the document does not already
+ * carry the height-measurement script, inject it, write it back, and return the injected HTML.
+ * Returns null when the file already carries the script (the caller streams it instead). On a
+ * successful migration the pre-migration validators in `headers` are dropped and caching is
+ * disabled, because they describe a file that no longer exists. */
+function migrateMeasuredHtml(full: string, headers: Record<string, string>): string | null {
+  // Outputs written by this version already carry the measurement script (injected at write time
+  // in runner/reimagine.ts), so they fall through to the streamed path below. Anything older is
+  // migrated ONCE, here, on first view: inject, write the completed document back, then serve it.
+  // That keeps a pre-existing run's auto-height working without every gallery card paying a full
+  // synchronous read and regex scan on every request forever.
+  const html = fs.readFileSync(full, "utf8");
+  if (hasOutputHeightMeasure(html)) return null;
+  const injected = injectOutputHeightMeasure(html);
+  // Temp file then rename, never a write in place. This is the user's generated output, the
+  // artifact the whole app exists to produce, and a crash or a kill partway through an in-place
+  // write leaves a truncated document with nothing to restore it from. Same pattern as
+  // util.ts's writeJSON and the .env write in server/settings.ts.
+  const tmp = `${full}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmp, injected);
+    fs.renameSync(tmp, full);
+  } catch (_) {
+    // Read-only output dir, or a locked file: serve the injected copy anyway and try again on
+    // the next view. Clean up the temp file so a failed migration can't litter the run folder.
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch (_) {
+      /* nothing further to do */
+    }
+  }
+  // The ETag and Last-Modified above were computed from the PRE-migration stat, so they
+  // describe a file that no longer exists. Serving them would let a client cache this
+  // response under a validator the next request will not reproduce; drop them instead. The
+  // migration happens once per file, so the caching loss is a one-off.
+  headers["Cache-Control"] = "no-store";
+  delete headers.ETag;
+  delete headers["Last-Modified"];
+  return injected;
+}
+
 /** Serve a file from a base dir, blocking path traversal outside that dir. `sandbox:true` adds a
  * CSP sandbox so model-generated HTML can't reach our origin/API even when opened directly in a
  * tab (the iframe also sandboxes it). Returns a Hono Response (never throws, errors are mapped
@@ -95,65 +166,18 @@ async function serveFile(c: Context, baseDir: string, relPath: unknown, { downlo
     const e = err as StatusError;
     return c.text(e.message || "Bad request", (e.status || 400) as ContentfulStatusCode);
   }
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(full);
-    if (!st.isFile()) throw new Error("not a file");
-  } catch (_) {
-    return c.text("Not found", 404);
-  }
+  const st = statFileOrNull(full);
+  if (!st) return c.text("Not found", 404);
 
   const measured = !!measure && !download && path.extname(full).toLowerCase() === ".html";
   const etag = fileEtag(st, measured ? "-measure" : "");
-  const headers: Record<string, string> = {
-    "Content-Type": MIME[path.extname(full).toLowerCase()] || "application/octet-stream",
-    "Cache-Control": download ? "no-store" : immutable ? "public, max-age=31536000, immutable" : "no-cache",
-    ETag: etag,
-    "Last-Modified": st.mtime.toUTCString(),
-  };
-  if (sandbox) headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads";
-  if (download) {
-    const safeName = path.basename(full).replace(/["\\\r\n]/g, "_");
-    headers["Content-Disposition"] = `attachment; filename="${safeName}"`;
-  }
+  const headers = fileHeaders(full, st, { download, sandbox, immutable }, etag);
   if (!download && requestFresh(c, st, etag)) {
     return new Response(null, { status: 304, headers });
   }
   if (measured) {
-    // Outputs written by this version already carry the measurement script (injected at write time
-    // in runner/reimagine.ts), so they fall through to the streamed path below. Anything older is
-    // migrated ONCE, here, on first view: inject, write the completed document back, then serve it.
-    // That keeps a pre-existing run's auto-height working without every gallery card paying a full
-    // synchronous read and regex scan on every request forever.
-    const html = fs.readFileSync(full, "utf8");
-    if (!hasOutputHeightMeasure(html)) {
-      const injected = injectOutputHeightMeasure(html);
-      // Temp file then rename, never a write in place. This is the user's generated output, the
-      // artifact the whole app exists to produce, and a crash or a kill partway through an in-place
-      // write leaves a truncated document with nothing to restore it from. Same pattern as
-      // util.ts's writeJSON and the .env write in server/settings.ts.
-      const tmp = `${full}.${process.pid}.tmp`;
-      try {
-        fs.writeFileSync(tmp, injected);
-        fs.renameSync(tmp, full);
-      } catch (_) {
-        // Read-only output dir, or a locked file: serve the injected copy anyway and try again on
-        // the next view. Clean up the temp file so a failed migration can't litter the run folder.
-        try {
-          fs.rmSync(tmp, { force: true });
-        } catch (_) {
-          /* nothing further to do */
-        }
-      }
-      // The ETag and Last-Modified above were computed from the PRE-migration stat, so they
-      // describe a file that no longer exists. Serving them would let a client cache this
-      // response under a validator the next request will not reproduce; drop them instead. The
-      // migration happens once per file, so the caching loss is a one-off.
-      headers["Cache-Control"] = "no-store";
-      delete headers.ETag;
-      delete headers["Last-Modified"];
-      return new Response(injected, { status: 200, headers });
-    }
+    const injected = migrateMeasuredHtml(full, headers);
+    if (injected !== null) return new Response(injected, { status: 200, headers });
   }
   return new Response(Bun.file(full), { status: 200, headers });
 }
