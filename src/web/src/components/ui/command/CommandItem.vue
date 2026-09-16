@@ -74,6 +74,6 @@ onUnmounted(() => {
     }"
   >
     <slot />
-    <CheckIcon class="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[state=checked]/command-item:opacity-100" />
+    <CheckIcon class="ms-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[state=checked]/command-item:opacity-100" />
   </ListboxItem>
 </template>
