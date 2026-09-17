@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && vue-tsc --noEmit -p tsconfig.vitest.json",
     "check:i18n": "node scripts/i18n-check.mjs",
     "preview": "vite preview",
-    "//test": "Vitest, run via `npm run test` (the root's `check:web` lane runs it too, as `bun run --cwd src/web test` - same script, same local toolchain). NOT `bun test`: bun's runner has no Vue SFC compiler, so .vue imports resolve to a string path and @vue/test-utils throws a WeakMap key error. CI uses `npm run test` for the same reason. Interactive watch mode is plain `npx vitest` in this directory: it is a dev loop that never exits, so it has no script of its own to be gated on.",
+    "//test": "Vitest, run via `npm run test` (the root's `check:web` lane runs it too, delegating into this directory - same script, same local toolchain). NOT `bun test`: bun's runner has no Vue SFC compiler, so .vue imports resolve to a string path and @vue/test-utils throws a WeakMap key error. CI uses `npm run test` for the same reason. Interactive watch mode is plain `npx vitest` in this directory: it is a dev loop that never exits, so it has no script of its own to be gated on.",
     "test": "vitest run"
   },
   "dependencies": {
