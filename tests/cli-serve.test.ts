@@ -373,6 +373,9 @@ describe("serveCmd auto-update relaunch hook", () => {
     expect((call.options.env as Record<string, string>).REDESIGN_RELAUNCH).toBe("1");
     expect(call.options.stdio).toBe("ignore");
     expect(call.options.windowsHide).toBe(true);
+    // Not a fixture path: this asserts the successor INHERITS the test process's own cwd, so
+    // both sides read the same value and it holds from any directory bun test is invoked from.
+    // arkitect-allow: spec-cwd-fixture-path - an inheritance assertion, not a path read
     expect(call.options.cwd).toBe(process.cwd());
     // The shared detached-spawn primitive decides this: powershell on win32, real detach elsewhere.
     expect(call.options.detached).toBe(!isWin);
