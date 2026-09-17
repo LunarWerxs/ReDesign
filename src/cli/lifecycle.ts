@@ -159,6 +159,114 @@ export async function healthCheckCmd(args: Args): Promise<void> {
   console.log(C.dim("\nState saved to src/keyState.json"));
 }
 
+/** Probe for a daemon that already owns this port: the runtime pointer first (it knows where the
+ *  daemon ACTUALLY bound, even after a port hop), falling back to probing the preferred port
+ *  directly (covers REDESIGN_PORT_FIXED=1 and any daemon started before the pointer existed). */
+async function findLive(): Promise<{ url: string } | null> {
+  return (await findLiveInstance(1_000, 3)) ?? (await findLiveInstanceAt(serverBase(), 1_000));
+}
+
+/** Announce an already-serving daemon and honour --open-ui. Both branches of the single-instance
+ *  guard print the identical line, so it lives here rather than twice over. */
+function reportAlreadyRunning(live: { url: string }, args: Args): void {
+  console.log(C.yellow(`RēDesign is already running → ${live.url}`));
+  if (args.openUi) openUi(live.url);
+}
+
+type LaunchLock = ReturnType<typeof acquireLaunchLock>;
+
+/** Outcome of the single-instance guard. `blocked` means another daemon (or another launcher
+ *  mid-boot) owns this port and serveCmd must return without booting; otherwise `lock` is the
+ *  cross-process gate to release once the server is up — null on the exempt paths, which never
+ *  take it. */
+type SingletonGate = { blocked: true; lock: null } | { blocked: false; lock: LaunchLock };
+
+/** Single-instance guard: if a RedDesign daemon is already serving (found via the runtime pointer,
+ *  or by probing the preferred port directly), don't start a second one, it would just hop to
+ *  another port and the CLI/tray would disagree about which instance is "the" one.
+ *  REDESIGN_PORT_FIXED=1 and REDESIGN_RELAUNCH=1 (the auto-update successor, which is SUPPOSED to
+ *  take over the same port from its predecessor) are exempt from this guard. */
+async function acquireSingletonGate(args: Args): Promise<SingletonGate> {
+  if (process.env.REDESIGN_PORT_FIXED === "1" || process.env.REDESIGN_RELAUNCH === "1") {
+    return { blocked: false, lock: null };
+  }
+  // Hold a cross-process gate while checking and binding. Without it, two launchers can both
+  // miss an unresponsive daemon and each decide to start a new port-hopping instance.
+  const lock = acquireLaunchLock(APP_CONFIG_DIR);
+  if (!lock) {
+    const live = await findLive();
+    if (live) reportAlreadyRunning(live, args);
+    else console.log(C.yellow("RēDesign is already starting. Wait a moment, then try again."));
+    return { blocked: true, lock: null };
+  }
+  const live = await findLive();
+  if (live) {
+    lock.release();
+    reportAlreadyRunning(live, args);
+    return { blocked: true, lock: null };
+  }
+  return { blocked: false, lock };
+}
+
+/** Spawn a DETACHED copy of this exact launch command for the auto-update successor
+ *  (REDESIGN_RELAUNCH=1 so the successor's http/serve.ts bindWithRetry can tell this is an expected
+ *  same-port handoff), then gracefully shut THIS daemon down (reusing serve.ts's own shutdown) to
+ *  free the port. Never shuts down without a successor. */
+function relaunchForUpdate(shutdown: () => void, boundPort: number): void {
+  try {
+    // process.execPath + the REAL args, never process.argv[0..1]. That pair is only the node
+    // executable + script in a source checkout; inside a `bun build --compile` binary it is the
+    // placeholder pair ["bun", "B:/~BUN/root/redesign.exe"] — argv[0] is the literal string
+    // "bun" (not a path) and argv[1] is a virtual path that exists only inside the running
+    // binary. Respawning it fails with `Module not found "B:/~BUN/root/redesign.exe"` where Bun
+    // happens to be installed, and cannot resolve "bun" at all on the machines a compiled
+    // release exists FOR. spawn() still resolves and returns a child (which then dies), so the
+    // catch below never fires and we shut down 800ms later expecting a successor that is
+    // already gone — an applied update leaving ZERO daemons.
+    const isCompiled = (globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ === true;
+    const relaunchArgv = buildRelaunchArgv(process.argv, {
+      execPath: process.execPath,
+      isCompiled,
+      boundPort,
+      // `serve` is IMPLICIT on a double-clicked release build (main.ts falls back to it when
+      // argv is empty). Appending flags to that empty list would put a flag in the command
+      // slot and the successor would dispatch on "--relaunch" instead of serving.
+      command: "serve",
+    });
+    // Through buildDetachedSpawn, not a plain spawn. `detached: true` is NOT a process-tree
+    // escape on Windows — the shared primitive's own header says so, and that is why it
+    // exists. Left as a plain spawn the successor stays inside THIS process's tree for the
+    // whole ~800ms handoff, so a tray Quit (`taskkill /T /F`) landing in that window kills the
+    // outgoing daemon AND its replacement, leaving the user with none.
+    // hideWindow: the successor is a CONSOLE program - without ShowWindow=0 every auto-update relaunch pops a visible console hosting the daemon (kit fix 2026-08-30).
+    const plan = buildDetachedSpawn(process.platform, relaunchArgv, { hideWindow: true });
+    const child = spawn(plan.argv[0] as string, plan.argv.slice(1), {
+      cwd: process.cwd(),
+      detached: plan.detached,
+      stdio: "ignore",
+      windowsHide: true,
+      env: {
+        ...process.env,
+        REDESIGN_RELAUNCH: "1",
+        // The port we are actually SERVING on, not the one we preferred. serve.ts reads PORT
+        // for its REDESIGN_RELAUNCH=1 branch, which binds it with NO findFreePort probe — so on
+        // a daemon that hopped (foreign process on the preferred port), handing over the
+        // preferred port aims the successor's bindWithRetry at a port nobody is releasing: it
+        // retries, fails, and the update takes the daemon down for good. With the bound port it
+        // rebinds the socket the predecessor is in the middle of freeing, which is exactly what
+        // that branch was written to do, and the open tab's SSE reconnects instead of dying.
+        PORT: String(boundPort),
+      },
+    });
+    child.unref();
+  } catch (e) {
+    console.error(C.red("redesign: auto-update relaunch failed to spawn, staying on the running version."), e);
+    return; // never shut down without a successor
+  }
+  console.log(C.dim("redesign: auto-update applied, relaunching the daemon..."));
+  setTimeout(shutdown, 800); // let the successor start binding, then free the port
+}
+
 export async function serveCmd(args: Args): Promise<void> {
   // Anonymous install ping (see src/install-ping.ts): fire-and-forget, throttled to at most once
   // per 24h, opt out with REDESIGN_NO_PING=1. Never awaited — must never delay boot.
@@ -169,41 +277,16 @@ export async function serveCmd(args: Args): Promise<void> {
   if (args.port) process.env.PORT = String(args.port);
   if (args.host) process.env.HOST = String(args.host);
   // The auto-update successor is signalled BOTH by --relaunch and by REDESIGN_RELAUNCH=1. The flag
-  // is the load-bearing half: the relaunch is handed to WMI Win32_Process.Create on win32 (see the
-  // relaunch hook below), which takes a command LINE and does NOT inherit the caller's environment
-  // block, so an env-only signal reaches the transient powershell.exe and never the successor
-  // daemon. Set here, before the single-instance guard reads it and before http/serve.ts is
-  // imported (it reads both PORT and REDESIGN_RELAUNCH at module load).
+  // is the load-bearing half: the relaunch is handed to WMI Win32_Process.Create on win32 (see
+  // relaunchForUpdate below), which takes a command LINE and does NOT inherit the caller's
+  // environment block, so an env-only signal reaches the transient powershell.exe and never the
+  // successor daemon. Set here, before the single-instance guard reads it and before http/serve.ts
+  // is imported (it reads both PORT and REDESIGN_RELAUNCH at module load).
   if (args.relaunch) process.env.REDESIGN_RELAUNCH = "1";
 
-  // Single-instance guard: if a RedDesign daemon is already serving (found via the runtime
-  // pointer, or by probing the preferred port directly), don't start a second one, it would
-  // just hop to another port and the CLI/tray would disagree about which instance is "the" one.
-  // REDESIGN_PORT_FIXED=1 and REDESIGN_RELAUNCH=1 (the auto-update successor, which is SUPPOSED
-  // to take over the same port from its predecessor) are exempt from this guard.
-  let launchLock: ReturnType<typeof acquireLaunchLock> = null;
-  if (process.env.REDESIGN_PORT_FIXED !== "1" && process.env.REDESIGN_RELAUNCH !== "1") {
-    // Hold a cross-process gate while checking and binding. Without it, two launchers can both
-    // miss an unresponsive daemon and each decide to start a new port-hopping instance.
-    launchLock = acquireLaunchLock(APP_CONFIG_DIR);
-    if (!launchLock) {
-      const live = (await findLiveInstance(1_000, 3)) ?? (await findLiveInstanceAt(serverBase(), 1_000));
-      if (live) {
-        console.log(C.yellow(`RēDesign is already running → ${live.url}`));
-        if (args.openUi) openUi(live.url);
-      } else {
-        console.log(C.yellow("RēDesign is already starting. Wait a moment, then try again."));
-      }
-      return;
-    }
-    const live = (await findLiveInstance(1_000, 3)) ?? (await findLiveInstanceAt(serverBase(), 1_000));
-    if (live) {
-      launchLock.release();
-      console.log(C.yellow(`RēDesign is already running → ${live.url}`));
-      if (args.openUi) openUi(live.url);
-      return;
-    }
-  }
+  const gate = await acquireSingletonGate(args);
+  if (gate.blocked) return;
+
   // Cleanup is also guarded by the install transaction lock. It only runs after ordinary
   // liveness has decided this process may continue, so a second launcher cannot delete an
   // in-flight update's staging or rollback files before returning above.
@@ -215,7 +298,7 @@ export async function serveCmd(args: Args): Promise<void> {
     shutdown = serve.shutdown;
     server = await serve.startServer();
   } finally {
-    launchLock?.release();
+    gate.lock?.release();
   }
   // Where we ACTUALLY landed — serve.ts may have hopped past a held port. Typed optional by
   // Bun.serve, so fall back to the same preference serve.ts itself computes.
@@ -226,67 +309,8 @@ export async function serveCmd(args: Args): Promise<void> {
   }
 
   // Auto-update loop (opt-in; see src/auto-update.ts). When it applies an update it must restart
-  // the daemon ITSELF, RēDesign has no separate tray supervisor that relaunches us. So hand it a
-  // relaunch that spawns a DETACHED copy of this exact launch command (REDESIGN_RELAUNCH=1 so the
-  // successor's http/serve.ts bindWithRetry can tell this is an expected same-port handoff), then
-  // gracefully shuts THIS daemon down (reusing serve.ts's own shutdown) to free the port.
-  setAutoUpdateHooks({
-    relaunch: () => {
-      try {
-        // process.execPath + the REAL args, never process.argv[0..1]. That pair is only the node
-        // executable + script in a source checkout; inside a `bun build --compile` binary it is the
-        // placeholder pair ["bun", "B:/~BUN/root/redesign.exe"] — argv[0] is the literal string
-        // "bun" (not a path) and argv[1] is a virtual path that exists only inside the running
-        // binary. Respawning it fails with `Module not found "B:/~BUN/root/redesign.exe"` where Bun
-        // happens to be installed, and cannot resolve "bun" at all on the machines a compiled
-        // release exists FOR. spawn() still resolves and returns a child (which then dies), so the
-        // catch below never fires and we shut down 800ms later expecting a successor that is
-        // already gone — an applied update leaving ZERO daemons.
-        const isCompiled =
-          (globalThis as { __REDESIGN_RELEASE_BUILD__?: boolean }).__REDESIGN_RELEASE_BUILD__ === true;
-        const relaunchArgv = buildRelaunchArgv(process.argv, {
-          execPath: process.execPath,
-          isCompiled,
-          boundPort,
-          // `serve` is IMPLICIT on a double-clicked release build (main.ts falls back to it when
-          // argv is empty). Appending flags to that empty list would put a flag in the command
-          // slot and the successor would dispatch on "--relaunch" instead of serving.
-          command: "serve",
-        });
-        // Through buildDetachedSpawn, not a plain spawn. `detached: true` is NOT a process-tree
-        // escape on Windows — the shared primitive's own header says so, and that is why it
-        // exists. Left as a plain spawn the successor stays inside THIS process's tree for the
-        // whole ~800ms handoff, so a tray Quit (`taskkill /T /F`) landing in that window kills the
-        // outgoing daemon AND its replacement, leaving the user with none.
-        // hideWindow: the successor is a CONSOLE program - without ShowWindow=0 every auto-update relaunch pops a visible console hosting the daemon (kit fix 2026-08-30).
-        const plan = buildDetachedSpawn(process.platform, relaunchArgv, { hideWindow: true });
-        const child = spawn(plan.argv[0] as string, plan.argv.slice(1), {
-          cwd: process.cwd(),
-          detached: plan.detached,
-          stdio: "ignore",
-          windowsHide: true,
-          env: {
-            ...process.env,
-            REDESIGN_RELAUNCH: "1",
-            // The port we are actually SERVING on, not the one we preferred. serve.ts reads PORT
-            // for its REDESIGN_RELAUNCH=1 branch, which binds it with NO findFreePort probe — so on
-            // a daemon that hopped (foreign process on the preferred port), handing over the
-            // preferred port aims the successor's bindWithRetry at a port nobody is releasing: it
-            // retries, fails, and the update takes the daemon down for good. With the bound port it
-            // rebinds the socket the predecessor is in the middle of freeing, which is exactly what
-            // that branch was written to do, and the open tab's SSE reconnects instead of dying.
-            PORT: String(boundPort),
-          },
-        });
-        child.unref();
-      } catch (e) {
-        console.error(C.red("redesign: auto-update relaunch failed to spawn, staying on the running version."), e);
-        return; // never shut down without a successor
-      }
-      console.log(C.dim("redesign: auto-update applied, relaunching the daemon..."));
-      setTimeout(shutdown, 800); // let the successor start binding, then free the port
-    },
-  });
+  // the daemon ITSELF, RēDesign has no separate tray supervisor that relaunches us.
+  setAutoUpdateHooks({ relaunch: () => relaunchForUpdate(shutdown, boundPort) });
   startAutoUpdate();
 
   // The listening server keeps the event loop alive (foreground), nothing more to do here.
