@@ -7,7 +7,7 @@ import { describe, it, expect, afterAll } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
 import * as store from "../src/store";
-import { INPUT_DIR } from "../src/inputResolver";
+import { currentInputDir } from "../src/inputResolver";
 import { ensureRunThumbnail } from "../src/thumbnail";
 
 describe("ensureRunThumbnail", () => {
@@ -51,8 +51,8 @@ describe("ensureRunThumbnail", () => {
   it("harvests a surviving input screenshot into the run dir and records it", async () => {
     // A real input file the manifest points at, still on disk.
     const inputName = `thumbtest-${Date.now()}.png`;
-    const inputAbs = path.join(INPUT_DIR, inputName);
-    fs.mkdirSync(INPUT_DIR, { recursive: true });
+    const inputAbs = path.join(currentInputDir(), inputName);
+    fs.mkdirSync(currentInputDir(), { recursive: true });
     fs.writeFileSync(inputAbs, Buffer.from([9, 8, 7]));
     createdInputs.push(inputAbs);
 

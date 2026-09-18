@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadModels, loadPrompts, resolveModels, resolvePrompts } from "../config";
 import type { Model } from "../config/models";
 import type { ResolvedPrompt } from "../config/prompts";
-import { INPUT_DIR, REFERENCE_DIR, resolveReferences, resolveSelection, listInputs, type InputItem } from "../inputResolver";
+import { currentInputDir, REFERENCE_DIR, resolveReferences, resolveSelection, listInputs, type InputItem } from "../inputResolver";
 import { ensureDir, resolveInside, normalizeSelectionIds, type SelectionInput } from "../util";
 import { estimateRunCost } from "./cost";
 import { cfgInt, getKeyManager } from "./helpers";
@@ -242,7 +242,7 @@ function snapshotRunAssets(inputs: ReturnType<typeof resolveRunSelection>["input
   const assetList: RunSpec["assets"] = [];
   const byteCounter = { value: 0 };
   const durableInputs = inputs.map((input) => {
-    const images = cap(input.images).map((rel) => copyAsset(INPUT_DIR, rel, "input", targetDir, assetList, byteCounter));
+    const images = cap(input.images).map((rel) => copyAsset(currentInputDir(), rel, "input", targetDir, assetList, byteCounter));
     return { ...input, images, imageCount: images.length, preview: images[0] || input.preview };
   });
   if (durableInputs.some((input) => !input.images.length)) throw new Error("selected input has no images after applying max images");

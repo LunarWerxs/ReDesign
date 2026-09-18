@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createApp } from "../src/http/app";
 import * as store from "../src/store";
@@ -41,6 +42,12 @@ interface BatchDigest {
 // exactly as an MCP client would call it, through the tool table, over real HTTP, without
 // needing a stdio subprocess: handleRpc()/the tools themselves are already pure enough that a
 // direct TOOLS.find(...).run(args) call is a faithful "tools/call" round trip.
+/** A 1x1 PNG, the same inline fixture tests/inputResolver.test.ts uses - no committed binary. */
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64"
+);
+
 describe("MCP tool: batch_reimagine", () => {
   let server: ReturnType<typeof Bun.serve>;
   const createdRunIds: string[] = [];
@@ -53,6 +60,8 @@ describe("MCP tool: batch_reimagine", () => {
 
   afterAll(() => {
     delete process.env.REDESIGN_URL;
+    delete process.env.REDESIGN_INPUT_DIR;
+    try { fs.rmSync(fixtureDir, { recursive: true, force: true }); } catch (_) { /* ignore */ }
     server.stop(true);
     for (const runId of createdRunIds) {
       try {
@@ -69,19 +78,37 @@ describe("MCP tool: batch_reimagine", () => {
     return t;
   }
 
+  // ⛔ THIS SUITE USED TO NEED A SUBJECT THE REPO DOES NOT SHIP, AND SO IT NEVER RAN IN CI
+  // (2026-09-18). `input/` is untracked: on a clean checkout `listInputs()` is empty, so these
+  // cases either failed outright (a `400 No inputs matched the selection` that held main red for
+  // three runs) or, once guarded, skipped - zero coverage wearing a green tick, on the tool that
+  // drives every batch. They now BUILD their own subject, the same way tests/inputResolver.test.ts
+  // already does, and point the server at it with REDESIGN_INPUT_DIR (see currentInputDir). A
+  // fixture the suite creates is the only kind that is there on every machine.
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "redesign-mcp-batch-input-"));
+  fs.writeFileSync(path.join(fixtureDir, "Fixture Subject.png"), TINY_PNG);
+  process.env.REDESIGN_INPUT_DIR = fixtureDir;
   const realInputs = inputResolver.listInputs();
-  const maybeIt = realInputs.length ? it : it.skip;
 
-  // maybeIt, like its two siblings below: this case needs a REAL input to reimagine, and the
-  // `"all"` fallback it used to carry could never work - with no inputs on disk, `all` matches
-  // nothing and the server correctly answers 400 "No inputs matched the selection."
-  //
-  // ⛔ `input/` IS UNTRACKED, so that fallback fired on every clean checkout: main went red on
-  // ubuntu, windows AND macos from 2026-09-17 21:16 onward while passing on any dev box that
-  // happened to have images sitting in `input/`. Three platforms failing identically is never
-  // flake - it is a fixture the repo does not ship, and a test that "works on my machine" only
-  // because of untracked local state is a test that is lying about what it covers.
-  maybeIt("wait:false returns { runId, note } immediately without a status field", async () => {
+  // ⛔ TWO DIFFERENT PRECONDITIONS, AND CONFLATING THEM IS WHAT HID THE BUG. A subject is now
+  // guaranteed by the fixture above, so `it` is unconditional for anything that only needs one -
+  // a skip there would mean something is genuinely wrong. But GENERATING requires API KEYS: even
+  // under `mock: true` the runner acquires from the model's key pool first and marks a keyless job
+  // `skipped` ("no API keys configured for <keyEnv>"), so any case asserting `status === "ok"`
+  // cannot pass on a machine without them. CI has no `.env`. Guarding those on the keys they
+  // actually need - rather than on inputs, which was never the real requirement - is what lets the
+  // keyless case RUN everywhere instead of the whole file skipping.
+  const hasKeys = (...envs: string[]): boolean => envs.every((e) => !!process.env[e]?.trim());
+  const GENERATION_KEYS = ["GEMINI_FLASH_API_KEYS", "QWEN_API_KEYS"];
+  const maybeIt = hasKeys(...GENERATION_KEYS) ? it : it.skip;
+
+  // UNCONDITIONAL: this case only needs a SUBJECT (the fixture guarantees one) and never a key -
+  // it asserts the shape of the queued reply, not a generated image. It is also the case that held
+  // main red on all three platforms from 2026-09-17 21:16, because it used to carry an
+  // `inputs: "all"` fallback that matches nothing on a clean checkout. Three platforms failing
+  // identically is never flake: it is a fixture the repo does not ship, and a test that "works on
+  // my machine" only because of untracked local state is lying about what it covers.
+  it("wait:false returns { runId, note } immediately without a status field", async () => {
     const result = (await tool("batch_reimagine").run({
       inputs: realInputs[0]!.id,
       models: "gemini-flash-latest",

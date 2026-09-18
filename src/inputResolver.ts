@@ -2,7 +2,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT, ensureDir, isImageFile, imageToBase64, slugify, normalizeSelectionIds, type SelectionInput, type ImagePayload } from "./util";
 
-const INPUT_DIR = path.join(ROOT, "input");
+/**
+ * The subjects directory.
+ *
+ * ⛔ RESOLVED PER CALL, NOT PINNED AT IMPORT (2026-09-18). It used to be
+ * `const INPUT_DIR = path.join(ROOT, "input")`, evaluated the moment this module loaded - which
+ * meant nothing could ever point the SERVER somewhere else, and `tests/mcp-batch-reimagine.test.ts`
+ * had no way to give `batch_reimagine` a subject to work on. `input/` is untracked, so on a clean
+ * checkout there are none: the suite either failed (a `400 No inputs matched the selection` that
+ * held main red for three runs) or, once guarded, SKIPPED ENTIRELY - zero coverage wearing a green
+ * tick, on the tool that drives every batch.
+ *
+ * `REDESIGN_INPUT_DIR` is a TEST SEAM and nothing else: unset - which is every real run, packaged
+ * or dev - it resolves exactly as before. Reading it at call time is what lets a test set it after
+ * this module is already imported, which is the whole point; an import-time const cannot be.
+ */
+function currentInputDir(): string {
+  return process.env.REDESIGN_INPUT_DIR?.trim() || path.join(ROOT, "input");
+}
 const REFERENCE_DIR = path.join(ROOT, "reference");
 const DEFAULT_UPLOAD_IMAGE_LIMIT_BYTES = 20 * 1024 * 1024;
 const UPLOAD_MIME_EXT: Record<string, string> = {
@@ -52,7 +69,7 @@ interface InputItem {
  *   - A subfolder in input/ is ONE subject with multiple reference images.
  * Returns lightweight metadata (no base64) suitable for listing in the UI.
  */
-function listInputs(inputDir: string = INPUT_DIR): InputItem[] {
+function listInputs(inputDir: string = currentInputDir()): InputItem[] {
   const items: InputItem[] = [];
   if (!fs.existsSync(inputDir)) return items;
   const entries = fs
@@ -193,7 +210,7 @@ interface SaveUploadedImagesResult {
 
 function saveUploadedImages(
   images: UploadInput[],
-  { inputDir = INPUT_DIR, now = new Date(), maxBytes = DEFAULT_UPLOAD_IMAGE_LIMIT_BYTES }: { inputDir?: string; now?: Date; maxBytes?: number } = {}
+  { inputDir = currentInputDir(), now = new Date(), maxBytes = DEFAULT_UPLOAD_IMAGE_LIMIT_BYTES }: { inputDir?: string; now?: Date; maxBytes?: number } = {}
 ): SaveUploadedImagesResult {
   const list = Array.isArray(images) ? images : [];
   if (!list.length) throw statusError("No images were provided.", 400);
@@ -222,7 +239,7 @@ function saveUploadedImages(
 
 // Delete one input by id: a loose file is removed; a group folder is removed
 // whole. Guarded to never touch anything outside the input dir.
-function deleteInput(id: string, { inputDir = INPUT_DIR }: { inputDir?: string } = {}): InputItem[] {
+function deleteInput(id: string, { inputDir = currentInputDir() }: { inputDir?: string } = {}): InputItem[] {
   const items = listInputs(inputDir);
   const item = items.find((it) => it.id === id);
   if (!item) throw statusError("Input not found.", 404);
@@ -269,7 +286,7 @@ function capImageRels(rels: string[], maxImages?: number): string[] {
 }
 
 // Load the actual image bytes (base64) for an item, capped to maxImages when one is given.
-function loadImages(item: InputItem, { maxImages, inputDir = INPUT_DIR }: { maxImages?: number; inputDir?: string } = {}): LoadedImage[] {
+function loadImages(item: InputItem, { maxImages, inputDir = currentInputDir() }: { maxImages?: number; inputDir?: string } = {}): LoadedImage[] {
   return loadImagesFromDir(capImageRels(item.images, maxImages), inputDir);
 }
 
@@ -318,7 +335,7 @@ function loadReferenceImages(rels: string[], { maxImages, refDir = REFERENCE_DIR
 }
 
 export {
-  INPUT_DIR,
+  currentInputDir,
   REFERENCE_DIR,
   listInputs,
   saveUploadedImages,

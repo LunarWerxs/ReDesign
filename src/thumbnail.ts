@@ -25,7 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import * as store from "./store";
 import { readJSON } from "./util";
-import { INPUT_DIR } from "./inputResolver";
+import { currentInputDir } from "./inputResolver";
 import { resolveChromiumBrowser } from "./portable-window.mjs";
 import { isRendererRequestAllowed, rendererDocument } from "./renderer-policy";
 
@@ -322,7 +322,7 @@ function survivingInput(m: store.Manifest | null): string | null {
   for (const input of inputs) {
     const rel = typeof input?.preview === "string" ? input.preview : "";
     if (!rel) continue;
-    const abs = path.join(INPUT_DIR, rel.split("/").join(path.sep));
+    const abs = path.join(currentInputDir(), rel.split("/").join(path.sep));
     if (fs.existsSync(abs)) return abs;
   }
   return null;
