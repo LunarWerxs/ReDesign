@@ -135,9 +135,27 @@ class CdpClient {
 
 function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+/**
+ * How long Chromium gets to open its DevTools endpoint.
+ *
+ * ⛔ FIVE SECONDS WAS TOO SHORT, AND IT COST A SECURITY TEST (2026-09-18). A COLD first launch has
+ * to build the profile directory before it writes `DevToolsActivePort`, and on a contended CI
+ * runner that routinely takes longer than five seconds - so `renderer-policy.test.ts`, the check
+ * that proves the renderer cannot reach a private loopback address, failed with "Chrome DevTools
+ * did not start" on three of four runs. It never got as far as asserting anything about the trap.
+ * A guard that only runs when the machine is fast is not a guard, and the red also reads as a
+ * security finding when it is really a launch timeout.
+ *
+ * Thirty seconds sits under the caller's own 40s test budget and well under any interactive use.
+ * A genuinely missing browser is already refused earlier by `resolveChromiumBrowser()`, so the
+ * only thing this longer wait can delay is a Chromium that is starting slowly - which is exactly
+ * the case worth waiting for.
+ */
+const DEVTOOLS_START_TIMEOUT_MS = 30_000;
+
 async function waitForDevTools(profileDir: string): Promise<string> {
   const marker = path.join(profileDir, "profile", "DevToolsActivePort");
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + DEVTOOLS_START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       const [port] = (await fs.promises.readFile(marker, "utf8")).trim().split(/\r?\n/);
