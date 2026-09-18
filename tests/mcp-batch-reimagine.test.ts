@@ -72,9 +72,18 @@ describe("MCP tool: batch_reimagine", () => {
   const realInputs = inputResolver.listInputs();
   const maybeIt = realInputs.length ? it : it.skip;
 
-  it("wait:false returns { runId, note } immediately without a status field", async () => {
+  // maybeIt, like its two siblings below: this case needs a REAL input to reimagine, and the
+  // `"all"` fallback it used to carry could never work - with no inputs on disk, `all` matches
+  // nothing and the server correctly answers 400 "No inputs matched the selection."
+  //
+  // ⛔ `input/` IS UNTRACKED, so that fallback fired on every clean checkout: main went red on
+  // ubuntu, windows AND macos from 2026-09-17 21:16 onward while passing on any dev box that
+  // happened to have images sitting in `input/`. Three platforms failing identically is never
+  // flake - it is a fixture the repo does not ship, and a test that "works on my machine" only
+  // because of untracked local state is a test that is lying about what it covers.
+  maybeIt("wait:false returns { runId, note } immediately without a status field", async () => {
     const result = (await tool("batch_reimagine").run({
-      inputs: realInputs.length ? realInputs[0]!.id : "all",
+      inputs: realInputs[0]!.id,
       models: "gemini-flash-latest",
       prompts: "faithful-refresh",
       mock: true,
