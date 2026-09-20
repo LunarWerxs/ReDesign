@@ -47,11 +47,13 @@
     "format": "biome format --write .",
     "//check:web": "src/web's own verification lanes: vue-tsc over both tsconfigs, the i18n key check, and vitest. CI's `web` job runs the same three, but no LOCAL gate did, so a green `bun run check` said nothing about the web app while its suite could be red. a `bun run` delegation with `--cwd` rather than `npm` with `--prefix`: both run the same script from src/web with that directory's node_modules/.bin on PATH, and the npm-vs-bun parent makes no difference to the toolchain (measured 2026-09-16 on this tree - vue-tsc clean on both tsconfigs, vitest 243/243) - but the verification-coverage-reachability oracle walks package scripts by following a `--cwd <dir>` edge and cannot parse `--prefix`, so under npm the three lanes read as reached by no gate and are reported as scripts that verify NOTHING. The flag must follow `run`: written the other way round, with the directory flag ahead of `run`, it is not a flag bun knows there, so it matches no script and prints the script list instead, exit 0 - a silent no-op, not an error.",
     "check:web": "bun run --cwd src/web typecheck && bun run --cwd src/web check:i18n && bun run --cwd src/web test",
-    "check": "bun run typecheck && bun run lint && bun run check:kit && bun run check:web",
+    "check": "bun run typecheck && bun run lint && bun run check:kit && bun run check:weblock && bun run check:web",
     "check:kit": "node ../../lunarwerx-ui/sync.mjs --check --app redesign",
     "//check:local": "Checks that CANNOT run on GitHub, so localci runs them on the host instead. check:kit compares this app's kit-managed copies against lunarwerx-ui, a PRIVATE sibling repo a public repo's CI can never check out. Without this its only enforcement is the pre-commit hook, which --no-verify skips and which silently no-ops on any machine without the sibling checkout.",
     "check:local": "bun run check:kit",
-    "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs"
+    "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs",
+    "check:weblock": "node scripts/checks/web-lockfile-in-sync.mjs",
+    "//check:weblock": "src/web has BOTH a bun.lock and an npm package-lock.json, and CI's web job installs with `npm ci`, which REFUSES a tree where the two disagree. A dependency bump done with bun refreshes one and leaves the other behind, so every local gate passes and the build dies in CI - twice now, the second time killing a release. This compares the ranges npm itself compares, with no registry and no install."
   },
   "dependencies": {
     "@cnct/connect": "^1.5.2",
