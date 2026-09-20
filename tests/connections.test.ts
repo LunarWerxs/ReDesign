@@ -2,7 +2,7 @@
  * Tests for src/connections.ts, the daemon-side BFF for "Sync my settings with Connections".
  *
  * Zero prior coverage for this surface, so this file exercises the whole lifecycle against a
- * MOCKED fetch (OIDC discovery + token endpoint + the locker's studio.connections.icu calls), 
+ * MOCKED fetch (OIDC discovery + token endpoint + the locker's studio.connectionsapi.com calls), 
  * NEVER the real Connections service. Modeled on RepoYeti's tests/connections-sync.test.ts, but
  * Reimagine's module is simpler: no config object is threaded through (state lives in the
  * module + a state file on disk) and the only synced field is `appearance` (theme), there is no
@@ -26,13 +26,13 @@ import { unseal, sealingActive } from "../src/dpapi-seal.mjs";
 
 const STATE_FILE = path.join(ROOT, "output", ".reimagine-connections.json");
 
-const ISSUER = "https://accounts.connections.icu";
+const ISSUER = "https://accounts.connectionsapi.com";
 const CLIENT_ID = "61c299a8207889e59d3a43faaf9b6524"; // must match src/connections.ts's OAUTH.clientId
 const DISCOVERY_URL = `${ISSUER}/.well-known/openid-configuration`;
 const AUTHORIZE_URL = `${ISSUER}/oauth/authorize`;
 const TOKEN_ENDPOINT = `${ISSUER}/oauth/token`;
 const USERINFO_ENDPOINT = `${ISSUER}/oauth/userinfo`;
-const STORE_BASE = "https://studio.connections.icu";
+const STORE_BASE = "https://studio.connectionsapi.com";
 const DOC_URL = `${STORE_BASE}/v1/app-data/${encodeURIComponent(CLIENT_ID)}`;
 
 /** In-memory fake of the remote app-data document + OIDC token/userinfo endpoints, wired as the

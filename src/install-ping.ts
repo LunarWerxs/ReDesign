@@ -1,6 +1,6 @@
 /**
  * Anonymous install/usage ping — the shared Studio "app-ping" contract already live for
- * QuickDictate and AnatomyOf. `GET https://studio.connections.icu/v1/app/redesign/latest`
+ * QuickDictate and AnatomyOf. `GET https://studio.connectionsapi.com/v1/app/redesign/latest`
  * returns GitHub's `releases/latest` JSON for LunarWerxs/ReDesign verbatim, so the SAME hit is
  * both an update check and an anonymous install-count row logged server-side (random install
  * id + app version + coarse OS only; never an IP, hostname, username, or path).
@@ -27,7 +27,7 @@ import pkg from "../package.json";
 import { IS_PACKAGED, ROOT, readJSON, writeJSON } from "./util";
 
 /** Shared by github-updater.ts so both call sites hit the exact same URL. */
-export const PING_URL = "https://studio.connections.icu/v1/app/redesign/latest";
+export const PING_URL = "https://studio.connectionsapi.com/v1/app/redesign/latest";
 
 // Reuses the dormant mechanism's old state file (gitignored, alongside the other small local
 // state files under output/) rather than adding a new one.

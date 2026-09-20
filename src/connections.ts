@@ -4,7 +4,7 @@
 // Reimagine is a single-user local daemon, so the daemon IS the BFF: it runs the
 // OIDC login (Authorization Code + PKCE, public client, no secret), holds the
 // owner's refresh token server-side, mints access tokens, and calls the Connections
-// settings-sync store (studio.connections.icu/v1/app-data/{clientId}). The browser
+// settings-sync store (studio.connectionsapi.com/v1/app-data/{clientId}). The browser
 // never holds a token.
 //
 // Since 2026-07-08 the OAuth/refresh/identity machinery is the OFFICIAL SDK — @cnct/connect
@@ -25,6 +25,7 @@ import {
   type ConnectClient,
   type ConnectStore,
   createConnect,
+  createLocker,
   createSettingsSync,
   type SettingsSync,
   type SettingsSyncStatus,
@@ -37,9 +38,22 @@ import { ROOT } from "./util";
 /** Reimagine's own public "Sign in with Connections" OAuth client (PKCE, no secret). Its client_id
  *  doubles as the settings-sync store appId, namespacing Reimagine's synced data to itself. */
 const OAUTH = {
-  issuer: "https://accounts.connections.icu",
+  issuer: "https://accounts.connectionsapi.com",
   clientId: "61c299a8207889e59d3a43faaf9b6524",
   scopes: ["openid", "profile", "email", "photo"],
+  /**
+   * Where the locker lives, passed explicitly rather than left to the SDK.
+   *
+   * `@cnct/connect@1.5.1` hardcodes `https://studio.connections.icu` as its
+   * locker default, and that zone was suspended by its registry on 2026-09-18
+   * (NXDOMAIN, whole zone). 1.5.1 is still the newest version on npm, so there
+   * is no SDK release to upgrade to: every consumer has to name the host
+   * itself until one ships. Setting `issuer` above is not enough - the issuer
+   * covers sign-in, the locker is a separate base URL and was still pointing
+   * at the dead host, which is exactly how settings sync kept failing with
+   * sign-in apparently fine.
+   */
+  storeBaseUrl: "https://studio.connectionsapi.com",
 };
 
 // Per-user state (SDK session + sync state), 0600, alongside the pulse state under output/.
@@ -244,8 +258,14 @@ function recordEngineStatus(status: SettingsSyncStatus): void {
   if (status.version !== null || status.lastSyncedAt !== null) persist();
 }
 
+/** The locker, with its base URL named here rather than taken from the SDK - see
+ *  `OAUTH.storeBaseUrl` for why that default cannot be trusted. */
+function lockerClient() {
+  return connect().locker((o) => createLocker({ ...o, baseUrl: OAUTH.storeBaseUrl }));
+}
+
 function syncEngine(): SettingsSync {
-  settingsSync ??= createSettingsSync(connect().locker(), {
+  settingsSync ??= createSettingsSync(lockerClient(), {
     // The wire shape is { appearance: { theme }, prefs: { … } }. `appearance` is the browser's
     // (theme) and predates this; `prefs` is the daemon's portable AppSettings, added 2026-08-25 —
     // see SYNCED_PREF_KEYS in app-settings.ts for which ones travel and why the rest do not.
