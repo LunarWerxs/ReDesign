@@ -5,7 +5,7 @@
     "": {
       "name": "reimagine",
       "dependencies": {
-        "@cnct/connect": "^1.5.1",
+        "@cnct/connect": "^1.5.2",
         "hono": "^4.13.8",
       },
       "devDependencies": {
@@ -34,7 +34,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oJWmBhoHsnhUKIke+0gXDX0mltJrWHA1UyHsrTlXwX0TL64ilVZAo+TYZm97baecV0esBdpzy3k96q+09JaZUQ=="],
 
-    "@cnct/connect": ["@cnct/connect@1.5.1", "", { "peerDependencies": { "react": ">=17", "vue": ">=3" }, "optionalPeers": ["react", "vue"], "bin": { "cnct-connect": "dist/cli.js", "connect": "dist/cli.js" } }, "sha512-6j4in+T0MjCt2xaNrHgMXOiRATKoSj7N8cItdGHQNJz8xuXO/c4uwihFEUn7nj0EZc6RgjFbXfHJMDHCYnkYhA=="],
+    "@cnct/connect": ["@cnct/connect@1.5.2", "", { "peerDependencies": { "react": ">=17", "vue": ">=3" }, "optionalPeers": ["react", "vue"], "bin": { "connect": "dist/cli.js", "cnct-connect": "dist/cli.js" } }, "sha512-RT0iZRZEqF/BAR64gZCXa33P9qt3bwU43H5bht3ol9zigobpWjeXI0w5yd47idH437yjtkjYngDGo95FPO890Q=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 

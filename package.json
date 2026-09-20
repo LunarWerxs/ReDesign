@@ -54,7 +54,7 @@
     "check:spawntimeout": "bun scripts/checks/spawn-test-without-timeout.mjs"
   },
   "dependencies": {
-    "@cnct/connect": "^1.5.1",
+    "@cnct/connect": "^1.5.2",
     "hono": "^4.13.8"
   },
   "devDependencies": {
