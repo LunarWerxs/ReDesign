@@ -142,37 +142,19 @@ describe("estimate", () => {
     expect(s.estimate.value.count).toBe(1);
   });
 
-  it("counts a non-blank custom prompt as one more prompt", () => {
+  it.each([
+    ["counts a non-blank custom prompt as one more prompt", true, "make it pop", 2],
+    ["ignores a custom prompt that is enabled but blank", true, "   ", 1],
+    ["ignores custom text while the custom toggle is off", false, "make it pop", 1],
+  ])("%s", (_case, customOn, custom, count) => {
     const s = createControlState();
     s.selInputs.value = ["i1"];
     s.selModels.value = ["m1"];
     s.selPrompts.value = ["p1"];
-    s.customOn.value = true;
-    s.custom.value = "make it pop";
+    s.customOn.value = customOn;
+    s.custom.value = custom;
 
-    expect(s.estimate.value.count).toBe(2);
-  });
-
-  it("ignores a custom prompt that is enabled but blank", () => {
-    const s = createControlState();
-    s.selInputs.value = ["i1"];
-    s.selModels.value = ["m1"];
-    s.selPrompts.value = ["p1"];
-    s.customOn.value = true;
-    s.custom.value = "   ";
-
-    expect(s.estimate.value.count).toBe(1);
-  });
-
-  it("ignores custom text while the custom toggle is off", () => {
-    const s = createControlState();
-    s.selInputs.value = ["i1"];
-    s.selModels.value = ["m1"];
-    s.selPrompts.value = ["p1"];
-    s.customOn.value = false;
-    s.custom.value = "make it pop";
-
-    expect(s.estimate.value.count).toBe(1);
+    expect(s.estimate.value.count).toBe(count);
   });
 
   it("shows a custom-only run as one prompt in the label", () => {

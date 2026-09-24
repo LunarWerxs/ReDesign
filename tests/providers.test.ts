@@ -3,8 +3,15 @@ import { classifyHttp, ProviderError, requestJSON } from "../src/providers";
 import { CLASS } from "../src/keyManager";
 
 describe("http: error classification", () => {
-  it("401 → auth", () => {
-    expect(classifyHttp(401, new Headers(), "").errorClass).toBe(CLASS.AUTH);
+  // Explicit invalid/revoked-credential evidence, whatever status it rides on.
+  it.each([
+    ["401", 401, ""],
+    ["403 revoked key", 403, "This API key has been revoked"],
+    ["403 explicitly invalid key", 403, "API key not valid. Please pass a valid API key."],
+    ["403 explicitly invalid key code", 403, '{"error":{"code":"API_KEY_INVALID"}}'],
+    ["400 invalid api key", 400, "Incorrect API key provided"],
+  ])("%s → auth", (_case, status, body) => {
+    expect(classifyHttp(status, new Headers(), body).errorClass).toBe(CLASS.AUTH);
   });
 
   it("403 resource permission → a non-retryable permission error without treating the credential as revoked", () => {
@@ -21,52 +28,24 @@ describe("http: error classification", () => {
     ).toBe(CLASS.PERMISSION);
   });
 
-  it("403 revoked key → auth", () => {
-    expect(classifyHttp(403, new Headers(), "This API key has been revoked").errorClass).toBe(CLASS.AUTH);
-  });
-
-  it("403 explicitly invalid key → auth", () => {
-    expect(classifyHttp(403, new Headers(), "API key not valid. Please pass a valid API key.").errorClass).toBe(CLASS.AUTH);
-    expect(classifyHttp(403, new Headers(), '{"error":{"code":"API_KEY_INVALID"}}').errorClass).toBe(CLASS.AUTH);
-  });
-
-  it("402 → no_balance", () => {
-    expect(classifyHttp(402, new Headers(), "").errorClass).toBe(CLASS.NO_BALANCE);
+  it.each([
+    ["402", 402, ""],
+    ["429 insufficient_quota", 429, "You exceeded your current quota, insufficient_quota"],
+    // A billing/account failure dressed up as a 400 must NOT be a bad_request (which
+    // the runner won't retry), it's key-specific, so it maps to no_balance/auth and
+    // the job rotates to a healthy key. Regression guard for the DashScope/Qwen bug.
+    ["400 Arrearage", 400, "Access denied, please make sure your account is in good standing. overdue-payment. Arrearage"],
+    ["400 insufficient balance", 400, "Insufficient Balance"],
+  ])("%s → no_balance", (_case, status, body) => {
+    expect(classifyHttp(status, new Headers(), body).errorClass).toBe(CLASS.NO_BALANCE);
   });
 
   it("429 plain → rate_limit", () => {
     expect(classifyHttp(429, new Headers(), "slow down").errorClass).toBe(CLASS.RATE_LIMIT);
   });
 
-  it("429 insufficient_quota → no_balance", () => {
-    expect(
-      classifyHttp(429, new Headers(), "You exceeded your current quota, insufficient_quota").errorClass
-    ).toBe(CLASS.NO_BALANCE);
-  });
-
   it("400 → bad_request", () => {
     expect(classifyHttp(400, new Headers(), "bad json").errorClass).toBe(CLASS.BAD_REQUEST);
-  });
-
-  // A billing/account failure dressed up as a 400 must NOT be a bad_request (which
-  // the runner won't retry), it's key-specific, so it maps to no_balance/auth and
-  // the job rotates to a healthy key. Regression guard for the DashScope/Qwen bug.
-  it("400 Arrearage → no_balance", () => {
-    expect(
-      classifyHttp(
-        400,
-        new Headers(),
-        "Access denied, please make sure your account is in good standing. overdue-payment. Arrearage"
-      ).errorClass
-    ).toBe(CLASS.NO_BALANCE);
-  });
-
-  it("400 insufficient balance → no_balance", () => {
-    expect(classifyHttp(400, new Headers(), "Insufficient Balance").errorClass).toBe(CLASS.NO_BALANCE);
-  });
-
-  it("400 invalid api key → auth", () => {
-    expect(classifyHttp(400, new Headers(), "Incorrect API key provided").errorClass).toBe(CLASS.AUTH);
   });
 
   it("400 no_balance is retryable across keys", () => {

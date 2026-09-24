@@ -17,8 +17,8 @@ describe("util: key parsing & helpers", () => {
     expect(masked.includes("567890")).toBe(false);
   });
 
-  it("keyId is stable", () => {
-    expect(util.keyId("hello")).toBe(util.keyId("hello"));
+  it("keyId is stable across releases (persisted key health in keyState.json is keyed by it)", () => {
+    expect(util.keyId("hello")).toBe("k4bj995");
   });
 
   it("keyId differs per key", () => {

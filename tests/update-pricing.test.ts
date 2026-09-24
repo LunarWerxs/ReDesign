@@ -56,16 +56,12 @@ describe("update-pricing: priceFromLiteLLM", () => {
     expect(price!.source).toBe("litellm");
   });
 
-  it("returns null for a missing key", () => {
-    expect(priceFromLiteLLM(catalog, "not-a-real-key")).toBeNull();
-  });
-
-  it("returns null when the entry has no flat input/output cost fields (tiered_pricing only)", () => {
-    expect(priceFromLiteLLM(catalog, "dashscope/qwen3.8-flash")).toBeNull();
-  });
-
-  it("returns null for a zero-cost entry (treated as unusable, not free)", () => {
-    expect(priceFromLiteLLM(catalog, "zero-cost-model")).toBeNull();
+  it.each([
+    ["a missing key", "not-a-real-key"],
+    ["an entry with no flat input/output cost fields (tiered_pricing only)", "dashscope/qwen3.8-flash"],
+    ["a zero-cost entry (treated as unusable, not free)", "zero-cost-model"],
+  ])("returns null for %s", (_case, key) => {
+    expect(priceFromLiteLLM(catalog, key)).toBeNull();
   });
 });
 
@@ -84,16 +80,12 @@ describe("update-pricing: priceFromCloudPrice", () => {
     expect(price!.source).toBe("cloudprice");
   });
 
-  it("NEVER takes an openrouter/-prefixed entry from CloudPrice, even if present and usable", () => {
-    expect(priceFromCloudPrice(catalog, "openrouter/qwen/qwen3.8-flash")).toBeNull();
-  });
-
-  it("returns null for a missing key", () => {
-    expect(priceFromCloudPrice(catalog, "not-a-real-key")).toBeNull();
-  });
-
-  it("returns null for a zero-cost entry (treated as unusable, not free)", () => {
-    expect(priceFromCloudPrice(catalog, "zero-cost-model")).toBeNull();
+  it.each([
+    ["an openrouter/-prefixed entry (NEVER taken from CloudPrice, even if present and usable)", "openrouter/qwen/qwen3.8-flash"],
+    ["a missing key", "not-a-real-key"],
+    ["a zero-cost entry (treated as unusable, not free)", "zero-cost-model"],
+  ])("returns null for %s", (_case, key) => {
+    expect(priceFromCloudPrice(catalog, key)).toBeNull();
   });
 });
 
@@ -114,16 +106,12 @@ describe("update-pricing: priceFromOpenRouter", () => {
     expect(price!.source).toBe("openrouter");
   });
 
-  it("returns null for a missing id", () => {
-    expect(priceFromOpenRouter(catalog, "not-a-real-id")).toBeNull();
-  });
-
-  it("returns null when pricing is absent", () => {
-    expect(priceFromOpenRouter(catalog, "no-pricing-model")).toBeNull();
-  });
-
-  it("returns null when pricing fields aren't parseable numbers", () => {
-    expect(priceFromOpenRouter(catalog, "bad-pricing-model")).toBeNull();
+  it.each([
+    ["a missing id", "not-a-real-id"],
+    ["an entry with no pricing", "no-pricing-model"],
+    ["pricing fields that aren't parseable numbers", "bad-pricing-model"],
+  ])("returns null for %s", (_case, id) => {
+    expect(priceFromOpenRouter(catalog, id)).toBeNull();
   });
 });
 
