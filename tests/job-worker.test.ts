@@ -16,9 +16,11 @@ interface FixtureResult {
   counts: { total: number; done: number; ok: number; error: number; skipped: number };
   output: string | null;
   meta: Record<string, unknown> | null;
+  renders: Array<{ width: number; fullPage?: boolean; mobile?: boolean }>;
+  followUp: { images: number; sawPreviousHtml: boolean } | null;
 }
 
-function runFixture(mode: "missing-caption" | "prose" | "fragment" | "cancelled-caption"): FixtureResult {
+function runFixture(mode: "missing-caption" | "prose" | "fragment" | "cancelled-caption" | "self-check-revise" | "self-check-refusal"): FixtureResult {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "redesign-job-worker-"));
   try {
     const proc = Bun.spawnSync({
@@ -83,5 +85,40 @@ describe("job worker prerequisites and output validation", () => {
     expect(result.calls).toBe(0);
     expect(result.job.status).toBe("cancelled");
     expect(result.counts).toEqual({ total: 1, done: 1, ok: 0, error: 0, skipped: 1 });
+  }, 60_000);
+});
+
+// Contract: with self-check on, a successful output is rendered at desktop and phone width and
+// the model gets ONE follow-up carrying the original, both renders and its own HTML; a clean
+// revision replaces the output, anything else restores the first one and the job stays ok.
+describe("job worker self-check pass", () => {
+  it("sends the original plus desktop and phone renders with the previous HTML, and keeps the revision", () => {
+    const result = runFixture("self-check-revise");
+
+    expect(result.calls).toBe(2);
+    expect(result.renders).toEqual([
+      { width: 1440, fullPage: true, mobile: false },
+      { width: 390, fullPage: true, mobile: true },
+    ]);
+    expect(result.followUp).toEqual({ images: 3, sawPreviousHtml: true });
+    expect(result.job.status).toBe("ok");
+    expect(result.output).toContain("Revised fragment");
+    expect((result.job as { selfCheck?: { status: string } }).selfCheck?.status).toBe("revised");
+    // Per-job usage stays the first generation's so history-based estimates compare like with like.
+    expect(result.job.usage).toEqual({ prompt_tokens: 12, completion_tokens: 4 });
+    expect(result.counts).toEqual({ total: 1, done: 1, ok: 1, error: 0, skipped: 0 });
+  }, 60_000);
+
+  it("restores the first output byte for byte when the revision is not HTML, and never fails the job", () => {
+    const result = runFixture("self-check-refusal");
+
+    expect(result.calls).toBe(2);
+    expect(result.job.status).toBe("ok");
+    expect(result.job.error).toBeNull();
+    expect(result.output).toContain("Valid fragment");
+    expect(result.output).not.toContain("will not revise");
+    expect(result.meta?.usage).toEqual({ prompt_tokens: 12, completion_tokens: 4 });
+    expect((result.job as { selfCheck?: { status: string } }).selfCheck?.status).toBe("kept");
+    expect(result.counts).toEqual({ total: 1, done: 1, ok: 1, error: 0, skipped: 0 });
   }, 60_000);
 });

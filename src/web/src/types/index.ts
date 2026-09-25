@@ -208,6 +208,8 @@ export interface ManifestConfig {
   grounded?: boolean;
   /** Optional ceiling copied onto a run so Run Again can preserve the original budget. */
   maxCostUsd?: number;
+  /** The run rendered each output and let its model correct it once. */
+  selfCheck?: boolean;
 }
 
 export interface Manifest {
@@ -449,6 +451,8 @@ export interface RunRequest {
    */
   maxImages?: number;
   mock: boolean;
+  /** Render each output at desktop and phone width and let its model correct it once. */
+  selfCheck?: boolean;
   reference?: { images: string[]; note: string | null };
   brandStyleGuide?: string | null;
   // The control panel always sends false: "Add to queue" parks the run, and only a

@@ -91,6 +91,8 @@ ${C.bold("RēDesign")} (ReDesign), run UI screenshots through many AI models.
     --brand-style-guide-file path
                             read those notes from a file (wins over the inline form)
     --mock                  no real API calls, placeholder HTML (for testing)
+    --self-check            render each output at desktop + phone width and let its model fix it
+                            once (one extra call per vision job; needs Edge or Chrome)
     --concurrency N         max parallel calls across the whole run
     --pool-concurrency N    max parallel calls per key pool/provider lane
     --max-images N          cap reference images per group

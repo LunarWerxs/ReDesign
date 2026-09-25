@@ -24,6 +24,7 @@ import { ensureDir, writeJSON } from "../util";
 import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
 import { brandStyleGuideBlock, groundingBlock, textReferenceBlock, visionReferenceBlock } from "./helpers";
 import type { Job } from "./scheduling";
+import { captureSelfCheck, MAX_SELF_CHECK_HTML_CHARS, outputRel, type SelfCheckOutcome, selfCheckBlock, selfCheckImages } from "./self-check";
 
 type ResolvedPrompt = ReturnType<typeof resolvePrompts>[number];
 
@@ -49,6 +50,8 @@ export interface JobWorkerContext {
   referenceNote: string;
   onProgress: (event: Record<string, unknown>) => void;
   markManifestDirty: () => void;
+  /** Per-run toggle: render each output and let the model correct it once (see ./self-check). */
+  selfCheck?: boolean;
 }
 
 interface PromptBuild {
@@ -250,11 +253,14 @@ async function finalizeJobResult(
   result: AdapterCallResult,
   built: PromptBuild,
   keyMask: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; html: string } | { ok: false; error: string }> {
   recordJobUsageAndCost(ctx.manifest, job, model, result);
   const saved = await saveJobOutput(ctx, job, model, prompt, input, result, built, keyMask);
   if (!saved.ok) return { ok: false, error: saved.error };
-  return applyOutputOutcome(job, ctx.runId, saved.rel, saved.extracted, result);
+  const outcome = applyOutputOutcome(job, ctx.runId, saved.rel, saved.extracted, result);
+  // The clean extracted document (without the viewer's measure script) is what a self-check pass
+  // hands back to the model.
+  return outcome.ok ? { ok: true, html: saved.extracted.html } : outcome;
 }
 
 type KeyAcquisition = Awaited<ReturnType<KeyManager["acquireOrWait"]>>;
@@ -298,10 +304,12 @@ function classifyJobCallError(err: unknown, ctx: JobWorkerContext, job: Job, mod
 
 // One attempt per key in the pool (bounded by maxAttempts). acquire() already skips keys
 // in cooldown, so a healthy pool never spends more than one attempt; only a pool full of
-// dead/exhausted keys works through the budget. Returns the last error seen, if any.
-async function runJobAttempts(ctx: JobWorkerContext, job: Job, model: Model, prompt: ResolvedPrompt, input: InputItem, adapter: ReturnType<typeof getAdapter>, built: PromptBuild, maxAttempts: number): Promise<string | null> {
+// dead/exhausted keys works through the budget. Returns the last error seen, if any, and the
+// saved document's HTML on success.
+async function runJobAttempts(ctx: JobWorkerContext, job: Job, model: Model, prompt: ResolvedPrompt, input: InputItem, adapter: ReturnType<typeof getAdapter>, built: PromptBuild, maxAttempts: number): Promise<{ lastErr: string | null; html: string | null }> {
   const { mock, signal, timeoutMs, systemContract, km } = ctx;
   let lastErr: string | null = null;
+  let html: string | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (signal?.aborted) {
@@ -340,6 +348,7 @@ async function runJobAttempts(ctx: JobWorkerContext, job: Job, model: Model, pro
         break;
       }
       lastErr = null;
+      html = outcome.html;
       break;
     } catch (err) {
       const classified = classifyJobCallError(err, ctx, job, model, acq);
@@ -353,7 +362,89 @@ async function runJobAttempts(ctx: JobWorkerContext, job: Job, model: Model, pro
     }
   }
 
-  return lastErr;
+  return { lastErr, html };
+}
+
+/** Everything the self-check pass may overwrite, so a failed or worse revision can be undone. */
+function snapshotFirstPass(job: Job) {
+  const { file, wrapped, finishReason, truncated, note, usage, cost, attempts, keyMask } = job;
+  return { file, wrapped, finishReason, truncated, note, usage, cost, attempts, keyMask };
+}
+
+// Reads a file that may not exist (a sidecar .meta.json), so a restore can rewrite exactly what was there.
+async function readIfPresent(file: string): Promise<Buffer | null> {
+  try { return await fs.promises.readFile(file); } catch { return null; }
+}
+
+// The self-check pass (see ./self-check for why): render the saved output at desktop and phone
+// widths, send one follow-up call with the original, both renders and the model's own HTML, and
+// keep the corrected document. The first pass is already a good output, so anything short of a
+// clean revision (render failure, provider error, refusal, truncation, cancellation) restores it
+// byte for byte and the job stays "ok"; the pass never turns a success into a failure. The one
+// exception is a restore that itself fails, returned as the job's error.
+async function runSelfCheckPass(ctx: JobWorkerContext, job: Job, model: Model, prompt: ResolvedPrompt, input: InputItem, adapter: ReturnType<typeof getAdapter>, built: PromptBuild, firstHtml: string, maxAttempts: number): Promise<string | null> {
+  const { runId, signal, onProgress, referenceImages } = ctx;
+  const started = Date.now();
+  const originalCount = Math.max(0, built.images.length - referenceImages.length);
+  const skip = (reason: string): null => {
+    job.selfCheck = { status: "skipped", reason } satisfies SelfCheckOutcome;
+    return null;
+  };
+  if (model.vision === false) return skip("text-only model cannot see its render");
+  if (!originalCount) return skip("no original screenshot to compare against");
+  if (firstHtml.length > MAX_SELF_CHECK_HTML_CHARS) return skip(`output too large to send back (${firstHtml.length} chars)`);
+  if (!job.file) return skip("no saved output");
+
+  const outputAbs = path.join(store.OUTPUT_DIR, job.file.split("/").join(path.sep));
+  const metaAbs = outputAbs.replace(/\.html$/, ".meta.json");
+  let captured: Awaited<ReturnType<typeof captureSelfCheck>>;
+  try {
+    captured = await captureSelfCheck(outputAbs);
+  } catch (err) {
+    return skip(`render failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (signal?.aborted) return skip("run cancelled");
+
+  const first = snapshotFirstPass(job);
+  const firstFiles = { html: await readIfPresent(outputAbs), meta: await readIfPresent(metaAbs) };
+  const captures = captured.files.map((file) => outputRel(store.OUTPUT_DIR, file));
+  const { images } = selfCheckImages(built.images, referenceImages.length, captured.images);
+  const checkBuilt: PromptBuild = { ...built, effectivePrompt: built.effectivePrompt + selfCheckBlock(firstHtml, originalCount), images };
+
+  // Back to "running" while the follow-up is in flight, so the panel does not show a finished card
+  // that is about to change; every exit below sets a terminal status again.
+  job.status = "running";
+  job.note = "self-check: comparing its desktop and phone renders against the original";
+  onProgress({ type: "job", runId, job });
+  const { lastErr } = await runJobAttempts(ctx, job, model, prompt, input, adapter, checkBuilt, maxAttempts);
+  const passCost = job.cost && job.cost !== first.cost ? job.cost.totalCost : null;
+  const revised = job.status === "ok" && !job.truncated;
+
+  // Per-job cost/usage stay the first generation's so history-based estimates compare like with
+  // like; the run's own ledger already counted the follow-up call.
+  Object.assign(job, { usage: first.usage, cost: first.cost });
+  if (revised) {
+    job.note = [first.note, "self-checked: revised after reviewing its desktop and phone renders"].filter(Boolean).join("; ");
+    job.selfCheck = { status: "revised", captures, ms: Date.now() - started, costUsd: passCost } satisfies SelfCheckOutcome;
+    return null;
+  }
+
+  const reason = job.status === "cancelled" ? "run cancelled" : job.truncated ? "revision truncated at the token limit" : lastErr || job.error || "revision failed";
+  try {
+    if (firstFiles.html) await fs.promises.writeFile(outputAbs, firstFiles.html);
+    if (firstFiles.meta) await fs.promises.writeFile(metaAbs, firstFiles.meta);
+  } catch (err) {
+    // The revision's bytes may be the non-HTML diagnostic; say so rather than claim the first pass.
+    const error = `self-check could not restore the first output: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
+    job.status = "error";
+    job.error = error;
+    job.selfCheck = { status: "kept", reason, captures, ms: Date.now() - started, costUsd: passCost } satisfies SelfCheckOutcome;
+    return error;
+  }
+  Object.assign(job, first, { status: "ok", error: null });
+  job.note = [first.note, `self-check kept the first output (${String(reason).slice(0, 160)})`].filter(Boolean).join("; ");
+  job.selfCheck = { status: "kept", reason, captures, ms: Date.now() - started, costUsd: passCost } satisfies SelfCheckOutcome;
+  return null;
 }
 
 export async function runOneJob(job: Job, ctx: JobWorkerContext): Promise<void> {
@@ -392,7 +483,11 @@ export async function runOneJob(job: Job, ctx: JobWorkerContext): Promise<void> 
       onProgress({ type: "job", runId, job });
 
       const maxAttempts = km.attemptBudget(model.keyEnv);
-      const lastErr = await runJobAttempts(ctx, job, model, prompt, input, adapter, built, maxAttempts);
+      const attempt = await runJobAttempts(ctx, job, model, prompt, input, adapter, built, maxAttempts);
+      let lastErr = attempt.lastErr;
+      if (ctx.selfCheck && job.status === "ok" && attempt.html && !signal?.aborted) {
+        lastErr = await runSelfCheckPass(ctx, job, model, prompt, input, adapter, built, attempt.html, maxAttempts);
+      }
 
       if (job.status !== "ok" && job.status !== "cancelled" && job.status !== "skipped") {
         job.status = "error";

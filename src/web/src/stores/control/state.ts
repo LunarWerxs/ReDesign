@@ -110,6 +110,9 @@ export function createControlState() {
   // reads as a deliberate choice on later loads instead of re-seeding every model.
   const selectionSeeded = useStorage('redesign.selection-seeded', false);
   const mock = ref(false);
+  // Self-check: one extra call per vision job in which the model reviews desktop and phone
+  // renders of its own output. Remembered like any other choice; the cost estimate shows it.
+  const selfCheck = useStorage('redesign.self-check', false);
   // Per-model copy count keyed by model id. Absence means the default of 1, so the
   // map only ever holds entries > 1 (see setModelQty). Replaces the old single
   // global "variants" number: each selected model can be generated N times.
@@ -296,6 +299,7 @@ export function createControlState() {
     referenceOn,
     selectionSeeded,
     mock,
+    selfCheck,
     modelQty,
     maxCostUsd,
     customOn,

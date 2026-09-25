@@ -57,9 +57,9 @@ function validateRunRequest(value: unknown): RunBody {
   return body;
 }
 
-/** `mock` and `autoStart` are the only booleans the queue reads directly. */
+/** `mock`, `selfCheck` and `autoStart` are the only booleans the queue reads directly. */
 function validateBooleanFlags(body: RunBody): void {
-  for (const key of ["mock", "autoStart"] as const) {
+  for (const key of ["mock", "selfCheck", "autoStart"] as const) {
     if (Object.hasOwn(body, key) && typeof body[key] !== "boolean") badRequest(`${key} must be a boolean`);
   }
 }

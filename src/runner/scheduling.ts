@@ -33,6 +33,8 @@ interface Job {
   note?: string;
   truncated?: boolean;
   finishReason?: string | null;
+  /** Set only when the run had self-check on: what the render-and-review pass did. */
+  selfCheck?: import("./self-check").SelfCheckOutcome;
   [key: string]: unknown;
 }
 

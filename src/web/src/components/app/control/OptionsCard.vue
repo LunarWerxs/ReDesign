@@ -48,6 +48,10 @@ const browseOpen = ref(false);
                 <Switch id="mock" v-model="store.mock" />
                 <Label for="mock" class="cursor-pointer">{{ t('options.mock') }}</Label>
               </div>
+              <div class="flex items-center gap-2" :title="t('options.selfCheckDescription')">
+                <Switch id="self-check" v-model="store.selfCheck" />
+                <Label for="self-check" class="cursor-pointer">{{ t('options.selfCheck') }}</Label>
+              </div>
               <div class="flex items-center gap-2" :title="t('options.customPromptDescription')">
                 <Switch id="custom-prompt" v-model="store.customOn" />
                 <Label for="custom-prompt" class="cursor-pointer">{{ t('options.customPrompt') }}</Label>

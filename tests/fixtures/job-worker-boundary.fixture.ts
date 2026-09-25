@@ -8,10 +8,11 @@ import type { JobWorkerContext } from "../../src/runner/job-worker";
 import type { Job } from "../../src/runner/scheduling";
 import type * as Store from "../../src/store";
 
-type Mode = "missing-caption" | "prose" | "fragment" | "cancelled-caption";
+type Mode = "missing-caption" | "prose" | "fragment" | "cancelled-caption" | "self-check-revise" | "self-check-refusal";
 
 const mode = process.argv[2] as Mode;
-if (!new Set<Mode>(["missing-caption", "prose", "fragment", "cancelled-caption"]).has(mode)) throw new Error("invalid fixture mode");
+if (!new Set<Mode>(["missing-caption", "prose", "fragment", "cancelled-caption", "self-check-revise", "self-check-refusal"]).has(mode)) throw new Error("invalid fixture mode");
+const selfCheck = mode === "self-check-revise" || mode === "self-check-refusal";
 
 // Capture util before loading any module that reads ROOT, then replace just its location
 // exports. The child process is the boundary: no real output/config/key-state is touched.
@@ -21,6 +22,18 @@ const tempHome = String(process.env.REDESIGN_TEST_HOME || "");
 if (!tempRoot || !tempHome) throw new Error("missing isolated fixture paths");
 mock.module("../../src/util", () => ({ ...realUtil, ROOT: tempRoot, APP_CONFIG_DIR: tempHome, ENV_FILE: path.join(tempHome, ".env") }));
 
+// The self-check modes need renders but not a browser: stand in a renderer that writes a tiny PNG
+// and records which viewports were asked for.
+const renders: Array<{ width: number; fullPage?: boolean; mobile?: boolean }> = [];
+const realThumbnail = await import("../../src/thumbnail");
+mock.module("../../src/thumbnail", () => ({
+  ...realThumbnail,
+  renderHtmlToPng: async (_html: string, outPng: string, size: { width: number; height: number; fullPage?: boolean; mobile?: boolean }) => {
+    renders.push({ width: size.width, fullPage: size.fullPage, mobile: size.mobile });
+    fs.writeFileSync(outPng, Buffer.from("89504e470d0a1a0a", "hex"));
+  },
+}));
+
 const [{ KeyManager }, { runOneJob }, { buildJobs }, store] = await Promise.all([
   import("../../src/keyManager"),
   import("../../src/runner/job-worker"),
@@ -29,13 +42,19 @@ const [{ KeyManager }, { runOneJob }, { buildJobs }, store] = await Promise.all(
 ]);
 
 let calls = 0;
-const responseText = mode === "prose" ? "I cannot produce the requested redesign." : "<section><h1>Valid fragment</h1></section>";
-globalThis.fetch = (async () => {
+let followUp: { images: number; sawPreviousHtml: boolean } | null = null;
+const firstText = mode === "prose" ? "I cannot produce the requested redesign." : "<section><h1>Valid fragment</h1></section>";
+const secondText = mode === "self-check-revise" ? "<section><h1>Revised fragment</h1></section>" : "I will not revise this page.";
+globalThis.fetch = (async (_url: unknown, init?: { body?: unknown }) => {
   calls++;
+  if (calls === 2) {
+    const body = String(init?.body || "");
+    followUp = { images: body.split("data:image/png;base64,").length - 1, sawPreviousHtml: body.includes("YOUR PREVIOUS HTML") && body.includes("Valid fragment") };
+  }
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content: responseText }, finish_reason: mode === "prose" ? "length" : "stop" }],
-      usage: { prompt_tokens: 12, completion_tokens: 4 },
+      choices: [{ message: { content: calls === 1 ? firstText : secondText }, finish_reason: mode === "prose" ? "length" : "stop" }],
+      usage: calls === 1 ? { prompt_tokens: 12, completion_tokens: 4 } : { prompt_tokens: 50, completion_tokens: 9 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -48,7 +67,7 @@ const model: Model = {
   apiModel: "test-model",
   keyEnv: "__TEST_TEXT_ONLY_KEYS__",
   baseUrl: "http://provider.test/v1",
-  vision: false,
+  vision: selfCheck,
   maxTokens: 100,
 };
 const prompt: ResolvedPrompt = { id: "test-prompt", label: "Test prompt", user: "Produce a redesign.", source: "preset" };
@@ -78,7 +97,7 @@ const ctx: JobWorkerContext = {
   modelById: new Map([[model.id, model]]),
   promptById: new Map([[prompt.id, prompt]]),
   inputById: new Map([[input.id, input]]),
-  imagesFor: () => [],
+  imagesFor: () => (selfCheck ? [{ mime: "image/png", data: "iVBORw0KGgo=", bytes: 12, file: "test.png" }] : []),
   describeInput,
   describeReference: async () => null,
   describer: null,
@@ -87,10 +106,11 @@ const ctx: JobWorkerContext = {
   referenceNote: "",
   onProgress: () => {},
   markManifestDirty: () => {},
+  selfCheck,
 };
 
 await runOneJob(job, ctx);
 
 const output = job.file ? fs.readFileSync(path.join(store.OUTPUT_DIR, job.file), "utf8") : null;
 const meta = job.file ? JSON.parse(fs.readFileSync(path.join(store.OUTPUT_DIR, job.file.replace(/\.html$/, ".meta.json")), "utf8")) : null;
-process.stdout.write(`${JSON.stringify({ calls, job, counts: manifest.counts, output, meta })}\n`);
+process.stdout.write(`${JSON.stringify({ calls, job, counts: manifest.counts, output, meta, renders, followUp })}\n`);

@@ -67,6 +67,7 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 - **All config, no code.** Models and prompts live in `~/.redesign/config/` (set `REDESIGN_HOME` to move it), seeded on first run and shared by the packaged app and a from-source checkout alike. Add a model, disable one, or point it at a newer version without touching the app. The copies under `src/config/` are the shipped seeds, not your live settings.
 - **Reference images.** Drop or paste in a look you like, choose exactly which references to send, and every model borrows their mood and colors rather than their layout.
 - **Grounded by default.** Every run inventories the screenshot once with a vision model and hands that description to every model alongside the image, so redesigns keep the real content instead of quietly dropping a tab or inventing a metric. It measurably beat the ungrounded path on content fidelity, so it is simply how runs work now, with no switch to remember.
+- **Self-check, when you want it.** Turn on Self-check under Advanced options (`--self-check` on the CLI, `self_check` over MCP) and each vision model gets one look at its own work: its output is rendered full-page at desktop and phone width in headless Edge or Chrome, and the model sees both renders next to the original and its own HTML, then sends back a corrected page. A revision that fails, refuses or truncates is thrown away and the first output stays, so the pass can only help. It costs one extra call per output, and the pre-run estimate counts it. The renders are kept beside each output as `*.check-desktop.png` and `*.check-phone.png`.
 - **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front.
 - **Where your keys live.** In `.env` beside the app, written owner-only (`0600`), and nowhere else. They are never sent anywhere but the provider you configured, never written into a run's saved output or its key-health state, and they are stripped out of any provider error text before it is stored or shown. If you use the optional Connections sync, its session token is additionally encrypted at rest with DPAPI on Windows; on macOS and Linux that token is stored as a plain `0600` file.
 
@@ -76,6 +77,7 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 bun run src/index.ts run      # queue a run (add --mock for a free dry run)
                               # --model-quantities id=n,id=n  per-model output counts
                               # --brand-style-guide-file b.md  brand notes for every prompt
+                              # --self-check  each model reviews desktop + phone renders of its output once
 bun run src/index.ts models   # models and how many keys each has
 bun run src/index.ts keys     # key health
 bun run src/index.ts mcp      # start the MCP server for agents

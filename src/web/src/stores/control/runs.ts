@@ -190,6 +190,7 @@ function buildRunRequest(state: ControlState, autoStart: boolean): RunRequest | 
       custom: state.customOn.value ? state.custom.value.trim() || null : null,
     },
     mock: state.mock.value,
+    ...(state.selfCheck.value ? { selfCheck: true } : {}),
     // autoStart:false parks the run (held) until runQueue(); true lets the server run it
     // now or fall in behind whatever's already generating.
     autoStart,

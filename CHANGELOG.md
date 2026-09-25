@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Self-check: each model looks at its own output before you do.** A run is one shot per model,
+  so a broken layout, a phone-width overflow or a dropped section used to go straight into the
+  gallery. With Self-check on (Advanced options, `--self-check`, or `self_check` over MCP), every
+  successful output from a vision model is rendered full-page at 1440px and 390px wide, and the
+  model gets one follow-up call with the original screenshot, both renders and its own HTML,
+  asking for the corrected page. A revision that errors, refuses or truncates is discarded and
+  the first output is restored byte for byte, so the pass never turns a success into a failure.
+  The renders stay beside the output, the job records what the pass did (`selfCheck`), and the
+  pre-run estimate counts the extra call. Idea from abi/screenshot-to-code's screenshot preview
+  tool (MIT); written fresh.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed

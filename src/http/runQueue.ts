@@ -33,6 +33,7 @@ interface RunBody {
   maxCostUsd?: number;
   timeoutMs?: number;
   mock?: boolean;
+  selfCheck?: boolean;
   inputs?: SelectionInput;
   models?: SelectionInput;
   prompts?: { presets?: unknown; custom?: string };

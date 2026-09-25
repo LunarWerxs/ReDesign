@@ -26,7 +26,7 @@ interface RunSpec {
   referenceNote: string;
   visionHelper: Model | null;
   brandStyleGuide: string;
-  settings: { mock: boolean; variants: number; variantsByModel: Record<string, number>; maxImagesPerInput?: number; concurrency: number; poolConcurrency: number; timeoutMs: number; maxCostUsd?: number };
+  settings: { mock: boolean; variants: number; variantsByModel: Record<string, number>; maxImagesPerInput?: number; concurrency: number; poolConcurrency: number; timeoutMs: number; maxCostUsd?: number; selfCheck?: boolean };
   jobs: Job[];
   assets: Array<{ path: string; sha256: string; bytes: number }>;
   assetBytes: number;
@@ -147,7 +147,8 @@ function hasValidSettings(value: RunSpec): boolean {
     && Number.isInteger(settings.concurrency) && settings.concurrency >= 1 && settings.concurrency <= RUN_LIMITS.concurrency
     && Number.isInteger(settings.poolConcurrency) && settings.poolConcurrency >= 1 && settings.poolConcurrency <= RUN_LIMITS.poolConcurrency
     && Number.isFinite(settings.timeoutMs) && settings.timeoutMs > 0
-    && (settings.maxCostUsd == null || (Number.isFinite(settings.maxCostUsd) && settings.maxCostUsd >= 0));
+    && (settings.maxCostUsd == null || (Number.isFinite(settings.maxCostUsd) && settings.maxCostUsd >= 0))
+    && (settings.selfCheck == null || typeof settings.selfCheck === "boolean");
 }
 
 /** Every input image, preview and reference must name an asset the spec actually carries. */
@@ -270,7 +271,7 @@ async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): 
   if (jobs.length > RUN_LIMITS.jobs) throw new Error(`run exceeds ${RUN_LIMITS.jobs} jobs`);
   const visionHelper = pickVisionHelper(options, models);
   const reference = options.reference;
-  const spec: RunSpec ={ version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }) }, jobs, assets: assetList, assetBytes };
+  const spec: RunSpec ={ version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }), ...(options.selfCheck === true ? { selfCheck: true } : {}) }, jobs, assets: assetList, assetBytes };
   writeSpec(targetDir, spec);
   return spec;
 }
@@ -306,7 +307,9 @@ async function cloneRunSpec(sourceDir: string, targetDir: string, jobIds?: strin
 function summarizeRunSpec(spec: RunSpec): { jobCount: number; assetBytes: number; estimatedCostUsd: number | null; unknownPricing: boolean } {
   if (spec.settings.mock) return { jobCount: spec.jobs.length, assetBytes: spec.assetBytes, estimatedCostUsd: 0, unknownPricing: false };
   const byModel: Record<string, number> = {};
-  for (const job of spec.jobs) byModel[job.modelId] = (byModel[job.modelId] || 0) + 1;
+  // Self-check sends every vision job one follow-up call, so count those jobs twice.
+  const callsPerJob = (modelId: string) => (spec.settings.selfCheck && spec.models.find((model) => model.id === modelId)?.vision !== false ? 2 : 1);
+  for (const job of spec.jobs) byModel[job.modelId] = (byModel[job.modelId] || 0) + callsPerJob(job.modelId);
   // One inventory caption per selected input, plus a style caption for text-only
   // runs with references and an untitled-run label request. These calls bill the helper.
   const selectedInputs = new Set(spec.jobs.map((job) => job.inputId)).size;

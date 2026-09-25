@@ -53,6 +53,8 @@ interface RunReimagineOptions {
   runId?: string;
   label?: string;
   maxCostUsd?: number;
+  /** Render each output at desktop and phone widths and let its model correct it once. */
+  selfCheck?: boolean;
   /** Internal only: already resolved and persisted by queue admission. */
   preparedSpec?: RunSpec;
   ownership?: store.RunOwnershipClaim;
@@ -374,6 +376,7 @@ interface RunExecState {
   onProgress: (event: Record<string, unknown>) => void;
   markManifestDirty: () => void;
   flushTimer: ReturnType<typeof setInterval>;
+  selfCheck: boolean;
 }
 
 /** Admit no further paid calls once the run's own spend ceiling is reached or unboundable. */
@@ -386,7 +389,7 @@ function assertSpendCeiling(manifest: store.Manifest, spec: RunSpec, mock: boole
 
 /** The job phase: enrich the summary, schedule every job, then finalize and persist the manifest. */
 async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
-  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer } = state;
+  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer, selfCheck } = state;
   const describeCtx: RunSummaryDescribeCtx = { opts: { ...opts, label: spec.label }, mock, visionHelper, km, timeoutMs, signal, imagesFor };
   const summaryPromise = describeRunSummary(summary, inputItems[0] as InputItem, describeCtx)
     .then((next) => {
@@ -434,6 +437,7 @@ async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
     referenceNote,
     onProgress,
     markManifestDirty,
+    selfCheck,
   };
 
   const scheduledResults = await runJobsByPool<Job>(jobs, {
@@ -481,7 +485,7 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
 
   const manifest = buildRunManifest(runId, summary, jobs, thumb, ro, rs, poolLimits, brandStyleGuide);
   manifest.specVersion = spec.version;
-  manifest.config = { ...manifest.config, timeoutMs, maxCostUsd: spec.settings.maxCostUsd };
+  manifest.config = { ...manifest.config, timeoutMs, maxCostUsd: spec.settings.maxCostUsd, ...(spec.settings.selfCheck ? { selfCheck: true } : {}) };
   store.writeManifest(runId, manifest);
   onProgress({ type: "start", runId, total: jobs.length, manifest });
   const inputById = new Map(inputItems.map((i) => [i.id, i]));
@@ -536,6 +540,7 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
     referenceNote: rs.referenceNote, visionHelper, referenceImages, referenceRels, summary,
     inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById,
     inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer,
+    selfCheck: spec.settings.selfCheck === true,
   };
 
   try {
