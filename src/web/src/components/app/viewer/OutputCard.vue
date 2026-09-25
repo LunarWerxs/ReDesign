@@ -85,9 +85,10 @@ const contrastBadge = computed(() => {
   if (!r) return null;
   if (!r.checked) return { label: t('viewer.contrastNoText'), title: t('viewer.contrastNoText'), fail: false };
   if (r.passes) return { label: t('viewer.contrastPass'), title: t('viewer.contrastPassTitle', { count: r.checked }), fail: false };
+  // failing is sorted worst first; worstRatio spans every checked line, passing large text included.
   const worst = r.failing[0];
   return {
-    label: t('viewer.contrastFail', { ratio: String(r.worstRatio ?? '') }),
+    label: t('viewer.contrastFail', { ratio: String(worst?.ratio ?? r.worstRatio ?? '') }),
     title: t('viewer.contrastFailTitle', { count: r.failingCount, text: worst?.text || '', ratio: String(worst?.ratio ?? ''), required: String(worst?.required ?? '') }),
     fail: true,
   };

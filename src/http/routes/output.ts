@@ -20,7 +20,7 @@ const CONTRAST_CACHE_MAX = 200;
 const contrastCache = new Map<string, Promise<ContrastReport>>();
 
 async function outputContrast(full: string, level: ContrastLevel): Promise<ContrastReport> {
-  const key = `${full}|${fs.statSync(full).mtimeMs}|${level}`;
+  const key = `${full}|${(await fs.promises.stat(full)).mtimeMs}|${level}`;
   const hit = contrastCache.get(key);
   if (hit) return hit;
   const pending = (async () => {
