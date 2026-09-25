@@ -8,10 +8,10 @@ import type { JobWorkerContext } from "../../src/runner/job-worker";
 import type { Job } from "../../src/runner/scheduling";
 import type * as Store from "../../src/store";
 
-type Mode = "missing-caption" | "prose" | "fragment" | "cancelled-caption";
+type Mode = "missing-caption" | "prose" | "fragment" | "cancelled-caption" | "slop-retry";
 
 const mode = process.argv[2] as Mode;
-if (!new Set<Mode>(["missing-caption", "prose", "fragment", "cancelled-caption"]).has(mode)) throw new Error("invalid fixture mode");
+if (!new Set<Mode>(["missing-caption", "prose", "fragment", "cancelled-caption", "slop-retry"]).has(mode)) throw new Error("invalid fixture mode");
 
 // Capture util before loading any module that reads ROOT, then replace just its location
 // exports. The child process is the boundary: no real output/config/key-state is touched.
@@ -29,12 +29,20 @@ const [{ KeyManager }, { runOneJob }, { buildJobs }, store] = await Promise.all(
 ]);
 
 let calls = 0;
-const responseText = mode === "prose" ? "I cannot produce the requested redesign." : "<section><h1>Valid fragment</h1></section>";
-globalThis.fetch = (async () => {
+const requestBodies: string[] = [];
+// slop-retry: the first answer trips two P0 anti-slop rules (purple gradient, emoji icons) and the
+// re-prompted second answer is clean, so the worker should keep the retry.
+const SLOP_HTML =
+  '<!DOCTYPE html><html><head><style>.hero{background:linear-gradient(135deg,#7c3aed,#db2777)}</style></head><body><section class="hero"><h1>Dashboard</h1><div>\u{1F680}</div><div>✨</div></section></body></html>';
+const CLEAN_HTML = '<!DOCTYPE html><html><head><style>.hero{background:#f4f1ea;color:#1c1b19}</style></head><body><section class="hero"><h1>Dashboard</h1></section></body></html>';
+const responseFor = (call: number) =>
+  mode === "prose" ? "I cannot produce the requested redesign." : mode === "slop-retry" ? (call === 1 ? SLOP_HTML : CLEAN_HTML) : "<section><h1>Valid fragment</h1></section>";
+globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
   calls++;
+  requestBodies.push(typeof init?.body === "string" ? init.body : "");
   return new Response(
     JSON.stringify({
-      choices: [{ message: { content: responseText }, finish_reason: mode === "prose" ? "length" : "stop" }],
+      choices: [{ message: { content: responseFor(calls) }, finish_reason: mode === "prose" ? "length" : "stop" }],
       usage: { prompt_tokens: 12, completion_tokens: 4 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
@@ -93,4 +101,5 @@ await runOneJob(job, ctx);
 
 const output = job.file ? fs.readFileSync(path.join(store.OUTPUT_DIR, job.file), "utf8") : null;
 const meta = job.file ? JSON.parse(fs.readFileSync(path.join(store.OUTPUT_DIR, job.file.replace(/\.html$/, ".meta.json")), "utf8")) : null;
-process.stdout.write(`${JSON.stringify({ calls, job, counts: manifest.counts, output, meta })}\n`);
+const retryPromptHasFindings = (requestBodies[1] || "").includes("purple-gradient");
+process.stdout.write(`${JSON.stringify({ calls, job, counts: manifest.counts, output, meta, retryPromptHasFindings })}\n`);

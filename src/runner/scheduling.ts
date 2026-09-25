@@ -33,6 +33,15 @@ interface Job {
   note?: string;
   truncated?: boolean;
   finishReason?: string | null;
+  /** Anti-slop lint score of the saved output (runner/slop-lint.ts). */
+  slop?: import("./slop-lint").SlopSummary | null;
+  /** Set when a P0 lint finding earned this job its one re-prompt. */
+  slopRetry?: {
+    kept: boolean;
+    before: { p0: number; p1: number; p2: number };
+    after: { p0: number; p1: number; p2: number } | null;
+    firstFile: string | null;
+  };
   [key: string]: unknown;
 }
 

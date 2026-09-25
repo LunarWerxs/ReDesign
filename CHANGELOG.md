@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Anti-slop lint on generated HTML.** Every saved redesign is run through a deterministic rule
+  table (`src/runner/slop-lint.ts`): purple-gradient, trust-gradient, ai-default-indigo,
+  emoji-icon, sans-display, invented-metric (checked against the run's grounding caption),
+  filler-copy, raw-hex, accent-overuse, all-caps-no-tracking and external-image, each at P0, P1 or
+  P2 with a snippet. The score lands on the job as `slop`, and the gallery card shows it as a badge
+  with the findings in its tooltip. A P0 finding re-prompts that model once with the findings; the
+  retry writes a sibling `__slopfix.html`, replaces the shown output only when it has fewer P0
+  findings, and is recorded as `slopRetry`. A gradient or emoji the grounding caption mentions is
+  the original's, so it scores P1 and never triggers the retry. Its cost is added to the job and passes through the run's
+  spend ceiling like any other call. `REDESIGN_NO_SLOP_RETRY=1` keeps the lint and turns the retry
+  off. Rule idea from nexu-io/open-design's artifact linter (Apache-2.0), written fresh here.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed
