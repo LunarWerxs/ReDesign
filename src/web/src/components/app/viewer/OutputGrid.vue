@@ -103,6 +103,7 @@ const emptyMsg = computed(() => {
           :scale="store.previewScale"
           :starred="store.isItemStarred(job.id)"
           :item-hidden="store.isItemHidden(job.id)"
+          :run-id="store.manifest?.runId"
           @toggle-star="store.toggleItemStarred(job.id)"
           @toggle-hidden="store.toggleItemHidden(job.id)"
         />

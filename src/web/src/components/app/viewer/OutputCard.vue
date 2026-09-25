@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { CameraIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, LoaderCircleIcon, StarIcon, XIcon } from '@lucide/vue';
+import { CameraIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, FileTextIcon, LoaderCircleIcon, StarIcon, XIcon } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
-import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl } from '@/lib/api';
+import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl, designMdUrl } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
@@ -21,6 +21,8 @@ const props = defineProps<{
   scale: number;
   starred: boolean;
   itemHidden: boolean;
+  /** The open run, so a chosen output can be handed off as a DESIGN.md; no button without it. */
+  runId?: string;
 }>();
 
 defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void }>();
@@ -112,6 +114,16 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.downloadOutput') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip v-if="runId && /\.html?$/i.test(job.file || '')">
+          <TooltipTrigger as-child>
+            <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.downloadDesignMd')">
+              <a :href="designMdUrl(runId, String(job.id))">
+                <FileTextIcon class="size-3.5" />
+              </a>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.downloadDesignMd') }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>

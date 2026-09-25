@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **A chosen redesign exports as a DESIGN.md.** A run used to end at a gallery of standalone HTML
+  mockups, so once you picked a winner nothing carried its look into your real app and the next
+  agent re-guessed the palette and spacing. Each output card now has a DESIGN.md download
+  (`GET /api/runs/:id/design-md?job=<jobId>`, also the `design_md` MCP tool), and the shortlist zip
+  carries one per shortlisted output plus a top-level `DESIGN.md` for the first-starred one. It holds
+  a token front matter (colours by role, type, radii, spacing, shadows, CSS custom properties), a
+  components map with the hover/focus/active states the page styles, Do's and Don'ts derived from
+  those tokens, and the gaps a static read cannot see. It is read offline from the HTML: no model
+  call, no spend.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed
