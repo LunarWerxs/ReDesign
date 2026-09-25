@@ -16,8 +16,10 @@ export function isRendererRequestAllowed(url: string, origin: string): boolean {
 }
 
 /** Make relative URLs resolve through the renderer's explicitly rooted asset route. */
-export function rendererDocument(html: string): string {
+export function rendererDocument(html: string, baseHref = "/asset/"): string {
   // The first base element wins. Put ours before the untrusted document so a generated
   // page cannot redirect relative resource lookups to another origin or local file path.
-  return `<!doctype html><head><base href="/asset/"></head>${html}`;
+  // baseHref is always under /asset/ (the page's own folder inside the served root).
+  const base = baseHref.startsWith("/asset/") ? baseHref.replace(/"/g, "%22") : "/asset/";
+  return `<!doctype html><head><base href="${base}"></head>${html}`;
 }

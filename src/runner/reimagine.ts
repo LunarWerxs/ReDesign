@@ -25,6 +25,7 @@ import {
 import { buildPoolLimits, runJobsByPool, type Job } from "./scheduling";
 import { runOneJob, type JobWorkerContext } from "./job-worker";
 import type { Model } from "../config/models";
+import { ASSET_DETECT_PROMPT, assetCropsEnabled, loadSavedCrops, parseDetectedAssets, saveAssetCrops, type CroppedAsset } from "./asset-crop";
 
 interface ReferenceOptions {
   enabled?: boolean;
@@ -194,6 +195,50 @@ async function captionReference(referenceImages: LoadedImage[], ctx: CaptionCtx)
     { signal: ctx.signal },
   );
   return r ? r.text : null;
+}
+
+// --- Real asset crops -------------------------------------------------------------
+
+// One detection call per input finds its logos and photos, and they are cropped into the run's
+// assets so every model can embed the real ones (see runner/asset-crop.ts). Best-effort: no
+// helper, a failed call or an unusable reply just means the jobs run without crops. The whole
+// body is guarded: this promise is warmed before any job attaches a handler, so it never rejects.
+async function cropInputAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
+  try {
+    return await detectAndCropAssets(input, ctx, runId);
+  } catch (err) {
+    console.warn(`[run ${runId}] asset crops for ${input.name} failed:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+async function detectAndCropAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
+  if (ctx.mock || !ctx.describer || !assetCropsEnabled()) return [];
+  // A retry keeps the crops its run already made, so finished outputs keep their images.
+  const saved = loadSavedCrops(store.runDir(runId), input.id);
+  if (saved) return saved;
+  const images = ctx.imagesFor(input);
+  if (!images.length) return [];
+  const helper = ctx.describer;
+  const r = await withKeyRotation(
+    ctx.km,
+    helper.keyEnv,
+    ({ apiKey }) =>
+      getAdapter(helper, { mock: false }).call({
+        model: { ...helper, maxTokens: 1500 },
+        apiKey,
+        systemContract: "You locate brand and content imagery in UI screenshots. Output JSON only.",
+        userPrompt: ASSET_DETECT_PROMPT,
+        images,
+        timeoutMs: ctx.timeoutMs,
+        signal: ctx.signal,
+        promptLabel: "asset-crop",
+        inputName: input.name,
+      }),
+    { signal: ctx.signal },
+  );
+  if (!r) return [];
+  return saveAssetCrops(store.runDir(runId), input.id, images, parseDetectedAssets(r.text, images.length));
 }
 
 // --- Option / selection resolution --------------------------------------------
@@ -371,6 +416,7 @@ interface RunExecState {
   imagesFor: (input: InputItem) => LoadedImage[];
   describeInput: (input: InputItem) => Promise<string | null>;
   describeReference: () => Promise<string | null>;
+  cropAssets: (input: InputItem) => Promise<CroppedAsset[]>;
   onProgress: (event: Record<string, unknown>) => void;
   markManifestDirty: () => void;
   flushTimer: ReturnType<typeof setInterval>;
@@ -386,7 +432,7 @@ function assertSpendCeiling(manifest: store.Manifest, spec: RunSpec, mock: boole
 
 /** The job phase: enrich the summary, schedule every job, then finalize and persist the manifest. */
 async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
-  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer } = state;
+  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, cropAssets, onProgress, markManifestDirty, flushTimer } = state;
   const describeCtx: RunSummaryDescribeCtx = { opts: { ...opts, label: spec.label }, mock, visionHelper, km, timeoutMs, signal, imagesFor };
   const summaryPromise = describeRunSummary(summary, inputItems[0] as InputItem, describeCtx)
     .then((next) => {
@@ -407,7 +453,11 @@ async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
   // would run, then let the rest be pulled in lazily: describeInput caches its promise, so a
   // job that arrives before its input is warmed simply starts the call itself and every
   // later job for that input shares it.
-  for (const input of inputItems.slice(0, poolConcurrency)) describeInput(input);
+  // Asset crops warm alongside, on the same helper pool and the same cap.
+  for (const input of inputItems.slice(0, poolConcurrency)) {
+    describeInput(input);
+    cropAssets(input);
+  }
   const anyTextOnly = models.some((m) => m.vision === false);
   if (anyTextOnly && referenceImages.length) describeReference();
 
@@ -428,6 +478,7 @@ async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
     imagesFor,
     describeInput,
     describeReference,
+    cropAssets,
     describer: visionHelper,
     referenceImages,
     referenceRels,
@@ -509,6 +560,17 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
     return refCaptionPromise;
   }
 
+  // Crop an input's real logos and photos once (shared across every job for that input).
+  // Caches the PROMISE so concurrent jobs don't trigger duplicate detection calls.
+  const cropCache = new Map<string, Promise<CroppedAsset[]>>();
+  function cropAssets(input: InputItem): Promise<CroppedAsset[]> {
+    const cached = cropCache.get(input.id);
+    if (cached) return cached;
+    const p = cropInputAssets(input, captionCtx, runId);
+    cropCache.set(input.id, p);
+    return p;
+  }
+
   // Debounced manifest persistence as jobs complete.
   let manifestDirty = false;
   // A throw in here would be raised inside a setInterval callback, and src/index.ts installs no
@@ -535,7 +597,7 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
     opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide,
     referenceNote: rs.referenceNote, visionHelper, referenceImages, referenceRels, summary,
     inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById,
-    inputById, imagesFor, describeInput, describeReference, onProgress, markManifestDirty, flushTimer,
+    inputById, imagesFor, describeInput, describeReference, cropAssets, onProgress, markManifestDirty, flushTimer,
   };
 
   try {
