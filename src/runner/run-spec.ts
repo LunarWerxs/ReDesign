@@ -6,6 +6,7 @@ import type { Model } from "../config/models";
 import type { ResolvedPrompt } from "../config/prompts";
 import { currentInputDir, REFERENCE_DIR, resolveReferences, resolveSelection, listInputs, type InputItem } from "../inputResolver";
 import { ensureDir, resolveInside, normalizeSelectionIds, type SelectionInput } from "../util";
+import { assetCropsEnabled } from "./asset-crop";
 import { estimateRunCost } from "./cost";
 import { cfgInt, getKeyManager } from "./helpers";
 import type { RunReimagineOptions } from "./reimagine";
@@ -308,10 +309,11 @@ function summarizeRunSpec(spec: RunSpec): { jobCount: number; assetBytes: number
   const byModel: Record<string, number> = {};
   for (const job of spec.jobs) byModel[job.modelId] = (byModel[job.modelId] || 0) + 1;
   // One inventory caption per selected input, plus a style caption for text-only
-  // runs with references and an untitled-run label request. These calls bill the helper.
+  // runs with references and an untitled-run label request. These calls bill the helper,
+  // as does one asset-crop detection per input unless ASSET_CROPS=0 turned it off.
   const selectedInputs = new Set(spec.jobs.map((job) => job.inputId)).size;
   const hasText = spec.jobs.some((job) => spec.models.find((model) => model.id === job.modelId)?.vision === false);
-  const helperCalls = spec.visionHelper ? selectedInputs + (hasText && spec.referenceRels.length ? 1 : 0) + (spec.label ? 0 : 1) : 0;
+  const helperCalls = spec.visionHelper ? selectedInputs * (assetCropsEnabled() ? 2 : 1) + (hasText && spec.referenceRels.length ? 1 : 0) + (spec.label ? 0 : 1) : 0;
   const helperIds = spec.visionHelper ? [spec.visionHelper.id] : [];
   if (spec.visionHelper && helperCalls) byModel[spec.visionHelper.id] = (byModel[spec.visionHelper.id] || 0) + helperCalls;
   const modelIds = [...new Set([...Object.keys(byModel), ...helperIds])];

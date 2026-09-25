@@ -21,6 +21,7 @@ import { injectOutputHeightMeasure } from "../outputMeasure";
 import { getAdapter, type ProviderError } from "../providers";
 import * as store from "../store";
 import { ensureDir, writeJSON } from "../util";
+import { assetCropBlock, type CroppedAsset } from "./asset-crop";
 import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
 import { brandStyleGuideBlock, groundingBlock, textReferenceBlock, visionReferenceBlock } from "./helpers";
 import type { Job } from "./scheduling";
@@ -43,6 +44,8 @@ export interface JobWorkerContext {
   imagesFor: (input: InputItem) => LoadedImage[];
   describeInput: (input: InputItem) => Promise<string | null>;
   describeReference: () => Promise<string | null>;
+  /** Real logos/photos cropped from the input (one shared, cached call per input). Optional so fixtures can omit it. */
+  cropAssets?: (input: InputItem) => Promise<CroppedAsset[]>;
   describer: Model | null | undefined;
   referenceImages: LoadedImage[];
   referenceRels: string[];
@@ -57,6 +60,7 @@ interface PromptBuild {
   caption: string | null;
   refCaption: string | null;
   prepMs: number;
+  assets?: CroppedAsset[];
 }
 
 // The vision-vs-text-only preflight: builds the prompt/image payload and captions the
@@ -65,9 +69,18 @@ interface PromptBuild {
 // the job loop's — see this file's header for why the body itself is otherwise unchanged.
 // The two branches live in the sibling helpers below, so this stays a dispatcher.
 async function buildJobPrompt(ctx: JobWorkerContext, job: Job, prompt: ResolvedPrompt, input: InputItem, hasVision: boolean, t0: number): Promise<PromptBuild> {
+  // Asset crops run beside the caption, and their wait is prep time too, never generation time.
+  const prepStart = hasVision ? Date.now() : t0;
+  const assetsPromise: Promise<CroppedAsset[]> = ctx.cropAssets ? ctx.cropAssets(input).catch(() => []) : Promise.resolve([]);
   const built = hasVision
     ? await prepareVisionPrompt(ctx, job, prompt, input)
     : await prepareTextOnlyPrompt(ctx, job, prompt, input, t0);
+  const assets = await assetsPromise;
+  built.prepMs = Math.max(built.prepMs, Date.now() - prepStart);
+  if (assets.length) {
+    built.effectivePrompt += assetCropBlock(assets, job.inputId);
+    built.assets = assets;
+  }
   if (ctx.brandStyleGuide) built.effectivePrompt += brandStyleGuideBlock(ctx.brandStyleGuide);
   return built;
 }
@@ -199,6 +212,7 @@ async function saveJobOutput(
       reference: referenceImages.length
         ? { images: referenceRels, note: referenceNote || null, caption: refCaption || null, captionBy: refCaption ? describer?.id || null : null }
         : null,
+      assetCrops: built.assets?.length ? built.assets.map((a) => a.rel) : null,
       createdAt: new Date().toISOString(),
     });
     return { ok: true, extracted, rel };

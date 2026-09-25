@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Redesigns can use the real logos and photos.** Each run's vision helper now also locates the
+  screenshot's logos, product photos, avatars and illustrations (a 0-1000 box per asset, or none
+  when it cannot tell the edges), and they are cropped into `assets/crops/<input>/`. Boxes round
+  outward so no edge pixel is lost; PNG screenshots crop to pixel-exact PNGs, other formats to a
+  lossless SVG frame of the original. Every model, vision or text-only, gets the crops' relative
+  URLs in its prompt, so outputs embed the real brand marks instead of placeholders or invented
+  logos. One extra helper call per input, counted in the pre-run estimate; `ASSET_CROPS=0`
+  turns it off. Idea from abi/screenshot-to-code's asset extraction (MIT), written fresh.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed
