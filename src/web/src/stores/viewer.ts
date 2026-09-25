@@ -8,7 +8,7 @@ import { recordFirstStar } from '@/lib/starTally';
 import { getRunReview, saveRunReview, type RunReview } from '@/lib/review-api';
 import { t } from '@/i18n';
 import { useControlStore } from '@/stores/control';
-import type { InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunRetryResponse, RunSummary } from '@/types';
+import type { ArenaBoard, InputItem, Job, Manifest, RunDeleteResponse, RunEvent, RunRetryResponse, RunSummary } from '@/types';
 
 export interface InputGroup {
   input: InputItem;
@@ -377,6 +377,8 @@ export const useViewerStore = defineStore('viewer', () => {
     // A route-driven reopen is an intentional revalidation, even if it names the current run.
     resetReview(id);
     runId.value = id;
+    // A duel pair belongs to the run it was drawn from; never carry it onto another run.
+    arenaPair.value = null;
     if (!id) {
       acceptManifest(null);
       return;
@@ -442,6 +444,90 @@ export const useViewerStore = defineStore('viewer', () => {
     } catch (e) {
       toast.error(t('viewer.repeatOriginalFailed'), { description: e instanceof Error ? e.message : String(e) });
       return null;
+    }
+  }
+
+  // ── Arena: anonymous A/B pick between two outputs ─────────────────────────────────────────
+  // WHY: stars say "I like this one" but not "better than which". A duel shows two finished
+  // outputs of the SAME input from two DIFFERENT models, with the model names hidden until the
+  // pick, and the server folds each pick into a per-model Elo board (src/arena.ts) that the
+  // Settings sidebar shows and can turn into the default model stack.
+  const arenaPair = ref<[Job, Job] | null>(null);
+  const arenaBoard = ref<ArenaBoard | null>(null);
+  const arenaBusy = ref(false);
+
+  /** Every (input, jobs) group of this run that holds finished outputs from 2+ models. */
+  function arenaCandidates(): Job[][] {
+    const m = manifest.value;
+    if (!m || m.mock) return [];
+    const byInput = new Map<string, Job[]>();
+    for (const job of m.jobs || []) {
+      if (job.status !== 'ok' || !job.file || hiddenItemSet.value.has(itemKey(job.id, m.runId))) continue;
+      const list = byInput.get(job.inputId) || [];
+      list.push(job);
+      byInput.set(job.inputId, list);
+    }
+    return [...byInput.values()].filter((jobs) => new Set(jobs.map((j) => j.modelId)).size >= 2);
+  }
+  const canArena = computed(() => !isLive.value && arenaCandidates().length > 0);
+
+  const pickRandom = <T>(list: T[]): T => list[Math.floor(Math.random() * list.length)]!;
+  /** Draw a fresh random pair (random input, two random models, random sides); null when none. */
+  function nextArenaPair() {
+    const groups = arenaCandidates();
+    if (!groups.length) {
+      arenaPair.value = null;
+      return;
+    }
+    const jobs = pickRandom(groups);
+    const first = pickRandom(jobs);
+    const second = pickRandom(jobs.filter((j) => j.modelId !== first.modelId));
+    arenaPair.value = Math.random() < 0.5 ? [first, second] : [second, first];
+  }
+  function stopArena() {
+    arenaPair.value = null;
+  }
+
+  async function loadArenaBoard() {
+    try {
+      arenaBoard.value = await api.arenaBoard();
+    } catch {
+      /* the board is a hint; a failed read just leaves the last one showing */
+    }
+  }
+
+  /** Record that side `winner` (0 = A, 1 = B) of the current pair is better, then draw again. */
+  async function voteArena(winner: 0 | 1) {
+    const pair = arenaPair.value;
+    const activeRunId = manifest.value?.runId;
+    if (!pair || !activeRunId || arenaBusy.value) return;
+    arenaBusy.value = true;
+    try {
+      const result = await api.arenaVote({
+        runId: activeRunId,
+        winnerJobId: pair[winner].id,
+        loserJobId: pair[winner === 0 ? 1 : 0].id,
+      });
+      arenaBoard.value = { votes: result.votes, standings: result.standings };
+      toast.success(t('viewer.arenaVoted', { winner: result.vote.winnerLabel, loser: result.vote.loserLabel }));
+      if (runId.value === activeRunId) nextArenaPair();
+    } catch (e) {
+      toast.error(t('viewer.arenaVoteFailed'), { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      arenaBusy.value = false;
+    }
+  }
+
+  async function undoArenaVote() {
+    if (arenaBusy.value) return;
+    arenaBusy.value = true;
+    try {
+      arenaBoard.value = await api.arenaUndo();
+      toast.success(t('viewer.arenaUndone'));
+    } catch (e) {
+      toast.error(t('viewer.arenaVoteFailed'), { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      arenaBusy.value = false;
     }
   }
 
@@ -514,5 +600,14 @@ export const useViewerStore = defineStore('viewer', () => {
     persistReview,
     setReviewKeep,
     setReviewNote,
+    arenaPair,
+    arenaBoard,
+    arenaBusy,
+    canArena,
+    nextArenaPair,
+    stopArena,
+    loadArenaBoard,
+    voteArena,
+    undoArenaVote,
   };
 });

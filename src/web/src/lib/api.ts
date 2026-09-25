@@ -1,5 +1,7 @@
 import type {
   AppSettings,
+  ArenaBoard,
+  ArenaVoteResult,
   AuthMe,
   AvailableModelsResponse,
   BootstrapResponse,
@@ -145,6 +147,11 @@ export const api = {
     request<RunRetryResponse>(`/api/runs/${encodeURIComponent(id)}/retry`, postJson(body)),
   repeatRun: (id: string, body: { autoStart?: boolean } = {}) =>
     request<RepeatRunResponse>(`/api/runs/${encodeURIComponent(id)}/repeat`, postJson(body)),
+  // Arena: pairwise "which output is better" votes folded into a per-model Elo board.
+  arenaBoard: () => request<ArenaBoard>('/api/arena'),
+  arenaVote: (body: { runId: string; winnerJobId: string; loserJobId: string }) =>
+    request<ArenaVoteResult>('/api/arena/votes', postJson(body)),
+  arenaUndo: () => request<ArenaBoard>('/api/arena/votes/last', { method: 'DELETE' }),
   healthCheck: (opts?: { signal?: AbortSignal }) =>
     request<HealthCheckResponse>('/api/health-check', { ...postJson({ models: 'all' }), signal: opts?.signal }),
   openOutput: (file: string, target: 'file' | 'folder') =>

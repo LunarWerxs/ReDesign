@@ -130,6 +130,12 @@ export const TOOLS: McpEngineTool[] = [
     run: (a) => post("/api/run", runSubmission(a, "input")),
   },
   {
+    name: "model_leaderboard",
+    description: "Per-model Elo leaderboard built from the owner's pairwise A/B votes in the viewer (best first: rating, wins, losses). Use it to pick which models to include in a run.",
+    inputSchema: obj(),
+    run: () => get("/api/arena"),
+  },
+  {
     name: "repeat_run",
     description: "Repeat a prior run from its durable original recipe. Returns the new run id without reconstructing selections from current UI state.",
     inputSchema: obj({ runId: { type: "string", description: "the run to repeat" } }, ["runId"]),

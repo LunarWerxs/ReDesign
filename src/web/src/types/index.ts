@@ -477,6 +477,26 @@ export interface RepeatRunResponse {
   runId: string;
 }
 
+/** One model's row on the arena board (src/arena.ts): Elo rating from pairwise A/B votes. */
+export interface ArenaStanding {
+  modelId: string;
+  label: string;
+  rating: number;
+  wins: number;
+  losses: number;
+  games: number;
+}
+
+/** GET /api/arena, and the board every vote/undo returns. */
+export interface ArenaBoard {
+  votes: number;
+  standings: ArenaStanding[];
+}
+
+export interface ArenaVoteResult extends ArenaBoard {
+  vote: { winnerModelId: string; loserModelId: string; winnerLabel: string; loserLabel: string };
+}
+
 export interface HealthCheckResponse {
   results?: unknown[];
   keys: KeySnapshot;
