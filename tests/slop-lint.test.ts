@@ -23,7 +23,20 @@ describe("anti-slop lint", () => {
   it("tells emoji icons (P0 when repeated) from emoji-free copy", () => {
     expect(rules(page("", "<div>\u{1F680}</div><div>✨</div><p>Fast</p>"))).toContain("P0 emoji-icon");
     expect(rules(page("", "<div>\u{1F680}</div><p>Fast</p>"))).toContain("P1 emoji-icon");
-    expect(rules(page("", "<p>Next → Settings © 2026</p>"))).not.toContain("P1 emoji-icon");
+    // Text-style glyphs standing alone: only these nodes can discriminate, since mixed copy is never emoji-only.
+    expect(rules(page("", "<span>©</span><span>→</span>")).filter((r) => r.endsWith("emoji-icon"))).toEqual([]);
+  });
+
+  // Contract: a gradient or emoji the grounding caption names is the original's, so it stays a P1 badge
+  // and never buys the paid retry. Regression: every faithful refresh of a purple-branded page re-prompted.
+  it("drops gradients and emoji the original shows from P0 to P1", () => {
+    const purple = page(".hero{background:linear-gradient(135deg,#7c3aed,#db2777)}", "<h1>Hi</h1>");
+    expect(rules(purple, "A purple gradient hero with the logo")).toEqual(["P1 purple-gradient"]);
+    const trust = page(".b{background:linear-gradient(90deg,#2563eb,#06b6d4)}", "<p>x</p>");
+    expect(rules(trust, "Header: blue to teal gradient")).toEqual(["P1 trust-gradient"]);
+    const icons = page("", "<div>\u{1F680}</div><div>✨</div><p>Fast</p>");
+    expect(rules(icons, "Feature list with \u{1F680} and ✨ bullets")).toContain("P1 emoji-icon");
+    expect(rules(icons, "Feature list with plain bullets")).toContain("P0 emoji-icon");
   });
 
   it("flags only figures the grounding caption never mentioned", () => {

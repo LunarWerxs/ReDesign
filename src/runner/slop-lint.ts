@@ -46,7 +46,8 @@ interface SlopSummary {
 
 interface LintOptions {
   /** The grounding caption of the original screenshot. Numbers and phrases found in it are real
-   *  content, not invention, so invented-metric and filler-copy skip them. */
+   *  content, not invention, so invented-metric and filler-copy skip them; a gradient or emoji the
+   *  caption mentions drops from P0 to P1, so no retry is paid to move away from the original. */
   sourceText?: string | null;
 }
 
@@ -231,8 +232,24 @@ function firstFamily(body: string): string | null {
 }
 
 // Emoji_Presentation (not Extended_Pictographic) so text-style glyphs like arrows and (c) stay legal.
-const EMOJI_RE = /\p{Emoji_Presentation}|\p{Extended_Pictographic}️/gu;
-const EMOJI_ONE = /\p{Emoji_Presentation}|\p{Extended_Pictographic}️/u; // non-global: .test() without lastIndex state
+const EMOJI_RE = /\p{Emoji_Presentation}|\p{Extended_Pictographic}\u{FE0F}/gu;
+const EMOJI_ONE = /\p{Emoji_Presentation}|\p{Extended_Pictographic}\u{FE0F}/u; // non-global: .test() without lastIndex state
+
+// Words in the grounding caption that mean the original already had the pattern. Caption text is
+// normalized (lowercase, no spaces), so each entry is matched as a plain substring.
+const PURPLE_WORDS = ["gradient", "purple", "violet", "fuchsia", "magenta", "lavender", "lilac"] as const;
+const TRUST_WORDS = ["gradient", "cyan", "turquoise", "teal", "aqua"] as const;
+const EMOJI_WORDS = ["emoji"] as const;
+
+/** A P0 pattern the original screenshot already shows is fidelity, not slop: it drops to P1 so the
+ *  badge still reports it but no paid retry is spent steering the model away from the original. */
+function inOriginal(seen: boolean, hit: RuleHit): RuleHit {
+  return seen ? { ...hit, message: `${hit.message} (the original shows one too)`, severity: "P1" } : hit;
+}
+
+function captionMentions(doc: LintDoc, words: readonly string[]): boolean {
+  return words.some((w) => doc.source.includes(w));
+}
 
 const FILLER_PHRASES = [
   "unlock the power",
@@ -264,9 +281,9 @@ const SLOP_RULES: readonly SlopRule[] = [
     title: "Purple/violet gradient",
     check: (doc) => {
       const css = cssGradients(doc.css).find((g) => gradientColors(g).some(isPurple));
-      if (css) return [{ message: "a purple or violet gradient, the default AI hero look", snippet: clip(css) }];
+      if (css) return [inOriginal(captionMentions(doc, PURPLE_WORDS), { message: "a purple or violet gradient, the default AI hero look", snippet: clip(css) })];
       const tw = tailwindGradientStops(doc.classLists).find((s) => s.hues.some((h) => h === "purple" || h === "violet" || h === "fuchsia"));
-      return tw ? [{ message: "a purple or violet gradient, the default AI hero look", snippet: clip(tw.classes) }] : [];
+      return tw ? [inOriginal(captionMentions(doc, PURPLE_WORDS), { message: "a purple or violet gradient, the default AI hero look", snippet: clip(tw.classes) })] : [];
     },
   },
   {
@@ -278,9 +295,9 @@ const SLOP_RULES: readonly SlopRule[] = [
         const colors = gradientColors(g);
         return colors.some(isBlue) && colors.some(isCyan);
       });
-      if (css) return [{ message: "a blue-to-cyan 'trust' gradient", snippet: clip(css) }];
+      if (css) return [inOriginal(captionMentions(doc, TRUST_WORDS), { message: "a blue-to-cyan 'trust' gradient", snippet: clip(css) })];
       const tw = tailwindGradientStops(doc.classLists).find((s) => s.hues.some((h) => h === "blue" || h === "indigo") && s.hues.some((h) => h === "cyan" || h === "sky" || h === "teal"));
-      return tw ? [{ message: "a blue-to-cyan 'trust' gradient", snippet: clip(tw.classes) }] : [];
+      return tw ? [inOriginal(captionMentions(doc, TRUST_WORDS), { message: "a blue-to-cyan 'trust' gradient", snippet: clip(tw.classes) })] : [];
     },
   },
   {
@@ -299,8 +316,9 @@ const SLOP_RULES: readonly SlopRule[] = [
     severity: "P0",
     title: "Emoji standing in for icons",
     check: (doc) => {
-      const icons = doc.textNodes.filter((t) => EMOJI_ONE.test(t) && t.replace(EMOJI_RE, "").replace(/[\s‍️]/g, "") === "");
-      if (icons.length >= 2) return [{ message: `${icons.length} emoji used as icons`, snippet: clip(icons.slice(0, 8).join(" ")) }];
+      // Alternation, not a character class: ZWJ and VS16 inside [] read as a misleading class.
+      const icons = doc.textNodes.filter((t) => EMOJI_ONE.test(t) && t.replace(EMOJI_RE, "").replace(/\s/g, "").replace(/‍|️/g, "") === "");
+      if (icons.length >= 2) return [inOriginal(captionMentions(doc, EMOJI_WORDS) || EMOJI_ONE.test(doc.source), { message: `${icons.length} emoji used as icons`, snippet: clip(icons.slice(0, 8).join(" ")) })];
       if (icons.length === 1) return [{ message: "an emoji used as an icon", snippet: clip(icons[0] as string), severity: "P1" }];
       return [];
     },
