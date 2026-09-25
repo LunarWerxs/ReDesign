@@ -23,6 +23,8 @@ const PROMPTS_FILE = path.join(CONFIG_ROOT, "prompts.json");
 const PROMPTS_DEFAULTS_FILE = path.join(CONFIG_ROOT, "prompts.defaults.json");
 const PRICING_FILE = path.join(CONFIG_ROOT, "pricing.json");
 const SHIPPED_BASELINE_FILE = path.join(CONFIG_ROOT, ".reimagine-shipped-baseline.json");
+// User data only (no seed): the owner's pairwise "which is better" votes, see src/arena.ts.
+const ARENA_VOTES_FILE = path.join(CONFIG_ROOT, "arena-votes.json");
 
 fs.mkdirSync(CONFIG_ROOT, { recursive: true });
 
@@ -339,6 +341,7 @@ function providerDefault(provider: string, key: keyof ProviderDefaults): string 
 
 export type { JsonCacheEntry, ProviderDefaults };
 export {
+  ARENA_VOTES_FILE,
   jsonCache,
   MODEL_ARCHIVE_KEY,
   MODEL_PROVIDERS,

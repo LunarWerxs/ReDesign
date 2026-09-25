@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import RunFlyout from '@/components/app/RunFlyout.vue';
 import FilterSelect from '@/components/app/viewer/FilterSelect.vue';
+import ArenaLeaderboard from '@/components/app/viewer/ArenaLeaderboard.vue';
 import { useViewerStore } from '@/stores/viewer';
 import { useControlStore } from '@/stores/control';
 import { starTallyReadout } from '@/lib/starTally';
@@ -457,6 +458,7 @@ function selectCustomInput(event: FocusEvent) {
       <p v-if="starTallyReadout" class="px-3.5 pb-2 pt-1 text-[11.5px] text-muted-foreground/70">
         {{ starTallyReadout }}
       </p>
+      <ArenaLeaderboard />
     </section>
   </div>
 

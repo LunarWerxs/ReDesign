@@ -23,6 +23,7 @@ import * as keys from "./routes/keys";
 import * as runs from "./routes/runs";
 import * as runExport from "./routes/run-export";
 import * as runReviews from "./routes/run-reviews";
+import * as arena from "./routes/arena";
 import * as updates from "./routes/updates";
 import * as events from "./routes/events";
 import * as health from "./routes/health";
@@ -96,6 +97,7 @@ export function createApp(hooks: AppHooks = {}): Hono {
   runs.register(app, deps);
   runExport.register(app, deps);
   runReviews.register(app, deps);
+  arena.register(app, deps);
   updates.register(app, deps);
   events.register(app, deps);
   health.register(app, deps);

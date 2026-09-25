@@ -16,6 +16,15 @@
   spend ceiling like any other call. `REDESIGN_NO_SLOP_RETRY=1` keeps the lint and turns the retry
   off. Rule idea from nexu-io/open-design's artifact linter (Apache-2.0), written fresh here.
 
+- **Arena-style A/B picks rank your models.** The viewer's "Compare A/B" shows two finished outputs
+  of the same screenshot from two different models, names hidden until you pick. Each pick is
+  stored in `<config>/arena-votes.json` (model ids are taken from the run's manifest, never from the
+  browser) and replayed through an Elo update into a per-model ranking shown under the viewer
+  settings, with a button that selects the models holding a win and a rating of 1500 or more as the
+  next run's stack. New routes `GET /api/arena`, `POST /api/arena/votes` and
+  `DELETE /api/arena/votes/last` (undo), and a `model_leaderboard` MCP tool. Mock runs cannot be
+  voted on.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed
