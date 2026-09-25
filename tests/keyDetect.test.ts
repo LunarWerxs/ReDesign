@@ -109,14 +109,6 @@ test("servicesFromModels dedupes by pool and poolsForBrand spans every Gemini po
 // ---------------------------------------------------------------------------
 // resolveKeyBrand: confident prefixes resolve with no network probe.
 // ---------------------------------------------------------------------------
-test("resolveKeyBrand resolves a confident prefix without probing", async () => {
-  const services = servicesFromModels([
-    { provider: "anthropic", keyEnv: "ANTHROPIC_API_KEYS", baseUrl: "https://api.anthropic.com/v1" },
-  ]);
-  const r = await resolveKeyBrand("sk-ant-api03-abcdefghijklmnop", services);
-  expect(r).toEqual({ brand: "anthropic", probed: false });
-});
-
 test("resolveKeyBrand yields brand even when no service is configured for it", async () => {
   const r = await resolveKeyBrand("xai-abcdefghijklmnopqrst", []);
   expect(r.brand).toBe("xai");

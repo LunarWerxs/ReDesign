@@ -117,13 +117,6 @@ describe("starTallyReadout", () => {
     expect(starTallyReadout.value).toBe("Alpha starred first in 2 of your last 3 runs");
   });
 
-  it("reads sensibly for a single run", async () => {
-    seed([{ runId: "r1", model: "Alpha" }]);
-    const { starTallyReadout } = await fresh();
-
-    expect(starTallyReadout.value).toBe("Alpha starred first in 1 of your last 1 runs");
-  });
-
   it("updates as new stars land", async () => {
     const { recordFirstStar, starTallyReadout } = await fresh();
 

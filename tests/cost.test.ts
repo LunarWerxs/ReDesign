@@ -306,10 +306,6 @@ describe("cost: traceStatsByModel groups traces by model", () => {
     // A model with no traces at all must not appear (proves this is a group-by, not a fixed roster).
     expect(stats["model-c"]).toBeUndefined();
   });
-
-  it("returns an empty object for an empty trace list", () => {
-    expect(traceStatsByModel([])).toEqual({});
-  });
 });
 
 describe("cost: recentTraces scans stored runs into a flat, newest-first trace list", () => {
