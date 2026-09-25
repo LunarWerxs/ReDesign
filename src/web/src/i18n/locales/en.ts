@@ -191,6 +191,7 @@ export default {
     hideItem: 'Hide item',
     openOutput: 'Open output',
     downloadOutput: 'Download output',
+    downloadDesignMd: 'Download DESIGN.md (tokens and rules for rebuilding this look)',
     screenshotItem: 'Take screenshot',
     screenshotFailed: 'Screenshot failed: {error}',
     failed: '✗ failed',

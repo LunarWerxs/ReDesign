@@ -70,6 +70,9 @@ export const daemonEventsUrl = '/api/events';
 // never routed through httpJson (see components/app/control/ViewSettings.vue) — the route is
 // same-origin guarded, and a same-origin anchor navigation satisfies that guard on its own.
 export const runDownloadUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/download`;
+// One output's DESIGN.md handoff (tokens, components, rules) - see src/design-md.ts. Same plain-anchor download.
+export const designMdUrl = (runId: string, jobId: string) =>
+  `/api/runs/${encodeURIComponent(runId)}/design-md?job=${encodeURIComponent(jobId)}`;
 
 export const api = {
   bootstrap: () => request<BootstrapResponse>('/api/bootstrap'),

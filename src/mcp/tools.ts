@@ -18,7 +18,7 @@ function base(): string {
   return `http://${host}:${port}`;
 }
 
-async function apiCall(pathname: string, init?: RequestInit): Promise<unknown> {
+async function apiText(pathname: string, init?: RequestInit): Promise<string> {
   let res: Response;
   try {
     res = await fetch(`${base()}${pathname}`, init);
@@ -29,6 +29,10 @@ async function apiCall(pathname: string, init?: RequestInit): Promise<unknown> {
   }
   const text = await res.text();
   if (!res.ok) throw new Error(`RēDesign ${res.status}: ${text || res.statusText}`);
+  return text;
+}
+async function apiCall(pathname: string, init?: RequestInit): Promise<unknown> {
+  const text = await apiText(pathname, init);
   return text ? JSON.parse(text) : {};
 }
 const get = (p: string): Promise<unknown> => apiCall(p);
@@ -134,6 +138,20 @@ export const TOOLS: McpEngineTool[] = [
     description: "Per-model Elo leaderboard built from the owner's pairwise A/B votes in the viewer (best first: rating, wins, losses). Use it to pick which models to include in a run.",
     inputSchema: obj(),
     run: () => get("/api/arena"),
+  },
+  {
+    name: "design_md",
+    description:
+      "Get a DESIGN.md handoff for one chosen output (usually a shortlisted one): token front matter (colors, type, radii, spacing), a components map with styled states, Do's and Don'ts, and known gaps, read statically from its HTML. Use it to carry the picked redesign's look into the real app.",
+    inputSchema: obj({
+      runId: { type: "string", description: "the run id" },
+      job: { type: "string", description: "the job id of the chosen output, from get_run" },
+    }, ["runId", "job"]),
+    run: async (a) => ({
+      runId: str(a.runId),
+      job: str(a.job),
+      markdown: await apiText(`/api/runs/${encodeURIComponent(str(a.runId))}/design-md?job=${encodeURIComponent(str(a.job))}`),
+    }),
   },
   {
     name: "repeat_run",
