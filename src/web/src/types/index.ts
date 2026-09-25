@@ -156,6 +156,29 @@ export interface Job {
   usage?: unknown;
   cost?: JobCost | null;
   note?: string;
+  /** Anti-slop lint score of the saved output (server: src/runner/slop-lint.ts). */
+  slop?: JobSlop | null;
+  /** Present when a P0 finding earned the job its one re-prompt. */
+  slopRetry?: {
+    kept: boolean;
+    before: { p0: number; p1: number; p2: number };
+    after: { p0: number; p1: number; p2: number } | null;
+    firstFile: string | null;
+  };
+}
+
+export interface JobSlopFinding {
+  rule: string;
+  severity: 'P0' | 'P1' | 'P2';
+  message: string;
+  snippet: string;
+}
+
+export interface JobSlop {
+  p0: number;
+  p1: number;
+  p2: number;
+  findings: JobSlopFinding[];
 }
 
 export interface Counts {

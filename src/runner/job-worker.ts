@@ -21,9 +21,10 @@ import { injectOutputHeightMeasure } from "../outputMeasure";
 import { getAdapter, type ProviderError } from "../providers";
 import * as store from "../store";
 import { ensureDir, writeJSON } from "../util";
-import { costForUsage, isMockUsage, type RunCostResult } from "./cost";
+import { type CostBreakdown, costForUsage, isMockUsage, type RunCostResult } from "./cost";
 import { brandStyleGuideBlock, groundingBlock, textReferenceBlock, visionReferenceBlock } from "./helpers";
 import type { Job } from "./scheduling";
+import { lintHtml, slopFixBlock, slopRetryEnabled, summarizeSlop } from "./slop-lint";
 
 type ResolvedPrompt = ReturnType<typeof resolvePrompts>[number];
 
@@ -57,6 +58,8 @@ interface PromptBuild {
   caption: string | null;
   refCaption: string | null;
   prepMs: number;
+  /** Appended to the output filename; the anti-slop retry writes beside the first answer, not over it. */
+  fileSuffix?: string;
 }
 
 // The vision-vs-text-only preflight: builds the prompt/image payload and captions the
@@ -169,7 +172,7 @@ async function saveJobOutput(
 ): Promise<{ ok: true; extracted: ReturnType<typeof extractHtml>; rel: string } | { ok: false; error: string }> {
   const { runId, referenceImages, referenceRels, referenceNote, describer } = ctx;
   const { caption, refCaption } = built;
-  const rel = path.join(job.inputId, `${model.id}__${prompt.id}__v${job.variant}.html`);
+  const rel = path.join(job.inputId, `${model.id}__${prompt.id}__v${job.variant}${built.fileSuffix || ""}.html`);
   const abs = path.join(store.runDir(runId), rel);
   try {
     const extracted = extractHtml(result.text);
@@ -254,7 +257,63 @@ async function finalizeJobResult(
   recordJobUsageAndCost(ctx.manifest, job, model, result);
   const saved = await saveJobOutput(ctx, job, model, prompt, input, result, built, keyMask);
   if (!saved.ok) return { ok: false, error: saved.error };
-  return applyOutputOutcome(job, ctx.runId, saved.rel, saved.extracted, result);
+  const outcome = applyOutputOutcome(job, ctx.runId, saved.rel, saved.extracted, result);
+  // Free, local anti-slop score of the saved redesign (see slop-lint.ts); the gallery badges it
+  // and runOneJob spends one retry on a P0. The caption lets it tell real figures from invented ones.
+  if (outcome.ok) job.slop = summarizeSlop(lintHtml(saved.extracted.html, { sourceText: built.caption }));
+  return outcome;
+}
+
+// Adds a second call's cost onto the first, so a retried job's cost shows everything it spent.
+function sumCost(a: CostBreakdown | null | undefined, b: CostBreakdown | null | undefined): CostBreakdown | null {
+  if (!a || !b) return a || b || null;
+  return {
+    ...a,
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cacheTokens: a.cacheTokens + b.cacheTokens,
+    inputCost: a.inputCost + b.inputCost,
+    outputCost: a.outputCost + b.outputCost,
+    totalCost: a.totalCost + b.totalCost,
+    estimate: a.estimate || b.estimate,
+    priced: a.priced && b.priced,
+    cacheAccountingPartial: a.cacheAccountingPartial || b.cacheAccountingPartial,
+  };
+}
+
+// One re-prompt for an output the anti-slop lint scored P0: the findings ride along as a fix list.
+// The retry writes a sibling file and is KEPT only when it ends ok with fewer P0 findings; any
+// other outcome (worse, failed, cancelled, spend ceiling hit) restores the first answer as it was.
+// Either way the job's cost includes the retry, because the provider billed it.
+async function retrySloppyOutput(
+  ctx: JobWorkerContext,
+  job: Job,
+  model: Model,
+  prompt: ResolvedPrompt,
+  input: InputItem,
+  adapter: ReturnType<typeof getAdapter>,
+  built: PromptBuild,
+  maxAttempts: number,
+): Promise<void> {
+  const first = job.slop;
+  if (!first || first.p0 === 0 || !slopRetryEnabled() || ctx.signal?.aborted) return;
+  const before = { ...job };
+  job.note = `anti-slop retry: ${first.findings.filter((f) => f.severity === "P0").map((f) => f.rule).join(", ")}`;
+  ctx.onProgress({ type: "job", runId: ctx.runId, job });
+
+  const retryBuilt: PromptBuild = { ...built, effectivePrompt: built.effectivePrompt + slopFixBlock(first.findings), fileSuffix: "__slopfix" };
+  await runJobAttempts(ctx, job, model, prompt, input, adapter, retryBuilt, maxAttempts);
+
+  const retryCost = job.cost !== before.cost ? job.cost : null;
+  const after = job.status === "ok" ? job.slop : null;
+  const kept = !!after && after.p0 < first.p0;
+  if (!kept) {
+    for (const key of Object.keys(job)) if (!(key in before)) Reflect.deleteProperty(job, key);
+    Object.assign(job, before);
+  }
+  job.cost = sumCost(before.cost, retryCost);
+  job.slopRetry = { kept, before: { p0: first.p0, p1: first.p1, p2: first.p2 }, after: after ? { p0: after.p0, p1: after.p1, p2: after.p2 } : null, firstFile: before.file };
+  job.note = kept ? `anti-slop retry kept: P0 ${first.p0} -> ${after?.p0 ?? 0}` : `anti-slop retry not kept (${after ? `P0 ${after.p0}` : "retry failed"}), first answer shown`;
 }
 
 type KeyAcquisition = Awaited<ReturnType<KeyManager["acquireOrWait"]>>;
@@ -393,6 +452,7 @@ export async function runOneJob(job: Job, ctx: JobWorkerContext): Promise<void> 
 
       const maxAttempts = km.attemptBudget(model.keyEnv);
       const lastErr = await runJobAttempts(ctx, job, model, prompt, input, adapter, built, maxAttempts);
+      if (job.status === "ok") await retrySloppyOutput(ctx, job, model, prompt, input, adapter, built, maxAttempts);
 
       if (job.status !== "ok" && job.status !== "cancelled" && job.status !== "skipped") {
         job.status = "error";

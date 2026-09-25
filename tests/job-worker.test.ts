@@ -12,13 +12,25 @@ const fixture = path.join(ROOT, "tests", "fixtures", "job-worker-boundary.fixtur
 
 interface FixtureResult {
   calls: number;
-  job: { status: string; attempts: number; error: string | null; wrapped: boolean; truncated?: boolean; note?: string; usage: unknown };
+  job: {
+    status: string;
+    attempts: number;
+    error: string | null;
+    wrapped: boolean;
+    truncated?: boolean;
+    note?: string;
+    usage: unknown;
+    file?: string | null;
+    slop?: { p0: number; findings: { rule: string }[] } | null;
+    slopRetry?: { kept: boolean; before: { p0: number }; after: { p0: number } | null; firstFile: string | null };
+  };
   counts: { total: number; done: number; ok: number; error: number; skipped: number };
   output: string | null;
   meta: Record<string, unknown> | null;
+  retryPromptHasFindings?: boolean;
 }
 
-function runFixture(mode: "missing-caption" | "prose" | "fragment" | "cancelled-caption"): FixtureResult {
+function runFixture(mode: "missing-caption" | "prose" | "fragment" | "cancelled-caption" | "slop-retry"): FixtureResult {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "redesign-job-worker-"));
   try {
     const proc = Bun.spawnSync({
@@ -83,5 +95,23 @@ describe("job worker prerequisites and output validation", () => {
     expect(result.calls).toBe(0);
     expect(result.job.status).toBe("cancelled");
     expect(result.counts).toEqual({ total: 1, done: 1, ok: 0, error: 0, skipped: 1 });
+  }, 60_000);
+
+  // Contract: a P0 anti-slop finding earns exactly one re-prompt carrying the findings, and a
+  // cleaner retry replaces the shown output while the first answer stays on disk. Regression: the
+  // retry never firing, looping, or overwriting the first file. Seam: runOneJob's provider boundary.
+  it("re-prompts once with the findings when the anti-slop lint scores the output P0, and keeps a cleaner retry", () => {
+    const result = runFixture("slop-retry");
+
+    expect(result.calls).toBe(2);
+    expect(result.retryPromptHasFindings).toBe(true);
+    expect(result.job.status).toBe("ok");
+    expect(result.job.slopRetry?.kept).toBe(true);
+    expect(result.job.slopRetry?.before.p0).toBe(2);
+    expect(result.job.slopRetry?.after?.p0).toBe(0);
+    expect(result.job.file).toMatch(/__slopfix\.html$/);
+    expect(result.job.slopRetry?.firstFile).toMatch(/__v1\.html$/);
+    expect(result.output).not.toContain("linear-gradient");
+    expect(result.counts).toEqual({ total: 1, done: 1, ok: 1, error: 0, skipped: 0 });
   }, 60_000);
 });

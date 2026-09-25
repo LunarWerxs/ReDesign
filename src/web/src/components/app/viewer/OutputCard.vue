@@ -54,6 +54,26 @@ async function takeScreenshot() {
   }
 }
 
+// Anti-slop lint badge: the worst severity the server's rule table found in this output, with
+// every finding in the tooltip, so a generic-looking redesign is flagged before anyone opens it.
+const slopBadge = computed(() => {
+  const slop = props.job.slop;
+  if (!slop || !slop.findings.length) return null;
+  const [severity, count, cls] =
+    slop.p0 > 0 ? (['P0', slop.p0, 'border-destructive/50 text-destructive'] as const)
+    : slop.p1 > 0 ? (['P1', slop.p1, 'border-warning/50 text-warning'] as const)
+    : (['P2', slop.p2, 'text-muted-foreground'] as const);
+  return { text: t('viewer.slopBadge', { severity, count }), cls };
+});
+
+const slopRetryText = computed(() => {
+  const retry = props.job.slopRetry;
+  if (!retry) return '';
+  return retry.kept
+    ? t('viewer.slopRetryKept', { before: retry.before.p0, after: retry.after?.p0 ?? 0 })
+    : t('viewer.slopRetryDropped');
+});
+
 const sub = () => {
   let s = props.promptLabel;
   if (props.job.variant > 1) s += ` · v${props.job.variant}`;
@@ -76,6 +96,23 @@ const sub = () => {
       <span class="size-2.5 shrink-0 rounded-full" :style="{ background: modelColor || '#888' }" />
       <span class="min-w-0 truncate text-[13px] font-bold">{{ modelLabel }}</span>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ sub() }}</span>
+      <Tooltip v-if="slopBadge">
+        <TooltipTrigger as-child>
+          <span
+            class="shrink-0 cursor-default rounded border px-1.5 text-[11px] font-medium"
+            :class="slopBadge.cls"
+            tabindex="0"
+            :aria-label="`${t('viewer.slopTitle')}: ${slopBadge.text}`"
+          >{{ slopBadge.text }}</span>
+        </TooltipTrigger>
+        <TooltipContent class="max-w-xs text-[12px] leading-snug">
+          <p class="mb-1 font-bold">{{ t('viewer.slopTitle') }}</p>
+          <ul class="space-y-0.5">
+            <li v-for="(f, i) in job.slop?.findings ?? []" :key="i">{{ f.severity }} {{ f.rule }}: {{ f.message }}</li>
+          </ul>
+          <p v-if="slopRetryText" class="mt-1">{{ slopRetryText }}</p>
+        </TooltipContent>
+      </Tooltip>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
         <Tooltip>
