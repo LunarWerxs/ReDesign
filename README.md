@@ -57,6 +57,7 @@ Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On
 - **One dead key doesn't cost you the batch.** If a model fails or gets skipped because its keys are cooling down, retry just those jobs rather than paying for the whole fan-out again. Any past run can also be reloaded into the control panel exactly as it was and run again.
 - **A queue you control.** Park several batches before spending keys, start them together, add more work behind a live run, and drag waiting batches into the order you want.
 - **Paste your keys, skip the setup.** Drop in one key or a whole pile at once. It works out which service each belongs to, checking live when a key could belong to more than one, and files them in the right pool. Give each provider a stack of keys and it cycles through them, quietly benching the ones that start failing, then bringing them back later.
+- **Checks what it made is readable.** One click on an output card rates its text contrast against WCAG AA from the rendered pixels, so light text over a photo or gradient gets flagged, not just bad CSS colours.
 - **Safe by design.** The HTML each model writes runs in a locked-down iframe. You can click around in it, but it cannot touch your data.
 - **It knows what it costs.** A per-run cost meter, plus an estimate before you hit Run, so a big fan-out never surprises you.
 - **It tells you when it's finished.** A fan-out runs for minutes, so if you have tabbed away it raises a desktop notification rather than a toast you will never see.

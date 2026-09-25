@@ -192,6 +192,11 @@ describe("routes/output.ts", () => {
     const res = await app.request("/api/output/screenshot", { headers: CROSS_SITE_HEADERS });
     expect(res.status).toBe(403);
   });
+
+  it("GET /api/output/contrast rejects a cross-site request before spawning a renderer", async () => {
+    const res = await app.request("/api/output/contrast", { headers: CROSS_SITE_HEADERS });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("jsonBodyLimit: default 5 MB cap vs. the two upload routes' larger cap", () => {

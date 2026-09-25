@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Text contrast check on every output card.** A new contrast button in the viewer rates each
+  generated redesign against WCAG AA from its rendered pixels, not its CSS: for every line of text
+  on the first screen it takes the pixels around the line, finds the dominant light and dark
+  colours and compares them, so light text over a photo, gradient or translucent layer is caught.
+  The card then shows a pass badge or the worst ratio with the failing line. Also available as
+  `GET /api/output/contrast?file=` (add `level=AAA` for the stricter level) and as the
+  `check_contrast` MCP tool. The method is adapted from the idea behind Flutter's text contrast
+  guideline.
+
 ## [1.6.8] - 2026-09-20
 
 ### Fixed
