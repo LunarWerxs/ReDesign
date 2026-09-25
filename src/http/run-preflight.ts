@@ -89,7 +89,7 @@ function optionsFor(body: RunBody): RunReimagineOptions {
     maxImagesPerInput: body.maxImages, concurrency: body.concurrency, poolConcurrency: body.poolConcurrency,
     timeoutMs: body.timeoutMs as number | undefined,
     reference: body.reference as ReferenceOptions | null | undefined,
-    brandStyleGuide: body.brandStyleGuide, maxCostUsd: body.maxCostUsd,
+    brandStyleGuide: body.brandStyleGuide, maxCostUsd: body.maxCostUsd, selfCheck: body.selfCheck === true,
   };
 }
 

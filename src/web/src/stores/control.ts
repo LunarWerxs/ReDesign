@@ -76,6 +76,7 @@ export const useControlStore = defineStore('control', () => {
     selReference: state.selReference,
     referenceOn: state.referenceOn,
     mock: state.mock,
+    selfCheck: state.selfCheck,
     modelQty: state.modelQty,
     maxCostUsd: state.maxCostUsd,
     customOn: state.customOn,

@@ -72,6 +72,7 @@ const runProperties = {
   model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
   brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
   mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+  self_check: { type: "boolean", description: "render each output at desktop and phone width and let its model correct it once (one extra call per vision-model job)" },
   concurrency: { type: "number", description: "max parallel calls across the whole run" },
   max_images: { type: "number", description: "cap reference images per input group" },
   max_cost: { type: "number", description: "optional USD ceiling; must be finite and nonnegative" },

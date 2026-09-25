@@ -249,6 +249,9 @@ export default {
     advancedDescription: 'Show less commonly changed run options',
     mock: 'Mock mode',
     mockDescription: 'Generate placeholder outputs instantly, no AI calls, no quota spent',
+    selfCheck: 'Self-check',
+    selfCheckDescription:
+      'Each model sees desktop and phone renders of its own output next to the original and fixes it once. One extra call per vision model output, counted in the estimate as a lower bound (that call also sends the renders and the HTML); needs Edge or Chrome.',
     customPrompt: 'Custom prompt',
     customPromptDescription: 'Add a one-off prompt to this run',
     customPlaceholder: 'Optional. Runs in addition to the prompt presets you pick.',

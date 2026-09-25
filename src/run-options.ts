@@ -44,6 +44,8 @@ export function buildMcpRunBody(input: Record<string, unknown>, inputName: "inpu
     modelQuantities: parseModelQuantities(input.model_quantities),
     brandStyleGuide: typeof input.brand_style_guide === "string" ? input.brand_style_guide : null,
     mock: input.mock === true,
+    // Only when asked for, so a plain recipe's wire body is unchanged.
+    ...(input.self_check === true ? { selfCheck: true } : {}),
     concurrency: input.concurrency,
     maxImages: input.max_images,
     label: input.label,

@@ -81,6 +81,7 @@ export async function runCmd(args: Args): Promise<void> {
     modelQuantities: parseModelQuantities(args["model-quantities"]),
     brandStyleGuide: readBrandStyleGuide(args),
     mock: !!args.mock || process.env.MOCK === "1",
+    selfCheck: !!args["self-check"],
     concurrency: Number.parseInt(String(args.concurrency), 10) || undefined,
     poolConcurrency: Number.parseInt(String(args["pool-concurrency"]), 10) || undefined,
     maxImagesPerInput: Number.parseInt(String(args["max-images"]), 10) || undefined,
@@ -89,7 +90,7 @@ export async function runCmd(args: Args): Promise<void> {
   };
   console.log(
     C.bold("Starting run  ") +
-      C.dim(`inputs=${opts.inputs} models=${opts.models} variants=${opts.variants} mock=${opts.mock}`),
+      C.dim(`inputs=${opts.inputs} models=${opts.models} variants=${opts.variants} mock=${opts.mock}${opts.selfCheck ? " self-check=on" : ""}`),
   );
   const manifest: Manifest = await runReimagine({
     ...opts,

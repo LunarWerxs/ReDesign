@@ -42,6 +42,8 @@ interface Job {
     after: { p0: number; p1: number; p2: number } | null;
     firstFile: string | null;
   };
+  /** Set only when the run had self-check on: what the render-and-review pass did. */
+  selfCheck?: import("./self-check").SelfCheckOutcome;
   [key: string]: unknown;
 }
 

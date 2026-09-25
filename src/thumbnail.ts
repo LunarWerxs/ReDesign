@@ -245,8 +245,23 @@ async function stopRenderer(child: ReturnType<typeof spawn>): Promise<void> {
   }
 }
 
+/**
+ * Tallest full-page capture, in CSS pixels. A runaway page (an infinite list, a 100vh loop) must
+ * not become a 40,000px PNG that a vision model rejects outright, so the self-check pass stops here.
+ */
+const MAX_FULL_PAGE_HEIGHT = 6000;
+
+interface RenderSize {
+  width: number;
+  height: number;
+  /** Capture the whole scrolled page (capped at MAX_FULL_PAGE_HEIGHT) instead of just the viewport. */
+  fullPage?: boolean;
+  /** Emulate a phone: mobile viewport meta, touch and scrollbars as a handset would lay them out. */
+  mobile?: boolean;
+}
+
 /** Render an HTML file to a PNG in an isolated headless Chromium renderer. Rejects on failure/timeout. */
-export async function renderHtmlToPng(fullHtml: string, outPng: string, size = { width: 1200, height: 900 }, assetRoot?: string): Promise<void> {
+export async function renderHtmlToPng(fullHtml: string, outPng: string, size: RenderSize = { width: 1200, height: 900 }, assetRoot?: string): Promise<void> {
   const browser = resolveChromiumBrowser();
   if (!browser) throw new Error("No Edge or Chrome install found to render a preview");
   const profileDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-thumb-"));
@@ -274,7 +289,7 @@ export async function renderHtmlToPng(fullHtml: string, outPng: string, size = {
   }
 }
 
-async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string, origin: string, outPng: string, size: { width: number; height: number }): Promise<void> {
+async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string, origin: string, outPng: string, size: RenderSize): Promise<void> {
   if (child.exitCode !== null) throw new Error("Renderer exited before DevTools started");
   const browserUrl = await waitForDevTools(profileDir);
   const port = Number(new URL(browserUrl).port);
@@ -301,12 +316,12 @@ async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string
     });
     try {
       await pageCdp.send("Page.enable");
-      await pageCdp.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: false });
+      await pageCdp.send("Emulation.setDeviceMetricsOverride", { width: size.width, height: size.height, deviceScaleFactor: 1, mobile: !!size.mobile });
       await pageCdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
       const loaded = pageCdp.once("Page.loadEventFired");
       await pageCdp.send("Page.navigate", { url: `${origin}/document` });
       await Promise.race([loaded, delay(4_000)]);
-      const screenshot = await pageCdp.send("Page.captureScreenshot", { format: "png", fromSurface: true });
+      const screenshot = await pageCdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, ...(size.fullPage ? await fullPageClip(pageCdp, size) : {}) });
       await fs.promises.writeFile(outPng, Buffer.from(String(screenshot.data), "base64"));
     } finally {
       unsubscribe();
@@ -316,6 +331,15 @@ async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string
     cdp?.close();
     browserCdp.close();
   }
+}
+
+// The whole laid-out page at the viewport's width, so a section below the fold (the part a
+// one-shot model most often drops or breaks) is in the capture too.
+async function fullPageClip(cdp: CdpClient, size: RenderSize): Promise<Record<string, unknown>> {
+  const metrics = await cdp.send("Page.getLayoutMetrics");
+  const content = (metrics.cssContentSize || metrics.contentSize) as { height?: number } | undefined;
+  const height = Math.min(MAX_FULL_PAGE_HEIGHT, Math.max(size.height, Math.ceil(Number(content?.height) || size.height)));
+  return { captureBeyondViewport: true, clip: { x: 0, y: 0, width: size.width, height, scale: 1 } };
 }
 
 function mimeFor(file: string): string {

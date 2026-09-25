@@ -200,6 +200,7 @@ async function submitRetryRuns(
           maxImages: config.maxImagesPerInput as number | undefined,
           reference: reference?.images ? { images: reference.images, note: reference.note || undefined } : null,
           brandStyleGuide: typeof config.brandStyleGuide === "string" ? config.brandStyleGuide : null,
+          selfCheck: config.selfCheck === true,
           autoStart,
         }),
       );
