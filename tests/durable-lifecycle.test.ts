@@ -78,10 +78,11 @@ describe("durable run lifecycle", () => {
   it("records every billed helper and generation call exactly once in the live-run ledger", () => {
     const result = runFixture(newRoot(), "ledger") as { fetches: number; status: string; purposes: string[]; jobCount: number; totalCost: number; expectedCost: number };
 
-    expect(result.fetches).toBe(3);
+    // The input's logo/photo detection (runner/asset-crop.ts) is a billed helper call too.
+    expect(result.fetches).toBe(4);
     expect(result.status).toBe("done");
-    expect(result.purposes.sort()).toEqual(["caption", "generation", "title"]);
-    expect(result.jobCount).toBe(3);
+    expect(result.purposes.sort()).toEqual(["asset_crop", "caption", "generation", "title"]);
+    expect(result.jobCount).toBe(4);
     expect(result.totalCost).toBe(result.expectedCost);
   }, 60_000);
 });

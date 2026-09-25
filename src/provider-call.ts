@@ -14,7 +14,7 @@ export interface ProviderUsageEntry {
   provider: string;
   apiModel: string | null;
   pool: string;
-  purpose: "generation" | "caption" | "reference_caption" | "title" | "health" | "other";
+  purpose: "generation" | "caption" | "reference_caption" | "title" | "health" | "asset_crop" | "other";
   promptLabel: string | null;
   usage: unknown;
   finishReason: string | null;
@@ -157,7 +157,7 @@ function acquireNetwork(pool: string, context: ProviderRunContext | undefined, s
 function record(meta: CallMeta, result: ProviderResponseLike | UsageErrorLike, status: "ok" | "error", error: unknown, startedAt: string, ms: number): void {
   const context = runs.getStore();
   if (!context?.recordUsage || !meta.modelId || !meta.provider) return;
-  const purpose = meta.promptLabel === "caption" ? "caption" : meta.promptLabel === "ref-caption" ? "reference_caption" : meta.promptLabel === "run-label" ? "title" : meta.promptLabel === "healthcheck" ? "health" : meta.promptLabel ? "generation" : "other";
+  const purpose = meta.promptLabel === "caption" ? "caption" : meta.promptLabel === "ref-caption" ? "reference_caption" : meta.promptLabel === "run-label" ? "title" : meta.promptLabel === "healthcheck" ? "health" : meta.promptLabel === "asset-crop" ? "asset_crop" : meta.promptLabel ? "generation" : "other";
   context.recordUsage({
     modelId: meta.modelId,
     provider: meta.provider,

@@ -107,7 +107,7 @@ if (mode === "cancel-queued") {
   const runId = await create(recipe);
   const manifest = await settle(runId);
   const providerCalls = (manifest.providerCalls || []) as Array<{ purpose?: string }>;
-  const expectedCost = costForUsage("gemini-flash-latest", { promptTokenCount: 10, candidatesTokenCount: 5 }).totalCost * 3;
+  const expectedCost = costForUsage("gemini-flash-latest", { promptTokenCount: 10, candidatesTokenCount: 5 }).totalCost * 4;
   process.stdout.write(`${JSON.stringify({ fetches, status: manifest.status, purposes: providerCalls.map((call) => call.purpose), jobCount: manifest.cost?.jobCount, totalCost: manifest.cost?.totalCost, expectedCost })}\n`);
 } else {
   throw new Error(`invalid mode ${mode}`);

@@ -360,7 +360,7 @@ function saveAssetCrops(runDir: string, inputId: string, images: LoadedImage[], 
     if (!img) continue;
     const buf = Buffer.from(img.data, "base64");
     const info = imageInfo(buf);
-    if (!info || info.orientation !== 1) continue;
+    if (info?.orientation !== 1) continue;
     const rect = normalizeBox(asset.box, info.width, info.height);
     if (!rect) continue;
     if (img.mime === "image/png" && !decoded.has(asset.image)) decoded.set(asset.image, decodePng(buf));
