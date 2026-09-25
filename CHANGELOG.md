@@ -12,7 +12,7 @@
   asking for the corrected page. A revision that errors, refuses or truncates is discarded and
   the first output is restored byte for byte, so the pass never turns a success into a failure.
   The renders stay beside the output, the job records what the pass did (`selfCheck`), and the
-  pre-run estimate counts the extra call. Idea from abi/screenshot-to-code's screenshot preview
+  pre-run estimate (web, CLI and MCP) counts the extra call as a lower bound. Idea from abi/screenshot-to-code's screenshot preview
   tool (MIT); written fresh.
 
 ## [1.6.8] - 2026-09-20

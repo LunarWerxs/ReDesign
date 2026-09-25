@@ -421,7 +421,8 @@ async function runSelfCheckPass(ctx: JobWorkerContext, job: Job, model: Model, p
   const revised = job.status === "ok" && !job.truncated;
 
   // Per-job cost/usage stay the first generation's so history-based estimates compare like with
-  // like; the run's own ledger already counted the follow-up call.
+  // like; the run's own ledger already counted the follow-up call. A revised output's sidecar
+  // .meta.json deliberately keeps the follow-up call's usage: it describes the HTML beside it.
   Object.assign(job, { usage: first.usage, cost: first.cost });
   if (revised) {
     job.note = [first.note, "self-checked: revised after reviewing its desktop and phone renders"].filter(Boolean).join("; ");

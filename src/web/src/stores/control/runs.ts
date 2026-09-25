@@ -382,7 +382,11 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     const nP = state.selPrompts.value.length + (state.customOn.value && state.custom.value.trim() ? 1 : 0);
     const base = state.selInputs.value.length * nP;
     const jobCountByModel: Record<string, number> = {};
-    for (const id of modelIds) jobCountByModel[id] = base * Math.max(1, state.modelQty.value[id] || 1);
+    // Self-check sends every vision job one follow-up call, so count those jobs twice,
+    // the same way the server's summarizeRunSpec does for preflight and MCP.
+    const visionById = new Map(state.models.value.map((m) => [m.id, m.vision !== false] as const));
+    const callsPerJob = (id: string) => (state.selfCheck.value && visionById.get(id) !== false ? 2 : 1);
+    for (const id of modelIds) jobCountByModel[id] = base * Math.max(1, state.modelQty.value[id] || 1) * callsPerJob(id);
     const seq = ++estimateSeq;
     state.costEstimateLoading.value = true;
     try {
@@ -407,6 +411,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
       [...state.selModels.value].sort().join(','),
       state.estimate.value.count,
       JSON.stringify(state.modelQty.value),
+      state.selfCheck.value,
     ],
     scheduleCostEstimate,
     { immediate: true },

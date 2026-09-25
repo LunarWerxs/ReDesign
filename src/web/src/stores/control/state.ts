@@ -111,7 +111,7 @@ export function createControlState() {
   const selectionSeeded = useStorage('redesign.selection-seeded', false);
   const mock = ref(false);
   // Self-check: one extra call per vision job in which the model reviews desktop and phone
-  // renders of its own output. Remembered like any other choice; the cost estimate shows it.
+  // renders of its own output. Remembered like any other choice; the cost estimate counts it (runs.ts refreshCostEstimate).
   const selfCheck = useStorage('redesign.self-check', false);
   // Per-model copy count keyed by model id. Absence means the default of 1, so the
   // map only ever holds entries > 1 (see setModelQty). Replaces the old single
