@@ -28,6 +28,7 @@ import { readJSON } from "./util";
 import { currentInputDir } from "./inputResolver";
 import { resolveChromiumBrowser } from "./portable-window.mjs";
 import { isRendererRequestAllowed, rendererDocument } from "./renderer-policy";
+import type { TextBox } from "./contrast";
 
 const RENDER_TIMEOUT_MS = 30_000;
 const MAX_CONCURRENT_RENDERS = 2;
@@ -260,8 +261,51 @@ interface RenderSize {
   mobile?: boolean;
 }
 
+export interface RenderOptions {
+  /** Serve this enclosing folder (the run dir) too, so an output's ../assets/crops/ links load. */
+  assetRoot?: string;
+  /** Also return every painted line of text in the viewport, for the pixel contrast check (src/contrast.ts). */
+  collectTextBoxes?: boolean;
+}
+
+/** Most text lines one render reports: bounds the page-side walk on a pathological document. */
+const MAX_TEXT_BOXES = 400;
+
+/**
+ * Page-side walk of every visible text node, one box per rendered line, clipped to the viewport
+ * the screenshot covers. WHY per line: a wrapped paragraph's single bounding box would also
+ * sweep in whatever sits beside its short last line.
+ */
+const TEXT_BOXES_SCRIPT = `(() => {
+  const out = [];
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const root = document.body || document.documentElement;
+  if (!root) return out;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  const skip = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, TITLE: 1 };
+  let node;
+  while ((node = walker.nextNode()) && out.length < ${MAX_TEXT_BOXES}) {
+    const text = (node.textContent || '').replace(/\\s+/g, ' ').trim();
+    const el = node.parentElement;
+    if (!text || !el || skip[el.tagName]) continue;
+    const style = getComputedStyle(el);
+    if (style.visibility !== 'visible' || Number(style.opacity) === 0) continue;
+    range.selectNodeContents(node);
+    for (const r of range.getClientRects()) {
+      const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top);
+      const x1 = Math.min(vw, r.right), y1 = Math.min(vh, r.bottom);
+      if (x1 - x0 < 2 || y1 - y0 < 2) continue;
+      out.push({ text: text.slice(0, 80), x: x0, y: y0, width: x1 - x0, height: y1 - y0,
+        fontSizePx: parseFloat(style.fontSize) || 16, fontWeight: parseInt(style.fontWeight, 10) || 400 });
+      if (out.length >= ${MAX_TEXT_BOXES}) break;
+    }
+  }
+  return out;
+})()`;
+
 /** Render an HTML file to a PNG in an isolated headless Chromium renderer. Rejects on failure/timeout. */
-export async function renderHtmlToPng(fullHtml: string, outPng: string, size: RenderSize = { width: 1200, height: 900 }, assetRoot?: string): Promise<void> {
+export async function renderHtmlToPng(fullHtml: string, outPng: string, size: RenderSize = { width: 1200, height: 900 }, options: RenderOptions = {}): Promise<{ textBoxes: TextBox[] }> {
   const browser = resolveChromiumBrowser();
   if (!browser) throw new Error("No Edge or Chrome install found to render a preview");
   const profileDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-thumb-"));
@@ -270,12 +314,12 @@ export async function renderHtmlToPng(fullHtml: string, outPng: string, size: Re
   try {
     await acquireRenderSlot();
     try {
-      renderer = await startRendererServer(fullHtml, assetRoot);
+      renderer = await startRendererServer(fullHtml, options.assetRoot);
       child = spawn(browser.path, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--remote-allow-origins=*", `--user-data-dir=${path.join(profileDir, "profile")}`, `--window-size=${size.width},${size.height}`], { stdio: "ignore", windowsHide: true });
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         const deadline = new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Render timed out")), RENDER_TIMEOUT_MS); });
-        await Promise.race([renderWithCdp(child, profileDir, renderer.origin, outPng, size), deadline]);
+        return await Promise.race([renderWithCdp(child, profileDir, renderer.origin, outPng, size, options), deadline]);
       } finally {
         if (timeout) clearTimeout(timeout);
       }
@@ -289,7 +333,7 @@ export async function renderHtmlToPng(fullHtml: string, outPng: string, size: Re
   }
 }
 
-async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string, origin: string, outPng: string, size: RenderSize): Promise<void> {
+async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string, origin: string, outPng: string, size: RenderSize, options: RenderOptions): Promise<{ textBoxes: TextBox[] }> {
   if (child.exitCode !== null) throw new Error("Renderer exited before DevTools started");
   const browserUrl = await waitForDevTools(profileDir);
   const port = Number(new URL(browserUrl).port);
@@ -321,8 +365,16 @@ async function renderWithCdp(child: ReturnType<typeof spawn>, profileDir: string
       const loaded = pageCdp.once("Page.loadEventFired");
       await pageCdp.send("Page.navigate", { url: `${origin}/document` });
       await Promise.race([loaded, delay(4_000)]);
+      // Read the text boxes BEFORE the capture so both describe the same settled layout.
+      let textBoxes: TextBox[] = [];
+      if (options.collectTextBoxes) {
+        const evaluated = await pageCdp.send("Runtime.evaluate", { expression: TEXT_BOXES_SCRIPT, returnByValue: true });
+        const value = (evaluated.result as { value?: unknown } | undefined)?.value;
+        if (Array.isArray(value)) textBoxes = value as TextBox[];
+      }
       const screenshot = await pageCdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, ...(size.fullPage ? await fullPageClip(pageCdp, size) : {}) });
       await fs.promises.writeFile(outPng, Buffer.from(String(screenshot.data), "base64"));
+      return { textBoxes };
     } finally {
       unsubscribe();
       await browserCdp.send("Target.closeTarget", { targetId }).catch(() => {});
@@ -441,7 +493,7 @@ async function ensureRunThumbnailUncached(runId: string): Promise<RunThumbnail |
   if (output) {
     const abs = path.join(dir, "thumb.png");
     try {
-      await renderHtmlToPng(output, abs, undefined, dir);
+      await renderHtmlToPng(output, abs, undefined, { assetRoot: dir });
       if (m) recordThumb(runId, m, "thumb.png");
       return { abs, mime: "image/png" };
     } catch {

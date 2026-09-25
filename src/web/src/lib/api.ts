@@ -60,6 +60,8 @@ export const outputRawUrl = (rel: string, opts?: { measure?: boolean }) =>
   `/output-raw/${encPath(rel)}${opts?.measure ? '?measure=1' : ''}`;
 export const downloadUrl = (rel: string) => `/output/${encPath(rel)}?download=1`;
 export const screenshotUrl = (rel: string) => `/api/output/screenshot?file=${encodeURIComponent(rel)}`;
+// Pixel-based WCAG text contrast report for one output (src/contrast.ts). Renders server-side.
+export const contrastUrl = (rel: string) => `/api/output/contrast?file=${encodeURIComponent(rel)}`;
 // The run's gallery thumbnail, backfilled on demand server-side (existing thumb → surviving input
 // → rendered output preview → 404). See src/thumbnail.ts. Immutable-cached, so it's fetched once.
 export const runThumbnailUrl = (runId: string) => `/api/runs/${encodeURIComponent(runId)}/thumbnail`;

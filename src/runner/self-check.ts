@@ -54,7 +54,7 @@ export async function captureSelfCheck(outputHtml: string, assetRoot?: string): 
   const files: string[] = [];
   for (const viewport of SELF_CHECK_VIEWPORTS) {
     const png = selfCheckCapturePath(outputHtml, viewport.name);
-    await renderHtmlToPng(outputHtml, png, { width: viewport.width, height: viewport.height, fullPage: true, mobile: viewport.mobile }, assetRoot);
+    await renderHtmlToPng(outputHtml, png, { width: viewport.width, height: viewport.height, fullPage: true, mobile: viewport.mobile }, { assetRoot });
     images.push({ ...imageToBase64(png), file: png });
     files.push(png);
   }

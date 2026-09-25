@@ -123,6 +123,20 @@ export const TOOLS: McpEngineTool[] = [
     run: (a) => get(`/api/runs/${encodeURIComponent(str(a.runId))}`),
   },
   {
+    // Lets an agent rank a run's outputs by legibility, not only the human in the gallery.
+    name: "check_contrast",
+    description:
+      "WCAG text contrast of one generated output, judged from its rendered pixels so text over images, gradients and translucent layers counts. Returns passes, worstRatio and the failing text lines, worst first. Renders in headless Edge/Chrome.",
+    inputSchema: obj(
+      {
+        file: { type: "string", description: "the output HTML, relative to output/: a job's `file` from get_run" },
+        level: { type: "string", description: '"AA" (default) or "AAA"' },
+      },
+      ["file"],
+    ),
+    run: (a) => get(`/api/output/contrast?file=${encodeURIComponent(str(a.file))}${a.level === "AAA" ? "&level=AAA" : ""}`),
+  },
+  {
     name: "run",
     description:
       'Queue a reimagine job: send input screenshot(s) through models × prompts and collect reimagined HTML. Returns { runId } immediately, poll get_run for progress. Set mock:true for a no-API-spend dry run.',

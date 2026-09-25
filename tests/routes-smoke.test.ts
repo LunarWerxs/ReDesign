@@ -192,6 +192,15 @@ describe("routes/output.ts", () => {
     const res = await app.request("/api/output/screenshot", { headers: CROSS_SITE_HEADERS });
     expect(res.status).toBe(403);
   });
+
+  // WHY: pins that the contrast route validates its file through resolveOutputHtmlFile before any
+  // render; without the route this path falls through to a 404/SPA response, not this 400.
+  it("GET /api/output/contrast refuses a non-HTML output before spawning a renderer", async () => {
+    const res = await app.request("/api/output/contrast?file=notes.txt");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toMatch(/Only HTML outputs/);
+  });
 });
 
 describe("jsonBodyLimit: default 5 MB cap vs. the two upload routes' larger cap", () => {

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { CameraIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, FileTextIcon, LoaderCircleIcon, StarIcon, XIcon } from '@lucide/vue';
+import { CameraIcon, ContrastIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, FileTextIcon, LoaderCircleIcon, StarIcon, XIcon } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
-import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl, designMdUrl } from '@/lib/api';
+import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl, designMdUrl, contrastUrl } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
@@ -76,6 +76,46 @@ const slopRetryText = computed(() => {
     : t('viewer.slopRetryDropped');
 });
 
+// WCAG text contrast judged from the rendered pixels (src/contrast.ts on the server), so a
+// redesign with light text over a photo or gradient gets flagged on its card. On demand: each
+// uncached check is a headless Chromium render, too heavy to fire for every card in a gallery.
+interface ContrastReport {
+  checked: number;
+  failingCount: number;
+  worstRatio: number | null;
+  passes: boolean;
+  failing: { text: string; ratio: number; required: number }[];
+}
+const contrastBusy = ref(false);
+const contrast = ref<ContrastReport | null>(null);
+async function checkContrast() {
+  if (contrastBusy.value || !props.job.file) return;
+  contrastBusy.value = true;
+  try {
+    const res = await fetch(contrastUrl(props.job.file));
+    const body = (await res.json().catch(() => null)) as (ContrastReport & { error?: string }) | null;
+    if (!res.ok || !body) throw new Error(body?.error || `HTTP ${res.status}`);
+    contrast.value = body;
+  } catch (err) {
+    toast.error(t('viewer.contrastFailed', { error: err instanceof Error ? err.message : String(err) }));
+  } finally {
+    contrastBusy.value = false;
+  }
+}
+const contrastBadge = computed(() => {
+  const r = contrast.value;
+  if (!r) return null;
+  if (!r.checked) return { label: t('viewer.contrastNoText'), title: t('viewer.contrastNoText'), fail: false };
+  if (r.passes) return { label: t('viewer.contrastPass'), title: t('viewer.contrastPassTitle', { count: r.checked }), fail: false };
+  // failing is sorted worst first; worstRatio spans every checked line, passing large text included.
+  const worst = r.failing[0];
+  return {
+    label: t('viewer.contrastFail', { ratio: String(worst?.ratio ?? r.worstRatio ?? '') }),
+    title: t('viewer.contrastFailTitle', { count: r.failingCount, text: worst?.text || '', ratio: String(worst?.ratio ?? ''), required: String(worst?.required ?? '') }),
+    fail: true,
+  };
+});
+
 const sub = () => {
   let s = props.promptLabel;
   if (props.job.variant > 1) s += ` · v${props.job.variant}`;
@@ -116,6 +156,12 @@ const sub = () => {
         </TooltipContent>
       </Tooltip>
       <span class="flex-1" />
+      <span
+        v-if="contrastBadge"
+        class="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium"
+        :class="contrastBadge.fail ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'"
+        :title="contrastBadge.title"
+      >{{ contrastBadge.label }}</span>
       <div class="flex shrink-0 items-center gap-0.5">
         <Tooltip>
           <TooltipTrigger as-child>
@@ -177,6 +223,22 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.screenshotItem') }}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :disabled="contrastBusy"
+              :aria-label="t('viewer.contrastItem')"
+              @click.stop="checkContrast"
+            >
+              <LoaderCircleIcon v-if="contrastBusy" class="size-3.5 animate-spin text-muted-foreground" />
+              <ContrastIcon v-else class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.contrastItem') }}</TooltipContent>
         </Tooltip>
         <!-- hide ("close") stays the LAST control so the X sits at the card's top-right corner -->
         <Tooltip>
