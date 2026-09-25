@@ -53,6 +53,13 @@ const MAX_ASSETS = 12;
 const MIN_SIDE_PX = 8;
 const MAX_AREA_SHARE = 0.9;
 const ASSET_KINDS = new Set(["logo", "photo", "avatar", "illustration"]);
+// Written beside an input's crops so a retry of the same run can reuse them (see loadSavedCrops).
+const CROP_INDEX = "index.json";
+
+/** Run-dir-relative folder holding one input's crops, forward slashes. */
+function cropDirRel(inputId: string): string {
+  return path.posix.join("assets", "crops", String(inputId).replace(/[^\w.-]+/g, "_"));
+}
 
 const ASSET_DETECT_PROMPT =
   "Find the real brand and content imagery in the attached UI screenshot(s) that a redesign should reuse rather than redraw: " +
@@ -317,7 +324,12 @@ function encodePng(img: PngImage): Buffer {
 
 /** A pixel-exact PNG crop, or null when the PNG is a kind decodePng does not handle. */
 function cropPng(buf: Buffer, rect: PixelRect): Buffer | null {
-  const img = decodePng(buf);
+  return cropDecodedPng(decodePng(buf), rect);
+}
+
+// Split from cropPng so saveAssetCrops can decode a screenshot once and cut every asset from
+// that one decode: the decode is a synchronous pure-JS loop on Bun's only thread.
+function cropDecodedPng(img: PngImage | null, rect: PixelRect): Buffer | null {
   if (!img || rect.right > img.width || rect.bottom > img.height) return null;
   const width = rect.right - rect.left;
   const height = rect.bottom - rect.top;
@@ -339,8 +351,10 @@ function svgCrop(buf: Buffer, mime: string, rect: PixelRect, width: number, heig
 
 /** Crop every detected asset out of its image and write it under <runDir>/assets/crops/<input>/. */
 function saveAssetCrops(runDir: string, inputId: string, images: LoadedImage[], detected: DetectedAsset[]): CroppedAsset[] {
-  const dirRel = path.posix.join("assets", "crops", String(inputId).replace(/[^\w.-]+/g, "_"));
+  const dirRel = cropDirRel(inputId);
   const out: CroppedAsset[] = [];
+  // One decode per screenshot, shared by every asset cut from it (null = not a PNG we decode).
+  const decoded = new Map<number, PngImage | null>();
   for (const asset of detected) {
     const img = images[asset.image - 1];
     if (!img) continue;
@@ -349,13 +363,36 @@ function saveAssetCrops(runDir: string, inputId: string, images: LoadedImage[], 
     if (!info || info.orientation !== 1) continue;
     const rect = normalizeBox(asset.box, info.width, info.height);
     if (!rect) continue;
-    const png = img.mime === "image/png" ? cropPng(buf, rect) : null;
+    if (img.mime === "image/png" && !decoded.has(asset.image)) decoded.set(asset.image, decodePng(buf));
+    const png = img.mime === "image/png" ? cropDecodedPng(decoded.get(asset.image) ?? null, rect) : null;
     const rel = path.posix.join(dirRel, `${asset.id}${png ? ".png" : ".svg"}`);
     ensureDir(path.join(runDir, ...dirRel.split("/")));
     fs.writeFileSync(path.join(runDir, ...rel.split("/")), png ?? svgCrop(buf, img.mime, rect, info.width, info.height));
     out.push({ id: asset.id, label: asset.label, kind: asset.kind, rel, width: rect.right - rect.left, height: rect.bottom - rect.top });
   }
+  if (out.length) fs.writeFileSync(path.join(runDir, ...dirRel.split("/"), CROP_INDEX), JSON.stringify(out, null, 2));
   return out;
+}
+
+// The crop set an earlier pass of this run already saved for an input. A retry reuses it rather
+// than detecting again, which would bill another call and could overwrite same-named crops with
+// different boxes under outputs that already succeeded.
+function loadSavedCrops(runDir: string, inputId: string): CroppedAsset[] | null {
+  const dirRel = cropDirRel(inputId);
+  let saved: unknown;
+  try {
+    saved = JSON.parse(fs.readFileSync(path.join(runDir, ...dirRel.split("/"), CROP_INDEX), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(saved)) return null;
+  const valid = saved.filter(
+    (a): a is CroppedAsset =>
+      !!a && typeof a.id === "string" && typeof a.label === "string" && typeof a.kind === "string" &&
+      typeof a.rel === "string" && a.rel.startsWith(`${dirRel}/`) && !a.rel.includes("..") &&
+      typeof a.width === "number" && typeof a.height === "number" && fs.existsSync(path.join(runDir, ...a.rel.split("/"))),
+  );
+  return valid.length ? valid : null;
 }
 
 /**
@@ -383,6 +420,7 @@ export {
   decodePng,
   cropPng,
   saveAssetCrops,
+  loadSavedCrops,
   assetCropBlock,
 };
 export type { DetectedAsset, CroppedAsset, PixelRect };

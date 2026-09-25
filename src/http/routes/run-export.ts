@@ -73,23 +73,27 @@ async function bundlePlan(id: string, shortlistOnly: boolean): Promise<ZipInputE
     indexItems.push({ name, label: String(job.id) });
   }
   entries.push({ name: "review.json", data: new TextEncoder().encode(JSON.stringify(review, null, 2)) });
-  if (!shortlistOnly) {
-    for (const name of ["manifest.json", "spec.json"]) await addFile(entries, rootReal, path.join(root, name), name);
-    async function walk(dir: string, prefix = "assets"): Promise<void> {
-      let children: fs.Dirent[];
-      try { children = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
-      for (const child of children) {
-        const file = path.join(dir, child.name);
-        const archiveName = `${prefix}/${child.name}`;
-        if (child.isDirectory()) {
-          try { if (isBelow(rootReal, await fs.promises.realpath(file))) await walk(file, archiveName); } catch { /* absent or inaccessible */ }
-        } else if (child.isFile() || child.isSymbolicLink()) {
-          // fileEntry resolves links and accepts only targets inside the real run root.
-          await addFile(entries, rootReal, file, archiveName);
-        }
+  async function walk(dir: string, prefix: string): Promise<void> {
+    let children: fs.Dirent[];
+    try { children = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const child of children) {
+      const file = path.join(dir, child.name);
+      const archiveName = `${prefix}/${child.name}`;
+      if (child.isDirectory()) {
+        try { if (isBelow(rootReal, await fs.promises.realpath(file))) await walk(file, archiveName); } catch { /* absent or inaccessible */ }
+      } else if (child.isFile() || child.isSymbolicLink()) {
+        // fileEntry resolves links and accepts only targets inside the real run root.
+        await addFile(entries, rootReal, file, archiveName);
       }
     }
-    await walk(path.join(root, "assets"));
+  }
+  if (!shortlistOnly) {
+    for (const name of ["manifest.json", "spec.json"]) await addFile(entries, rootReal, path.join(root, name), name);
+    await walk(path.join(root, "assets"), "assets");
+  } else {
+    // Outputs embed their cropped logos and photos as ../assets/crops/..., so a shortlist zip
+    // carries the crops too, or every shortlisted page would open with broken images.
+    await walk(path.join(root, "assets", "crops"), "assets/crops");
   }
   entries.push({ name: "comparison.html", data: comparisonIndex(indexItems) });
   checkPlan(entries);

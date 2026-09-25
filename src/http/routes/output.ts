@@ -46,7 +46,10 @@ export function register(app: Hono, _deps: Deps): void {
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-shot-"));
     const png = path.join(tmpDir, "shot.png");
     try {
-      await renderHtmlToPng(full, png, { width: 1440, height: 900 });
+      // Serve the whole run dir (store.OUTPUT_DIR/<runId>), not only the page's folder: outputs
+      // link their cropped logos as ../assets/crops/..., which would otherwise capture as broken.
+      const runRoot = path.join(store.OUTPUT_DIR, path.relative(store.OUTPUT_DIR, full).split(path.sep)[0] || "");
+      await renderHtmlToPng(full, png, { width: 1440, height: 900 }, runRoot);
       const buf = await fs.promises.readFile(png);
       const base = path.basename(full).replace(/\.html?$/i, "").replace(/[^\w.-]+/g, "_") || "preview";
       return c.body(new Uint8Array(buf), 200, {

@@ -25,7 +25,7 @@ import {
 import { buildPoolLimits, runJobsByPool, type Job } from "./scheduling";
 import { runOneJob, type JobWorkerContext } from "./job-worker";
 import type { Model } from "../config/models";
-import { ASSET_DETECT_PROMPT, assetCropsEnabled, parseDetectedAssets, saveAssetCrops, type CroppedAsset } from "./asset-crop";
+import { ASSET_DETECT_PROMPT, assetCropsEnabled, loadSavedCrops, parseDetectedAssets, saveAssetCrops, type CroppedAsset } from "./asset-crop";
 
 interface ReferenceOptions {
   enabled?: boolean;
@@ -201,9 +201,22 @@ async function captionReference(referenceImages: LoadedImage[], ctx: CaptionCtx)
 
 // One detection call per input finds its logos and photos, and they are cropped into the run's
 // assets so every model can embed the real ones (see runner/asset-crop.ts). Best-effort: no
-// helper, a failed call or an unusable reply just means the jobs run without crops.
+// helper, a failed call or an unusable reply just means the jobs run without crops. The whole
+// body is guarded: this promise is warmed before any job attaches a handler, so it never rejects.
 async function cropInputAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
+  try {
+    return await detectAndCropAssets(input, ctx, runId);
+  } catch (err) {
+    console.warn(`[run ${runId}] asset crops for ${input.name} failed:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+async function detectAndCropAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
   if (ctx.mock || !ctx.describer || !assetCropsEnabled()) return [];
+  // A retry keeps the crops its run already made, so finished outputs keep their images.
+  const saved = loadSavedCrops(store.runDir(runId), input.id);
+  if (saved) return saved;
   const images = ctx.imagesFor(input);
   if (!images.length) return [];
   const helper = ctx.describer;
@@ -225,12 +238,7 @@ async function cropInputAssets(input: InputItem, ctx: CaptionCtx, runId: string)
     { signal: ctx.signal },
   );
   if (!r) return [];
-  try {
-    return saveAssetCrops(store.runDir(runId), input.id, images, parseDetectedAssets(r.text, images.length));
-  } catch (err) {
-    console.warn(`[run ${runId}] asset crops for ${input.name} failed:`, err instanceof Error ? err.message : err);
-    return [];
-  }
+  return saveAssetCrops(store.runDir(runId), input.id, images, parseDetectedAssets(r.text, images.length));
 }
 
 // --- Option / selection resolution --------------------------------------------

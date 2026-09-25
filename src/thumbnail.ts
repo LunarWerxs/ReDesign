@@ -185,9 +185,23 @@ function safeAssetPath(root: string, rawPath: string): string | null {
   return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? candidate : null;
 }
 
-async function startRendererServer(htmlFile: string): Promise<{ origin: string; stop: () => void }> {
-  const root = await fs.promises.realpath(path.dirname(htmlFile));
-  const html = rendererDocument(await fs.promises.readFile(htmlFile, "utf8"));
+// assetRoot widens what the page may load from its own folder to an enclosing one (the run dir),
+// because outputs link crops as ../assets/crops/...; base then points at the page's own folder
+// inside that root, so its relative URLs still resolve as they do in the viewer.
+async function startRendererServer(htmlFile: string, assetRoot?: string): Promise<{ origin: string; stop: () => void }> {
+  const docDir = await fs.promises.realpath(path.dirname(htmlFile));
+  let root = docDir;
+  let docRel = "";
+  if (assetRoot) {
+    const wider = await fs.promises.realpath(assetRoot);
+    const rel = path.relative(wider, docDir);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+      root = wider;
+      docRel = rel;
+    }
+  }
+  const baseHref = `/asset/${docRel ? `${docRel.split(path.sep).map((part) => encodeURIComponent(part)).join("/")}/` : ""}`;
+  const html = rendererDocument(await fs.promises.readFile(htmlFile, "utf8"), baseHref);
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -232,7 +246,7 @@ async function stopRenderer(child: ReturnType<typeof spawn>): Promise<void> {
 }
 
 /** Render an HTML file to a PNG in an isolated headless Chromium renderer. Rejects on failure/timeout. */
-export async function renderHtmlToPng(fullHtml: string, outPng: string, size = { width: 1200, height: 900 }): Promise<void> {
+export async function renderHtmlToPng(fullHtml: string, outPng: string, size = { width: 1200, height: 900 }, assetRoot?: string): Promise<void> {
   const browser = resolveChromiumBrowser();
   if (!browser) throw new Error("No Edge or Chrome install found to render a preview");
   const profileDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "redesign-thumb-"));
@@ -241,7 +255,7 @@ export async function renderHtmlToPng(fullHtml: string, outPng: string, size = {
   try {
     await acquireRenderSlot();
     try {
-      renderer = await startRendererServer(fullHtml);
+      renderer = await startRendererServer(fullHtml, assetRoot);
       child = spawn(browser.path, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1", "--remote-allow-origins=*", `--user-data-dir=${path.join(profileDir, "profile")}`, `--window-size=${size.width},${size.height}`], { stdio: "ignore", windowsHide: true });
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -403,7 +417,7 @@ async function ensureRunThumbnailUncached(runId: string): Promise<RunThumbnail |
   if (output) {
     const abs = path.join(dir, "thumb.png");
     try {
-      await renderHtmlToPng(output, abs);
+      await renderHtmlToPng(output, abs, undefined, dir);
       if (m) recordThumb(runId, m, "thumb.png");
       return { abs, mime: "image/png" };
     } catch {

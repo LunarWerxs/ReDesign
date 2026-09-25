@@ -12,6 +12,9 @@
   URLs in its prompt, so outputs embed the real brand marks instead of placeholders or invented
   logos. One extra helper call per input, counted in the pre-run estimate; `ASSET_CROPS=0`
   turns it off. Idea from abi/screenshot-to-code's asset extraction (MIT), written fresh.
+  Gallery thumbnails and PNG captures serve the run folder so the crops render, a shortlist zip
+  carries them too, and retrying failed jobs reuses the run's saved crops instead of detecting
+  again. A single page downloaded on its own still needs the run's `assets/` folder beside it.
 
 ## [1.6.8] - 2026-09-20
 
