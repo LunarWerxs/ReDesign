@@ -324,6 +324,19 @@ function closeWriter(writer: ReturnType<typeof createWriteStream>): Promise<void
   );
 }
 
+/** Destroy `writer` and settle once its file handle is closed (bounded, so a stuck stream never hangs an update). */
+function destroyWriter(writer: ReturnType<typeof createWriteStream>): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (writer.closed) return resolve();
+    const timer = setTimeout(resolve, 5_000);
+    writer.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    writer.destroy();
+  });
+}
+
 /** Pump the body into `writer`, returning the byte count; overruns throw as soon as they are seen. */
 async function pumpBodyToWriter(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -363,7 +376,9 @@ export async function downloadResponseToFile(
     if (total !== expectedBytes) throw new Error("download size does not match the published asset size");
     await closeWriter(writer);
   } catch (error) {
-    writer.destroy();
+    // The stream opens its file asynchronously: remove it only once the stream has closed, or a
+    // still-pending open recreates the file after the removal (seen under load, harvest F).
+    await destroyWriter(writer);
     rmSync(destination, { force: true });
     throw error;
   } finally {

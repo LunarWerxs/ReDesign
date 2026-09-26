@@ -6,11 +6,13 @@ import path from "node:path";
 const roots: string[] = [];
 const fixture = path.join(import.meta.dir, "fixtures", "history-pagination.fixture.ts");
 
+// Deleting the fixture roots is synchronous and can pass bun's 5 s hook default on a loaded box,
+// which reports the whole file as "a beforeEach/afterEach hook timed out" (harvest F, 2026-09-25).
 afterAll(() => {
   roots.forEach((root) => {
     fs.rmSync(root, { recursive: true, force: true });
   });
-});
+}, 60_000);
 
 function runFixture(mode: string, count?: number): Record<string, unknown> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "redesign-history-pagination-"));
