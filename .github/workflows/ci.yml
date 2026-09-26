@@ -14,8 +14,13 @@ on:
   # drifting from the ordinary PR/main contract.
   workflow_call:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   daemon:
+    timeout-minutes: 30
     name: daemon (test + typecheck)
     # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
     strategy:
@@ -53,6 +58,7 @@ jobs:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
 
   web:
+    timeout-minutes: 60
     name: web (i18n + typecheck + test + build)
     runs-on: ubuntu-latest
     defaults:
