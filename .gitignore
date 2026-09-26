@@ -50,3 +50,4 @@ tmp/
 # items are ignored. Managed by public_todo_guard.py in the Odin repo.
 /docs/todo/*
 !/docs/todo/README.md
+*.tsbuildinfo

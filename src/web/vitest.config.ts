@@ -15,6 +15,8 @@ export default defineConfig({
     alias: { "@": resolve(__dirname, "src") },
   },
   test: {
+    pool: 'forks',
+    maxWorkers: 4,
     environment: "happy-dom",
     globals: true,
     setupFiles: ["./test/setup.ts"],
