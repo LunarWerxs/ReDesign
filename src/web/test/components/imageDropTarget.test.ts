@@ -107,7 +107,7 @@ describe("ImageDropTarget", () => {
   });
 
   it("sizes itself from `dense`, which is the only thing the two zones disagree on", () => {
-    expect(mountTarget().classes()).toContain("min-h-[86px]");
-    expect(mountTarget({ dense: true }).classes()).toContain("min-h-[64px]");
+    expect(mountTarget().classes()).toContain("min-h-21.5");
+    expect(mountTarget({ dense: true }).classes()).toContain("min-h-16");
   });
 });
