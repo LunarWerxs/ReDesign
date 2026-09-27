@@ -70,8 +70,8 @@ function onPaste(e: ClipboardEvent) {
     </div>
 
     <div
-      class="grid transition-[grid-template-rows] duration-300 ease-out"
-      :style="{ gridTemplateRows: store.referenceOn ? '1fr' : '0fr' }"
+      class="reference-expand"
+      :data-state="store.referenceOn ? 'open' : 'closed'"
       :aria-hidden="!store.referenceOn"
       :inert="!store.referenceOn"
     >
@@ -121,7 +121,7 @@ function onPaste(e: ClipboardEvent) {
               </div>
             </div>
 
-            <div class="grid gap-2.5" style="grid-template-columns: repeat(auto-fill, minmax(110px, 1fr))">
+            <div class="reference-tiles grid gap-2.5">
               <InputTile
                 v-for="r in store.references"
                 :key="r.id"
@@ -137,10 +137,10 @@ function onPaste(e: ClipboardEvent) {
             <code class="font-mono">reference/</code>.
           </p>
           <div class="grid gap-1.5">
-            <Label class="text-xs text-muted-foreground">{{ t('reference.noteLabel') }}</Label>
+            <Label><span class="text-xs text-muted-foreground">{{ t('reference.noteLabel') }}</span></Label>
             <Textarea
               v-model="store.refNote"
-              class="min-h-[56px]"
+              class="min-h-14"
               :placeholder="t('reference.notePlaceholder')"
             />
           </div>

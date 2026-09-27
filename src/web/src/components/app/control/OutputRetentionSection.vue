@@ -54,14 +54,14 @@ onMounted(() => {
   <SettingsGroup :label="t('outputRetention.label')" :description="t('outputRetention.hint')">
     <SettingsRow :label="t('outputRetention.diskUsageLabel')">
       <template #control>
-        <span class="font-mono text-[12.5px] text-foreground">{{ diskUsageLabel }}</span>
+        <span class="font-mono text-ui text-foreground">{{ diskUsageLabel }}</span>
       </template>
     </SettingsRow>
     <SettingsRow :label="t('outputRetention.keepLabel')">
       <template #control>
         <Loader2Icon v-if="store.outputRetentionLoading" class="size-3.5 animate-spin text-muted-foreground" />
         <Select v-else :model-value="String(store.outputRetentionDays)" @update:model-value="onRetentionChange">
-          <SelectTrigger class="h-8 w-[150px] text-[12.5px]" :aria-label="t('outputRetention.keepLabel')">
+          <SelectTrigger class="h-8 w-37.5":aria-label="t('outputRetention.keepLabel')">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

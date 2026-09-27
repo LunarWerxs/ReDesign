@@ -307,18 +307,20 @@ watch(
 
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
-    <DialogScrollContent class="max-h-[min(90vh,860px)] gap-0 p-0 sm:max-w-3xl">
-      <DialogHeader class="border-b px-6 pb-4 pt-6 pe-14">
-        <div class="flex items-center gap-2">
-          <span class="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
-            <SparklesIcon class="size-4" />
-          </span>
-          <div>
-            <DialogTitle>{{ t('promptBuilder.title') }}</DialogTitle>
-            <DialogDescription>{{ t('promptBuilder.description') }}</DialogDescription>
+    <DialogScrollContent flush class="max-h-[min(90vh,860px)] sm:max-w-3xl">
+      <div class="border-b px-6 pb-4 pt-6 pe-14">
+        <DialogHeader>
+          <div class="flex items-center gap-2">
+            <span class="grid size-8 place-items-center rounded-lg bg-primary/10 text-primary">
+              <SparklesIcon class="size-4" />
+            </span>
+            <div>
+              <DialogTitle>{{ t('promptBuilder.title') }}</DialogTitle>
+              <DialogDescription>{{ t('promptBuilder.description') }}</DialogDescription>
+            </div>
           </div>
-        </div>
-      </DialogHeader>
+        </DialogHeader>
+      </div>
 
       <div
         class="grid gap-6 px-6 py-5"
@@ -390,7 +392,7 @@ watch(
               @click="toggleBuiltIn(option.id)"
             >
               <span
-                class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-[4px] border"
+                class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border"
                 :class="
                   selectedBuiltInSet.has(option.id)
                     ? 'border-primary bg-primary text-primary-foreground'
@@ -422,7 +424,7 @@ watch(
                 @click="toggleCustomOption(option)"
               >
                 <span
-                  class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-[4px] border"
+                  class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border"
                   :class="
                     selectedCustomMap.has(option.id)
                       ? 'border-primary bg-primary text-primary-foreground'
@@ -437,13 +439,12 @@ watch(
                     <span class="text-sm font-semibold">
                       {{ displayedCustomOption(option).label }}
                     </span>
-                    <Badge variant="secondary" class="px-1.5 py-0 text-[10px]">
+                    <Badge variant="secondary">
                       {{ t('promptBuilder.customOption') }}
                     </Badge>
                     <Badge
                       v-if="customOptionHasSnapshotDrift(option)"
                       variant="outline"
-                      class="px-1.5 py-0 text-[10px]"
                     >
                       {{ t('promptBuilder.savedOption') }}
                     </Badge>
@@ -491,7 +492,7 @@ watch(
               @click="removeSavedOption(option.id)"
             >
               <span
-                class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-[4px] border border-primary bg-primary text-primary-foreground"
+                class="mt-0.5 grid size-4 shrink-0 place-items-center rounded-sm border border-primary bg-primary text-primary-foreground"
                 aria-hidden="true"
               >
                 <CheckIcon class="size-3" />
@@ -499,7 +500,7 @@ watch(
               <span class="grid min-w-0 gap-0.5">
                 <span class="flex flex-wrap items-center gap-1.5">
                   <span class="text-sm font-semibold">{{ option.label }}</span>
-                  <Badge variant="secondary" class="px-1.5 py-0 text-[10px]">
+                  <Badge variant="secondary">
                     {{ t('promptBuilder.savedOption') }}
                   </Badge>
                 </span>
@@ -549,31 +550,33 @@ watch(
         </section>
       </div>
 
-      <DialogFooter class="sticky bottom-0 border-t bg-background/95 px-6 py-4 backdrop-blur">
-        <Button
-          v-if="isEditing"
-          type="button"
-          variant="destructive"
-          class="me-auto"
-          :disabled="busy"
-          @click="deleteConfirmOpen = true"
-        >
-          <Trash2Icon class="size-4" />
-          {{ t('promptBuilder.deleteBookmark') }}
-        </Button>
-        <Button type="button" variant="ghost" :disabled="busy" @click="close()">
-          {{ t('promptBuilder.cancel') }}
-        </Button>
-        <Button type="button" variant="outline" :disabled="busy" @click="useOnce">
-          <SparklesIcon class="size-4" />
-          {{ t('promptBuilder.useOnce') }}
-        </Button>
-        <Button type="button" :disabled="busy" @click="bookmarkAndUse">
-          <Loader2Icon v-if="saving" class="size-4 animate-spin" />
-          <BookmarkIcon v-else class="size-4" />
-          {{ isEditing ? t('promptBuilder.updateBookmark') : t('promptBuilder.bookmarkAndUse') }}
-        </Button>
-      </DialogFooter>
+      <div class="sticky bottom-0 border-t bg-background/95 px-6 py-4 backdrop-blur">
+        <DialogFooter>
+          <Button
+            v-if="isEditing"
+            type="button"
+            variant="destructive"
+            class="me-auto"
+            :disabled="busy"
+            @click="deleteConfirmOpen = true"
+          >
+            <Trash2Icon class="size-4" />
+            {{ t('promptBuilder.deleteBookmark') }}
+          </Button>
+          <Button type="button" variant="ghost" :disabled="busy" @click="close()">
+            {{ t('promptBuilder.cancel') }}
+          </Button>
+          <Button type="button" variant="outline" :disabled="busy" @click="useOnce">
+            <SparklesIcon class="size-4" />
+            {{ t('promptBuilder.useOnce') }}
+          </Button>
+          <Button type="button" :disabled="busy" @click="bookmarkAndUse">
+            <Loader2Icon v-if="saving" class="size-4 animate-spin" />
+            <BookmarkIcon v-else class="size-4" />
+            {{ isEditing ? t('promptBuilder.updateBookmark') : t('promptBuilder.bookmarkAndUse') }}
+          </Button>
+        </DialogFooter>
+      </div>
     </DialogScrollContent>
   </Dialog>
 

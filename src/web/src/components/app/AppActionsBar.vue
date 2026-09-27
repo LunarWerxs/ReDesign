@@ -94,11 +94,13 @@ function confirmShutdown() {
   emit('close');
 }
 
-const destructiveClass = 'text-destructive hover:bg-destructive/10 hover:text-destructive';
 const menuItemClass =
-  'flex h-9 w-full items-center gap-3 px-3.5 text-start text-[13px] font-medium outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50';
+  'flex h-9 w-full items-center gap-3 px-3.5 text-start text-ui font-medium outline-none transition-colors hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50';
 const menuIconClass = 'size-4 shrink-0 text-muted-foreground';
 const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10';
+// Two-line tooltip body. TooltipContent keeps its own px-3 py-1.5; the extra py-0.5 here makes
+// up the py-2 these tooltips always had.
+const tooltipBodyClass = 'grid gap-1 py-0.5 text-start leading-snug';
 </script>
 
 <template>
@@ -163,9 +165,11 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <RefreshCwIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ t('actions.refresh') }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ t('actions.refreshDescription') }}</span>
+      <TooltipContent side="bottom" :side-offset="8" elevated class="max-w-55">
+        <div :class="tooltipBodyClass">
+          <span class="text-xs font-semibold">{{ t('actions.refresh') }}</span>
+          <span class="text-2xs text-muted-foreground">{{ t('actions.refreshDescription') }}</span>
+        </div>
       </TooltipContent>
     </Tooltip>
     <Tooltip v-if="!props.hideKeys">
@@ -174,9 +178,11 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <KeyRoundIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ t('actions.apiKeys') }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ t('actions.apiKeysDescription') }}</span>
+      <TooltipContent side="bottom" :side-offset="8" elevated class="max-w-55">
+        <div :class="tooltipBodyClass">
+          <span class="text-xs font-semibold">{{ t('actions.apiKeys') }}</span>
+          <span class="text-2xs text-muted-foreground">{{ t('actions.apiKeysDescription') }}</span>
+        </div>
       </TooltipContent>
     </Tooltip>
     <Tooltip v-if="!props.hideTheme">
@@ -190,44 +196,48 @@ const menuDestructiveClass = 'text-destructive hover:bg-destructive/10 focus-vis
           <component :is="themeIcon" class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ t('actions.theme', { mode: themeLabel }) }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ t('actions.themeSwitch', { mode: nextThemeLabel }) }}</span>
+      <TooltipContent side="bottom" :side-offset="8" elevated class="max-w-55">
+        <div :class="tooltipBodyClass">
+          <span class="text-xs font-semibold">{{ t('actions.theme', { mode: themeLabel }) }}</span>
+          <span class="text-2xs text-muted-foreground">{{ t('actions.themeSwitch', { mode: nextThemeLabel }) }}</span>
+        </div>
       </TooltipContent>
     </Tooltip>
     <span class="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
     <Tooltip v-if="controlStore.running">
       <TooltipTrigger as-child>
         <Button
-          variant="ghost"
+          variant="ghost-destructive"
           size="icon-sm"
-          :class="destructiveClass"
           :aria-label="t('actions.cancelRun')"
           @click="onCancel"
         >
           <SquareIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ t('actions.cancelRun') }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ t('actions.cancelRunDescription') }}</span>
+      <TooltipContent side="bottom" :side-offset="8" elevated class="max-w-55">
+        <div :class="tooltipBodyClass">
+          <span class="text-xs font-semibold">{{ t('actions.cancelRun') }}</span>
+          <span class="text-2xs text-muted-foreground">{{ t('actions.cancelRunDescription') }}</span>
+        </div>
       </TooltipContent>
     </Tooltip>
     <Tooltip>
       <TooltipTrigger as-child>
         <Button
-          variant="ghost"
+          variant="ghost-destructive"
           size="icon-sm"
-          :class="destructiveClass"
           :aria-label="t('actions.shutdown')"
           @click="onShutdown"
         >
           <PowerIcon class="size-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent side="bottom" :side-offset="8" class="grid max-w-[220px] gap-1 px-3 py-2 text-start leading-snug shadow-lg">
-        <span class="text-xs font-semibold">{{ t('actions.shutdown') }}</span>
-        <span class="text-[11px] text-muted-foreground">{{ t('actions.shutdownDescription') }}</span>
+      <TooltipContent side="bottom" :side-offset="8" elevated class="max-w-55">
+        <div :class="tooltipBodyClass">
+          <span class="text-xs font-semibold">{{ t('actions.shutdown') }}</span>
+          <span class="text-2xs text-muted-foreground">{{ t('actions.shutdownDescription') }}</span>
+        </div>
       </TooltipContent>
     </Tooltip>
   </div>

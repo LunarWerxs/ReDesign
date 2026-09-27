@@ -111,7 +111,7 @@ watch(provider, () => {
       </DialogHeader>
 
       <div class="flex items-center gap-2">
-        <Label class="text-xs text-muted-foreground">{{ t('browseModels.provider') }}</Label>
+        <Label><span class="text-muted-foreground">{{ t('browseModels.provider') }}</span></Label>
         <Select v-model="provider">
           <SelectTrigger class="h-8 w-48">
             <SelectValue />
@@ -130,7 +130,7 @@ watch(provider, () => {
         </div>
         <p v-else-if="error" class="px-2 py-6 text-center text-xs text-muted-foreground">{{ error }}</p>
         <template v-else>
-          <div class="px-1 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+          <div class="px-1 pb-1 text-3xs uppercase tracking-wider text-muted-foreground/70">
             {{ source === 'provider' ? t('browseModels.sourceProvider') : t('browseModels.sourceCatalog') }}
           </div>
           <div

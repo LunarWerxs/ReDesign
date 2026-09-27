@@ -206,38 +206,85 @@ function paeth(a: number, b: number, c: number): number {
   return pb <= pc ? b : c;
 }
 
-/** Decode an 8-bit, non-interlaced RGB or RGBA PNG. Throws on anything else. */
-export function decodePng(buf: Uint8Array): RgbaImage {
+interface PngChunks {
+  width: number;
+  height: number;
+  colourType: number;
+  idat: Uint8Array[];
+}
+
+function assertPngSignature(buf: Uint8Array): void {
   for (let i = 0; i < PNG_SIGNATURE.length; i++) {
     if (buf[i] !== PNG_SIGNATURE[i]) throw new Error("Not a PNG");
   }
+}
+
+function readIhdr(data: Uint8Array, chunks: PngChunks): void {
+  const header = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  chunks.width = header.getUint32(0);
+  chunks.height = header.getUint32(4);
+  const bitDepth = data[8];
+  chunks.colourType = data[9] ?? -1;
+  const interlace = data[12];
+  if (bitDepth !== 8 || (chunks.colourType !== 2 && chunks.colourType !== 6) || interlace !== 0) {
+    throw new Error("Unsupported PNG format (need 8-bit RGB/RGBA, not interlaced)");
+  }
+}
+
+/** The image header and data chunks, read up to IEND. */
+function readPngChunks(buf: Uint8Array): PngChunks {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  let width = 0;
-  let height = 0;
-  let colourType = -1;
-  const idat: Uint8Array[] = [];
+  const chunks: PngChunks = { width: 0, height: 0, colourType: -1, idat: [] };
   let pos = 8;
   while (pos + 8 <= buf.length) {
     const length = view.getUint32(pos);
     const type = String.fromCharCode(...buf.subarray(pos + 4, pos + 8));
     const data = buf.subarray(pos + 8, pos + 8 + length);
     pos += 12 + length;
-    if (type === "IHDR") {
-      const header = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      width = header.getUint32(0);
-      height = header.getUint32(4);
-      const bitDepth = data[8];
-      colourType = data[9] ?? -1;
-      const interlace = data[12];
-      if (bitDepth !== 8 || (colourType !== 2 && colourType !== 6) || interlace !== 0) {
-        throw new Error("Unsupported PNG format (need 8-bit RGB/RGBA, not interlaced)");
-      }
-    } else if (type === "IDAT") {
-      idat.push(data);
-    } else if (type === "IEND") {
-      break;
-    }
+    if (type === "IEND") break;
+    if (type === "IHDR") readIhdr(data, chunks);
+    else if (type === "IDAT") chunks.idat.push(data);
   }
+  return chunks;
+}
+
+function unfilterByte(filter: number | undefined, v: number, a: number, b: number, c: number): number {
+  switch (filter) {
+    case 0: return v;
+    case 1: return (v + a) & 0xff;
+    case 2: return (v + b) & 0xff;
+    case 3: return (v + ((a + b) >> 1)) & 0xff;
+    case 4: return (v + paeth(a, b, c)) & 0xff;
+    default: throw new Error(`Bad PNG filter type ${filter}`);
+  }
+}
+
+/** Unfilter one scanline (`line`, filter byte already stripped) into `cur`, against the row above in `prev`. */
+function unfilterRow(filter: number | undefined, line: Uint8Array, prev: Uint8Array, cur: Uint8Array, bpp: number): void {
+  for (let i = 0; i < cur.length; i++) {
+    const a = i >= bpp ? (cur[i - bpp] as number) : 0;
+    const c = i >= bpp ? (prev[i - bpp] as number) : 0;
+    cur[i] = unfilterByte(filter, line[i] as number, a, prev[i] as number, c);
+  }
+}
+
+/** Copy one unfiltered row into the RGBA output starting at byte `rowOut`, adding opaque alpha to RGB. */
+function writeRgbaRow(cur: Uint8Array, out: Uint8Array, rowOut: number, bpp: number): void {
+  const width = cur.length / bpp;
+  for (let x = 0; x < width; x++) {
+    const s = x * bpp;
+    const d = rowOut + x * 4;
+    out[d] = cur[s] as number;
+    out[d + 1] = cur[s + 1] as number;
+    out[d + 2] = cur[s + 2] as number;
+    out[d + 3] = bpp === 4 ? (cur[s + 3] as number) : 255;
+  }
+}
+
+/** Decode an 8-bit, non-interlaced RGB or RGBA PNG. Throws on anything else. */
+export function decodePng(buf: Uint8Array): RgbaImage {
+  assertPngSignature(buf);
+  const { width, height, colourType, idat } = readPngChunks(buf);
   if (!width || !height || colourType < 0) throw new Error("PNG has no image header");
 
   const raw = inflateSync(Buffer.concat(idat));
@@ -250,30 +297,9 @@ export function decodePng(buf: Uint8Array): RgbaImage {
   let p = 0;
   for (let y = 0; y < height; y++) {
     const filter = raw[p++];
-    for (let i = 0; i < stride; i++) {
-      const v = raw[p + i] as number;
-      const a = i >= bpp ? (cur[i - bpp] as number) : 0;
-      const b = prev[i] as number;
-      const c = i >= bpp ? (prev[i - bpp] as number) : 0;
-      switch (filter) {
-        case 0: cur[i] = v; break;
-        case 1: cur[i] = (v + a) & 0xff; break;
-        case 2: cur[i] = (v + b) & 0xff; break;
-        case 3: cur[i] = (v + ((a + b) >> 1)) & 0xff; break;
-        case 4: cur[i] = (v + paeth(a, b, c)) & 0xff; break;
-        default: throw new Error(`Bad PNG filter type ${filter}`);
-      }
-    }
+    unfilterRow(filter, raw.subarray(p, p + stride), prev, cur, bpp);
     p += stride;
-    const rowOut = y * width * 4;
-    for (let x = 0; x < width; x++) {
-      const s = x * bpp;
-      const d = rowOut + x * 4;
-      out[d] = cur[s] as number;
-      out[d + 1] = cur[s + 1] as number;
-      out[d + 2] = cur[s + 2] as number;
-      out[d + 3] = bpp === 4 ? (cur[s + 3] as number) : 255;
-    }
+    writeRgbaRow(cur, out, y * width * 4, bpp);
     [prev, cur] = [cur, prev];
   }
   return { width, height, data: out };

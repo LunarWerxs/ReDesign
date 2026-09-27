@@ -19,7 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 import type { LoadedImage } from "../inputResolver";
-import { ensureDir } from "../util";
+import { asciiSlug, ensureDir } from "../util";
 
 interface DetectedAsset {
   id: string;
@@ -91,12 +91,9 @@ function firstJson(text: string): unknown {
   return null;
 }
 
+// Asset ids stay at the 40 characters the crop filenames always had (asciiSlug caps at 48).
 function slug(value: unknown): string {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+  return asciiSlug(value, "").slice(0, 40);
 }
 
 /** The detector's reply as validated assets. A null or malformed box drops that asset, never the rest. */
@@ -256,25 +253,39 @@ function paeth(a: number, b: number, c: number): number {
   return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
 }
 
-/** Decode a non-interlaced 8/16-bit PNG to unfiltered rows; null for anything else. */
-function decodePng(buf: Buffer): PngImage | null {
-  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+interface PngChunks {
+  ihdr: Buffer | null;
+  idat: Buffer[];
+  ancillary: Buffer[];
+}
+
+type PngHeader = Pick<PngImage, "width" | "height" | "bitDepth" | "colorType" | "bpp">;
+
+/** The chunks decodePng needs, read up to IEND; null when a chunk runs past the end of the file. */
+function readPngChunks(buf: Buffer): PngChunks | null {
+  const chunks: PngChunks = { ihdr: null, idat: [], ancillary: [] };
   let off = 8;
-  let ihdr: Buffer | null = null;
-  const idat: Buffer[] = [];
-  const ancillary: Buffer[] = [];
   while (off + 12 <= buf.length) {
     const len = buf.readUInt32BE(off);
     const type = buf.toString("latin1", off + 4, off + 8);
     const end = off + 12 + len;
     if (end > buf.length) return null;
-    if (type === "IHDR") ihdr = buf.subarray(off + 8, off + 8 + len);
-    else if (type === "IDAT") idat.push(buf.subarray(off + 8, off + 8 + len));
-    else if (PNG_KEPT_CHUNKS.has(type)) ancillary.push(buf.subarray(off, end));
-    else if (type === "IEND") break;
+    if (type === "IEND") break;
+    collectPngChunk(chunks, type, buf.subarray(off, end));
     off = end;
   }
-  if (!ihdr || ihdr.length < 13 || !idat.length) return null;
+  return chunks;
+}
+
+/** `chunk` is the whole chunk: length, type, data and CRC. */
+function collectPngChunk(chunks: PngChunks, type: string, chunk: Buffer): void {
+  const data = chunk.subarray(8, chunk.length - 4);
+  if (type === "IHDR") chunks.ihdr = data;
+  else if (type === "IDAT") chunks.idat.push(data);
+  else if (PNG_KEPT_CHUNKS.has(type)) chunks.ancillary.push(chunk);
+}
+
+function parsePngHeader(ihdr: Buffer): PngHeader | null {
   const width = ihdr.readUInt32BE(0);
   const height = ihdr.readUInt32BE(4);
   const bitDepth = ihdr[8] as number;
@@ -283,31 +294,53 @@ function decodePng(buf: Buffer): PngImage | null {
   // Sub-byte depths would need bit shifting to cut at an arbitrary x, and Adam7 interlacing
   // stores pixels out of row order; both are rare in screenshots and take the SVG path.
   if (!channels || (bitDepth !== 8 && bitDepth !== 16) || ihdr[12] !== 0 || !width || !height) return null;
-  const bpp = channels * (bitDepth / 8);
-  const stride = width * bpp;
-  const raw = inflateSync(Buffer.concat(idat));
-  if (raw.length < (stride + 1) * height) return null;
-  const pixels = Buffer.alloc(stride * height);
-  for (let y = 0; y < height; y++) {
-    const filter = raw[y * (stride + 1)];
-    const src = y * (stride + 1) + 1;
-    const dst = y * stride;
-    for (let i = 0; i < stride; i++) {
-      const x = raw[src + i] as number;
-      const a = i >= bpp ? (pixels[dst + i - bpp] as number) : 0;
-      const b = y ? (pixels[dst - stride + i] as number) : 0;
-      const c = y && i >= bpp ? (pixels[dst - stride + i - bpp] as number) : 0;
-      let v: number;
-      if (filter === 0) v = x;
-      else if (filter === 1) v = x + a;
-      else if (filter === 2) v = x + b;
-      else if (filter === 3) v = x + ((a + b) >> 1);
-      else if (filter === 4) v = x + paeth(a, b, c);
-      else return null;
-      pixels[dst + i] = v & 0xff;
-    }
+  return { width, height, bitDepth, colorType, bpp: channels * (bitDepth / 8) };
+}
+
+/** One byte through its scanline filter; null for an unknown filter type. */
+function unfilterByte(filter: number | undefined, x: number, a: number, b: number, c: number): number | null {
+  if (filter === 0) return x;
+  if (filter === 1) return x + a;
+  if (filter === 2) return x + b;
+  if (filter === 3) return x + ((a + b) >> 1);
+  if (filter === 4) return x + paeth(a, b, c);
+  return null;
+}
+
+/** Unfilter row y of `raw` into `pixels`; false on an unknown filter type. */
+function unfilterPngRow(raw: Buffer, pixels: Buffer, y: number, header: PngHeader): boolean {
+  const { bpp } = header;
+  const stride = header.width * bpp;
+  const filter = raw[y * (stride + 1)];
+  const src = y * (stride + 1) + 1;
+  const dst = y * stride;
+  for (let i = 0; i < stride; i++) {
+    const x = raw[src + i] as number;
+    const a = i >= bpp ? (pixels[dst + i - bpp] as number) : 0;
+    const b = y ? (pixels[dst - stride + i] as number) : 0;
+    const c = y && i >= bpp ? (pixels[dst - stride + i - bpp] as number) : 0;
+    const v = unfilterByte(filter, x, a, b, c);
+    if (v === null) return false;
+    pixels[dst + i] = v & 0xff;
   }
-  return { width, height, bitDepth, colorType, bpp, ancillary, pixels };
+  return true;
+}
+
+/** Decode a non-interlaced 8/16-bit PNG to unfiltered rows; null for anything else. */
+function decodePng(buf: Buffer): PngImage | null {
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+  const chunks = readPngChunks(buf);
+  if (!chunks?.ihdr || chunks.ihdr.length < 13 || !chunks.idat.length) return null;
+  const header = parsePngHeader(chunks.ihdr);
+  if (!header) return null;
+  const stride = header.width * header.bpp;
+  const raw = inflateSync(Buffer.concat(chunks.idat));
+  if (raw.length < (stride + 1) * header.height) return null;
+  const pixels = Buffer.alloc(stride * header.height);
+  for (let y = 0; y < header.height; y++) {
+    if (!unfilterPngRow(raw, pixels, y, header)) return null;
+  }
+  return { ...header, ancillary: chunks.ancillary, pixels };
 }
 
 function encodePng(img: PngImage): Buffer {

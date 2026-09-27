@@ -99,7 +99,7 @@ function loadDefault() {
         role="button"
         tabindex="0"
         :aria-label="t('options.brandAttachmentsAddFiles')"
-        class="grid min-h-[56px] cursor-pointer place-items-center gap-0.5 rounded-lg border border-dashed bg-muted/30 p-3 text-center transition-colors outline-none focus-visible:border-primary"
+        class="grid min-h-14 cursor-pointer place-items-center gap-0.5 rounded-lg border border-dashed bg-muted/30 p-3 text-center transition-colors outline-none focus-visible:border-primary"
         :class="[
           dragOver ? 'border-primary bg-accent' : 'border-input hover:border-primary',
           uploading ? 'pointer-events-none opacity-75' : '',

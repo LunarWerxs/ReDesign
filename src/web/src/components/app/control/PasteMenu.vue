@@ -60,14 +60,14 @@ defineExpose({ openAt, close });
   <Teleport to="body">
     <div
       v-if="open"
-      class="fixed inset-0 z-[60]"
+      class="fixed inset-0 z-(--z-paste-backdrop)"
       @pointerdown="close"
       @contextmenu.prevent="close"
       @wheel="close"
     >
       <div
-        class="animate-in fade-in-0 zoom-in-95 fixed z-[61] min-w-[8.5rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md duration-150"
-        :style="{ left: `${x}px`, top: `${y}px` }"
+        class="animate-in fade-in-0 zoom-in-95 fixed top-(--paste-y) left-(--paste-x) z-(--z-paste-menu) min-w-34 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md duration-150"
+        :style="{ '--paste-x': `${x}px`, '--paste-y': `${y}px` }"
         @pointerdown.stop
       >
         <button

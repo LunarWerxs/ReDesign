@@ -61,7 +61,7 @@ function onRowKeydown(e: KeyboardEvent) {
         @keydown="onRowKeydown"
       >
         <Checkbox class="pointer-events-none" :model-value="selected" tabindex="-1" />
-        <span class="size-2 shrink-0 rounded-full" :style="{ background: model.color || '#888' }" />
+        <span class="size-2 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': model.color }" />
         <span class="flex min-w-0 flex-1 items-center gap-1.5">
           <span class="truncate font-medium">{{ model.label }}</span>
           <span v-if="meta" class="shrink-0 text-xs text-muted-foreground">{{ meta }}</span>
@@ -82,8 +82,8 @@ function onRowKeydown(e: KeyboardEvent) {
         <!-- Star toggle: pin this model to the top tier. Never toggles the row. -->
         <button
           type="button"
-          class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground/50 outline-none transition-colors hover:text-amber-400 focus-visible:text-amber-400"
-          :class="model.starred ? 'text-amber-400' : ''"
+          class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground/50 outline-none transition-colors hover:text-favorite focus-visible:text-favorite"
+          :class="model.starred ? 'text-favorite' : ''"
           :aria-label="model.starred ? t('modelSelect.unstar') : t('modelSelect.star')"
           :title="model.starred ? t('modelSelect.unstar') : t('modelSelect.star')"
           @click.stop="store.toggleModelStarred(model.id)"

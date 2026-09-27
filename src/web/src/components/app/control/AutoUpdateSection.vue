@@ -74,7 +74,7 @@ onMounted(() => {
     <SettingsRow :label="t('autoUpdate.versionLabel')">
       <template #control>
         <!-- i18n-ignore -->
-        <span class="font-mono text-[12.5px] text-foreground">{{ store.appVersion || t('autoUpdate.versionUnknown') }}</span>
+        <span class="font-mono text-ui text-foreground">{{ store.appVersion || t('autoUpdate.versionUnknown') }}</span>
       </template>
     </SettingsRow>
     <SettingsRow :label="t('actions.checkUpdates')">

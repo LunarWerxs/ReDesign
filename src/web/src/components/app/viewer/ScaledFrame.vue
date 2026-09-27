@@ -78,7 +78,7 @@ useIframeScale(wrap, frame, () => ({
 </script>
 
 <template>
-  <div ref="wrap" class="relative overflow-hidden bg-white" :style="{ aspectRatio: String(frameAspect) }">
+  <div ref="wrap" class="relative aspect-(--frame-aspect) overflow-hidden bg-white" :style="{ '--frame-aspect': String(frameAspect) }">
     <!-- data-output-frame: claimed by composables/useFrameFocusGuard.ts, which undoes the
          scroll jump a preview causes when its content autofocuses itself on load. -->
     <iframe

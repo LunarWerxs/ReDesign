@@ -46,5 +46,5 @@ onMounted(async () => {
       </span>
     </div>
   </div>
-  <p v-else-if="loaded" class="mt-3 text-[11px] text-muted-foreground/70">{{ t('cost.tracesEmpty') }}</p>
+  <p v-else-if="loaded" class="mt-3 text-2xs text-muted-foreground/70">{{ t('cost.tracesEmpty') }}</p>
 </template>

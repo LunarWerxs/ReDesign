@@ -33,13 +33,15 @@ const inactiveNavClass = 'text-muted-foreground hover:bg-background/70 hover:tex
 const route = useRoute();
 const dashboardLinkEl = ref<HTMLElement | null>(null);
 const viewerLinkEl = ref<HTMLElement | null>(null);
-const indicatorStyle = ref<{ transform: string; width: string }>({ transform: 'translateX(0px)', width: '0px' });
+const indicatorX = ref(0);
+const indicatorW = ref(0);
 const indicatorReady = ref(false);
 
 function measure() {
   const active = route.path === '/viewer' ? viewerLinkEl.value : dashboardLinkEl.value;
   if (!active) return;
-  indicatorStyle.value = { transform: `translateX(${active.offsetLeft}px)`, width: `${active.offsetWidth}px` };
+  indicatorX.value = active.offsetLeft;
+  indicatorW.value = active.offsetWidth;
   indicatorReady.value = true;
 }
 
@@ -56,20 +58,20 @@ onBeforeUnmount(() => {
 
 <template>
   <header
-    class="sticky top-0 z-40 bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75"
+    class="sticky top-0 z-40 bg-background/90 backdrop-blur supports-backdrop-filter:bg-background/75"
     :class="props.bordered ? 'border-b' : ''"
   >
     <div
       :class="
         props.contained
           ? [
-              'mx-auto h-[58px] w-full max-w-(--container-max) px-6',
+              'mx-auto h-14.5 w-full max-w-(--container-max) px-6',
               props.sidebar ? 'grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]' : '',
             ]
-          : 'px-[18px]'
+          : 'px-4.5'
       "
     >
-      <div class="flex h-[58px] min-w-0 items-center gap-3">
+      <div class="flex h-14.5 min-w-0 items-center gap-3">
         <RouterLink
           to="/"
           class="inline-flex shrink-0 items-center gap-2 text-base font-extrabold"
@@ -82,8 +84,8 @@ onBeforeUnmount(() => {
         <nav class="relative flex shrink-0 items-center rounded-lg border bg-muted/40 p-0.5" :aria-label="t('topbar.workspace')">
           <div
             v-if="indicatorReady"
-            class="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-background shadow-xs transition-[transform,width] duration-200 ease-out"
-            :style="indicatorStyle"
+            class="pointer-events-none absolute inset-y-0.5 left-0.5 rounded-md bg-background shadow-xs topbar-indicator"
+            :style="{ '--indicator-x': `${indicatorX}px`, '--indicator-w': `${indicatorW}px` }"
             aria-hidden="true"
           />
           <RouterLink v-slot="{ href, navigate, isActive }" to="/" custom>

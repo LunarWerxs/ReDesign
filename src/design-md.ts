@@ -107,109 +107,173 @@ function firstFont(value: string): string {
   return /^(inherit|initial|unset|var\()/i.test(first) ? "" : first;
 }
 
+interface ComponentEntry {
+  count: number;
+  states: Set<string>;
+}
+
+/** Everything extractDesignTokens accumulates while it reads the page. */
+interface TokenScan {
+  buckets: Record<keyof DesignTokens["colors"], Counter>;
+  fonts: Counter;
+  sizes: Counter;
+  radii: Counter;
+  spacing: Counter;
+  shadows: Counter;
+  variables: Map<string, string>;
+  components: Map<string, ComponentEntry>;
+  utilityClasses: boolean;
+  darkVariant: boolean;
+}
+
+function newTokenScan(darkVariant: boolean): TokenScan {
+  return {
+    buckets: { background: new Counter(), text: new Counter(), border: new Counter(), other: new Counter() },
+    fonts: new Counter(),
+    sizes: new Counter(),
+    radii: new Counter(),
+    spacing: new Counter(),
+    shadows: new Counter(),
+    variables: new Map<string, string>(),
+    components: new Map<string, ComponentEntry>(),
+    utilityClasses: false,
+    darkVariant,
+  };
+}
+
+function touchComponent(scan: TokenScan, name: string): ComponentEntry {
+  let entry = scan.components.get(name);
+  if (!entry) { entry = { count: 0, states: new Set() }; scan.components.set(name, entry); }
+  return entry;
+}
+
+/** One CSS declaration: custom properties are kept as variables (first definition wins), the rest feed the counters. */
+function collectDeclaration(scan: TokenScan, prop: string, value: string): void {
+  if (prop.startsWith("--")) {
+    if (!scan.variables.has(prop) && value.length <= 120) scan.variables.set(prop, value);
+    return;
+  }
+  for (const c of value.match(COLOR_RE) || []) scan.buckets[colorBucket(prop)].add(normColor(c));
+  collectTypeAndBoxDeclaration(scan, prop, value);
+}
+
+function collectTypeAndBoxDeclaration(scan: TokenScan, prop: string, value: string): void {
+  if (prop === "font-family") scan.fonts.add(firstFont(value));
+  else if (prop === "font") scan.fonts.add(firstFont(/(?:^|\s)[\d.]+(?:px|rem|em|pt|%)(?:\/\S+)?\s+(.+)$/.exec(value)?.[1] || ""));
+  else if (prop === "font-size") scan.sizes.add(value);
+  else if (prop.endsWith("radius")) scan.radii.add(value);
+  else if (/^(padding|margin|gap|row-gap|column-gap)(-|$)/.test(prop)) collectSpacingValues(scan, value);
+  else if (prop === "box-shadow" && value !== "none") scan.shadows.add(value);
+}
+
+function collectSpacingValues(scan: TokenScan, value: string): void {
+  for (const v of value.split(/\s+/)) if (/^-?[\d.]+(px|rem|em)$/.test(v)) scan.spacing.add(v);
+}
+
+/** Google Fonts links name the families even when the CSS only says var(--font). */
+function collectGoogleFonts(scan: TokenScan, html: string): void {
+  for (const m of html.matchAll(/fonts\.googleapis\.com\/css2?\?([^"'\s>]+)/gi)) {
+    for (const fam of (m[1] || "").replace(/&amp;/g, "&").matchAll(/family=([^:&]+)/g)) {
+      try { scan.fonts.add(decodeURIComponent((fam[1] || "").replace(/\+/g, " "))); } catch { /* malformed escape: skip */ }
+    }
+  }
+}
+
+function componentForTag(tag: string, role: string, classes: string): (typeof COMPONENTS)[number] | undefined {
+  return COMPONENTS.find((c) => c.tags.includes(tag) || (role && c.roles.includes(role)) || c.classHint.test(classes));
+}
+
+/** One opening tag: count the component it is, then read its utility classes. */
+function scanTag(scan: TokenScan, m: RegExpMatchArray): void {
+  const tag = (m[1] || "").toLowerCase();
+  if (tag === "style" || tag === "script" || tag === "link" || tag === "meta") return;
+  const attrs = m[2] || "";
+  const cls = /\sclass\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attrs);
+  const classList = (cls?.[2] ?? cls?.[3] ?? "").split(/\s+/).filter(Boolean);
+  const role = /\srole\s*=\s*["']?([\w-]+)/i.exec(attrs)?.[1]?.toLowerCase() || "";
+  const component = componentForTag(tag, role, classList.join(" "));
+  const entry = component ? touchComponent(scan, component.name) : null;
+  if (entry) entry.count++;
+  for (const raw of classList) collectUtilityClass(scan, raw, entry);
+}
+
+/** One class name: a state prefix marks the tag's component, the bare utility feeds the counters. */
+function collectUtilityClass(scan: TokenScan, raw: string, entry: ComponentEntry | null): void {
+  const state = TW_STATE_RE.exec(raw);
+  if (state) {
+    scan.utilityClasses = true;
+    if (state[1] === "dark") scan.darkVariant = true;
+    else entry?.states.add(state[1] || "");
+  }
+  const base = raw.replace(/^(?:[\w-]+:)+/, "");
+  if (collectUtilityColor(scan, base) || collectUtilityToken(scan, base)) scan.utilityClasses = true;
+}
+
+function collectUtilityColor(scan: TokenScan, base: string): boolean {
+  const color = TW_COLOR_RE.exec(base);
+  if (!color || TW_TEXT_SIZE_RE.test(base)) return false;
+  const arbitrary = /^\[(.+)\]$/.exec(color[2] || "");
+  scan.buckets[colorBucket(color[1] || "")].add(arbitrary ? normColor(arbitrary[1] || "") : base);
+  return true;
+}
+
+function collectUtilityToken(scan: TokenScan, base: string): boolean {
+  if (TW_TEXT_SIZE_RE.test(base)) scan.sizes.add(base);
+  else if (/^rounded(-[\w[\].#%]+)?$/.test(base)) scan.radii.add(base);
+  else if (TW_SPACING_RE.test(base)) scan.spacing.add(base);
+  else if (/^shadow(-\w+)?$/.test(base) && base !== "shadow-none") scan.shadows.add(base);
+  else if (/^font-(sans|serif|mono|\[[^\]]+\])$/.test(base)) scan.fonts.add(base);
+  else return false;
+  return true;
+}
+
+/** CSS rules attach states to a component when the selector names it (button:hover, .card:focus-within). */
+function collectCssStates(scan: TokenScan, css: string): void {
+  for (const m of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)) {
+    for (const selector of (m[1] || "").split(",")) collectSelectorStates(scan, selector);
+  }
+}
+
+function collectSelectorStates(scan: TokenScan, selector: string): void {
+  const states = [...selector.matchAll(CSS_STATE_RE)].map((s) => s[1] || s[2] || s[3] || "").filter(Boolean);
+  if (!states.length) return;
+  const bare = selector.replace(CSS_STATE_RE, " ");
+  const component = COMPONENTS.find((c) => c.tags.some((t) => new RegExp(`(^|[\\s>+~])${t}\\b`, "i").test(bare)) || c.classHint.test(bare.replace(/[.#]/g, " ")));
+  if (component) for (const s of states) touchComponent(scan, component.name).states.add(s);
+}
+
+function componentSummary(scan: TokenScan): DesignTokens["components"] {
+  return [...scan.components.entries()]
+    .map(([name, v]) => ({ name, count: v.count, states: [...v.states].sort() }))
+    .filter((c) => c.count > 0 || c.states.length)
+    .sort((a, b) => COMPONENTS.findIndex((c) => c.name === a.name) - COMPONENTS.findIndex((c) => c.name === b.name));
+}
+
 /** Read the page's own tokens and components. Pure: exported for tests. */
 export function extractDesignTokens(input: string): DesignTokens {
   const html = input.length > MAX_HTML_CHARS ? input.slice(0, MAX_HTML_CHARS) : input;
   const { blocks, inline } = cssSources(html);
-  const buckets = { background: new Counter(), text: new Counter(), border: new Counter(), other: new Counter() };
-  const fonts = new Counter();
-  const sizes = new Counter();
-  const radii = new Counter();
-  const spacing = new Counter();
-  const shadows = new Counter();
-  const variables = new Map<string, string>();
+  const scan = newTokenScan(/prefers-color-scheme:\s*dark|\.dark\b|\[data-theme=["']?dark/i.test(blocks.join("\n")));
 
   for (const [prop, value] of [...blocks.flatMap((b) => declarations(b, true)), ...inline.flatMap((b) => declarations(b, false))]) {
-    if (prop.startsWith("--")) {
-      if (!variables.has(prop) && value.length <= 120) variables.set(prop, value);
-      continue;
-    }
-    for (const c of value.match(COLOR_RE) || []) buckets[colorBucket(prop)].add(normColor(c));
-    if (prop === "font-family") fonts.add(firstFont(value));
-    else if (prop === "font") fonts.add(firstFont(/(?:^|\s)[\d.]+(?:px|rem|em|pt|%)(?:\/\S+)?\s+(.+)$/.exec(value)?.[1] || ""));
-    else if (prop === "font-size") sizes.add(value);
-    else if (prop.endsWith("radius")) radii.add(value);
-    else if (/^(padding|margin|gap|row-gap|column-gap)(-|$)/.test(prop)) {
-      for (const v of value.split(/\s+/)) if (/^-?[\d.]+(px|rem|em)$/.test(v)) spacing.add(v);
-    } else if (prop === "box-shadow" && value !== "none") shadows.add(value);
+    collectDeclaration(scan, prop, value);
   }
+  collectGoogleFonts(scan, html);
+  for (const m of html.matchAll(/<([a-z][\w-]*)\b([^>]*)>/gi)) scanTag(scan, m);
+  for (const css of blocks) collectCssStates(scan, css);
 
-  // Google Fonts links name the families even when the CSS only says var(--font).
-  for (const m of html.matchAll(/fonts\.googleapis\.com\/css2?\?([^"'\s>]+)/gi)) {
-    for (const fam of (m[1] || "").replace(/&amp;/g, "&").matchAll(/family=([^:&]+)/g)) {
-      try { fonts.add(decodeURIComponent((fam[1] || "").replace(/\+/g, " "))); } catch { /* malformed escape: skip */ }
-    }
-  }
-
-  const componentCounts = new Map<string, { count: number; states: Set<string> }>();
-  const touch = (name: string) => {
-    let entry = componentCounts.get(name);
-    if (!entry) { entry = { count: 0, states: new Set() }; componentCounts.set(name, entry); }
-    return entry;
-  };
-  let utilityClasses = false;
-  let darkVariant = /prefers-color-scheme:\s*dark|\.dark\b|\[data-theme=["']?dark/i.test(blocks.join("\n"));
-
-  for (const m of html.matchAll(/<([a-z][\w-]*)\b([^>]*)>/gi)) {
-    const tag = (m[1] || "").toLowerCase();
-    if (tag === "style" || tag === "script" || tag === "link" || tag === "meta") continue;
-    const attrs = m[2] || "";
-    const cls = /\sclass\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attrs);
-    const classList = (cls?.[2] ?? cls?.[3] ?? "").split(/\s+/).filter(Boolean);
-    const role = /\srole\s*=\s*["']?([\w-]+)/i.exec(attrs)?.[1]?.toLowerCase() || "";
-    const component = COMPONENTS.find((c) => c.tags.includes(tag) || (role && c.roles.includes(role)) || c.classHint.test(classList.join(" ")));
-    const entry = component ? touch(component.name) : null;
-    if (entry) entry.count++;
-    for (const raw of classList) {
-      const state = TW_STATE_RE.exec(raw);
-      if (state) {
-        utilityClasses = true;
-        if (state[1] === "dark") darkVariant = true;
-        else entry?.states.add(state[1] || "");
-      }
-      const base = raw.replace(/^(?:[\w-]+:)+/, "");
-      const color = TW_COLOR_RE.exec(base);
-      if (color && !TW_TEXT_SIZE_RE.test(base)) {
-        utilityClasses = true;
-        const arbitrary = /^\[(.+)\]$/.exec(color[2] || "");
-        buckets[colorBucket(color[1] || "")].add(arbitrary ? normColor(arbitrary[1] || "") : base);
-        continue;
-      }
-      if (TW_TEXT_SIZE_RE.test(base)) { utilityClasses = true; sizes.add(base); }
-      else if (/^rounded(-[\w[\].#%]+)?$/.test(base)) { utilityClasses = true; radii.add(base); }
-      else if (TW_SPACING_RE.test(base)) { utilityClasses = true; spacing.add(base); }
-      else if (/^shadow(-\w+)?$/.test(base) && base !== "shadow-none") { utilityClasses = true; shadows.add(base); }
-      else if (/^font-(sans|serif|mono|\[[^\]]+\])$/.test(base)) { utilityClasses = true; fonts.add(base); }
-    }
-  }
-
-  // CSS rules attach states to a component when the selector names it (button:hover, .card:focus-within).
-  for (const css of blocks) {
-    for (const m of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{/g)) {
-      for (const selector of (m[1] || "").split(",")) {
-        const states = [...selector.matchAll(CSS_STATE_RE)].map((s) => s[1] || s[2] || s[3] || "").filter(Boolean);
-        if (!states.length) continue;
-        const bare = selector.replace(CSS_STATE_RE, " ");
-        const component = COMPONENTS.find((c) => c.tags.some((t) => new RegExp(`(^|[\\s>+~])${t}\\b`, "i").test(bare)) || c.classHint.test(bare.replace(/[.#]/g, " ")));
-        if (component) for (const s of states) touch(component.name).states.add(s);
-      }
-    }
-  }
-
+  const { buckets } = scan;
   return {
-    variables: [...variables.entries()].slice(0, 40),
+    variables: [...scan.variables.entries()].slice(0, 40),
     colors: { background: buckets.background.top(), text: buckets.text.top(), border: buckets.border.top(6), other: buckets.other.top(6) },
-    fonts: fonts.top(4),
-    fontSizes: sizes.top(10),
-    radii: radii.top(6),
-    spacing: spacing.top(10),
-    shadows: shadows.top(4),
-    utilityClasses,
-    darkVariant,
-    components: [...componentCounts.entries()]
-      .map(([name, v]) => ({ name, count: v.count, states: [...v.states].sort() }))
-      .filter((c) => c.count > 0 || c.states.length)
-      .sort((a, b) => COMPONENTS.findIndex((c) => c.name === a.name) - COMPONENTS.findIndex((c) => c.name === b.name)),
+    fonts: scan.fonts.top(4),
+    fontSizes: scan.sizes.top(10),
+    radii: scan.radii.top(6),
+    spacing: scan.spacing.top(10),
+    shadows: scan.shadows.top(4),
+    utilityClasses: scan.utilityClasses,
+    darkVariant: scan.darkVariant,
+    components: componentSummary(scan),
   };
 }
 

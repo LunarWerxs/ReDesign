@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useControlStore } from '@/stores/control';
@@ -37,19 +36,17 @@ function onPreviewOpenChange(open: boolean) {
 
 <template>
   <Card>
-    <CardHeader class="flex flex-row items-center gap-2.5">
-      <CardTitle class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {{ t('input.inputsTitle') }}
+    <CardHeader class="flex flex-row items-center">
+      <CardTitle>
+        <span class="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {{ t('input.inputsTitle') }}
+        </span>
       </CardTitle>
     </CardHeader>
     <CardContent>
       <InputDropzone />
 
-      <div
-        v-if="sessionInputs.length"
-        class="grid gap-2.5"
-        style="grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))"
-      >
+      <div v-if="sessionInputs.length" class="input-tile-grid grid gap-2.5">
         <InputTile
           v-for="it in sessionInputs"
           :key="it.id"
@@ -76,10 +73,7 @@ function onPreviewOpenChange(open: boolean) {
             <Button variant="ghost" size="sm" @click="store.selectNone('inputs')">{{ t('input.none') }}</Button>
           </div>
         </div>
-        <div
-          class="grid gap-2"
-          style="grid-template-columns: repeat(auto-fill, minmax(104px, 124px))"
-        >
+        <div class="input-tile-grid-compact grid gap-2">
           <InputTile
             v-for="it in previousInputs"
             :key="it.id"
@@ -102,10 +96,12 @@ function onPreviewOpenChange(open: boolean) {
   </Card>
 
   <Dialog :open="!!previewInput" @update:open="onPreviewOpenChange">
-    <DialogContent class="max-h-[94vh] w-[min(98vw,1500px)] max-w-none gap-0 overflow-hidden p-0">
-      <DialogHeader class="border-b px-4 py-3">
-        <DialogTitle class="truncate pe-10 text-sm">{{ previewInput?.name }}</DialogTitle>
-      </DialogHeader>
+    <DialogContent flush class="max-h-[94vh] w-[min(98vw,1500px)] max-w-none overflow-hidden">
+      <!-- plain wrapper, not DialogHeader: this flush header draws its own rule and padding, and
+           pe-14 (px-4 + the old pe-10) keeps the title clear of the close button -->
+      <div class="border-b py-3 ps-4 pe-14">
+        <DialogTitle><span class="block truncate">{{ previewInput?.name }}</span></DialogTitle>
+      </div>
       <div class="max-h-[calc(94vh-49px)] overflow-auto bg-black p-3">
         <img
           v-if="previewInput"

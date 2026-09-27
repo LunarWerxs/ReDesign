@@ -76,7 +76,7 @@ const syncError = computed(() => (store.syncStatus && !store.syncStatus.ok ? sto
     <!-- signed out (or still loading the status) → sign in, and syncing starts -->
     <SettingsRow v-if="!connected" :label="t('cloudSync.title')">
       <template #icon>
-        <CloudIcon class="size-[18px] shrink-0 text-sky-500" />
+        <CloudIcon class="size-4.5 shrink-0 text-info" />
       </template>
       <template #info>
         <InfoHint :text="t('cloudSync.enableHint')" />
@@ -98,9 +98,9 @@ const syncError = computed(() => (store.syncStatus && !store.syncStatus.ok ? sto
             v-if="account?.picture"
             :src="account.picture"
             alt=""
-            class="size-[18px] shrink-0 rounded-full object-cover"
+            class="size-4.5 shrink-0 rounded-full object-cover"
           />
-          <CloudIcon v-else class="size-[18px] shrink-0 text-sky-500" />
+          <CloudIcon v-else class="size-4.5 shrink-0 text-info" />
         </template>
         <template #label>
           <span class="truncate">
@@ -140,7 +140,7 @@ const syncError = computed(() => (store.syncStatus && !store.syncStatus.ok ? sto
     </template>
 
     <!-- inline, non-blocking error -->
-    <p v-if="syncError" class="px-3.5 py-2 text-[11.5px] text-destructive">
+    <p v-if="syncError" class="px-3.5 py-2 text-xs text-destructive">
       {{ syncError.error }}
       <template v-if="syncError.retryAfterSeconds">
         , {{ t('cloudSync.retryHint', { seconds: syncError.retryAfterSeconds }) }}

@@ -41,8 +41,8 @@ const skipped = computed(() => props.job.status === 'skipped');
     :class="itemHidden ? 'opacity-50 grayscale' : ''"
   >
     <div class="flex min-w-0 items-center gap-2.5 border-b px-3 py-2.5">
-      <span class="size-2.5 shrink-0 rounded-full" :style="{ background: modelColor || '#888' }" />
-      <span class="min-w-0 truncate text-[13px] font-bold">{{ modelLabel }}</span>
+      <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': modelColor }" />
+      <span class="min-w-0 truncate text-ui font-bold">{{ modelLabel }}</span>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ promptLabel }}</span>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
@@ -95,9 +95,9 @@ const skipped = computed(() => props.job.status === 'skipped');
       </div>
     </div>
     <div
-      class="grid place-items-center p-3.5 text-center"
+      class="grid aspect-(--frame-aspect) place-items-center p-3.5 text-center"
       :class="skipped ? 'bg-muted/40 text-muted-foreground' : 'bg-destructive/10 text-destructive'"
-      :style="{ aspectRatio: String(frameAspect) }"
+      :style="{ '--frame-aspect': String(frameAspect) }"
     >
       <div>
         <div>{{ skipped ? t('viewer.skipped') : t('viewer.failed') }}</div>

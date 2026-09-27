@@ -70,7 +70,7 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
       :src="src"
       alt=""
       class="block w-full bg-black object-cover"
-      :class="size === 'compact' ? 'h-14' : 'h-[110px]'"
+      :class="size === 'compact' ? 'h-14' : 'h-27.5'"
     />
     <span
       class="flex items-center justify-between gap-1.5 px-2.5 py-1.5 text-xs"
@@ -84,7 +84,7 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
       <span class="truncate" :title="name">{{ name }}</span>
       <span
         v-if="badge"
-        class="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground"
+        class="shrink-0 rounded-full bg-muted px-1.5 py-px text-3xs text-muted-foreground"
         >{{ badge }}</span
       >
     </span>

@@ -461,7 +461,7 @@ async function confirmDeleteKey() {
             <span class="text-muted-foreground" :title="spendTitle">{{ t('cost.spendToDate') }}</span>
             <span class="font-mono font-semibold">{{ spendLabel }}</span>
           </div>
-          <p v-if="pricingLastUpdatedLabel" class="mt-1.5 text-[11px] text-muted-foreground/70">
+          <p v-if="pricingLastUpdatedLabel" class="mt-1.5 text-2xs text-muted-foreground/70">
             {{ pricingLastUpdatedLabel }}
           </p>
           <TraceStats v-if="open" />

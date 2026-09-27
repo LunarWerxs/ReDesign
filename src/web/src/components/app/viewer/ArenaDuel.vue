@@ -24,7 +24,7 @@ const sides = computed(() => {
 </script>
 
 <template>
-  <section v-if="store.arenaPair" class="mx-[18px] mt-[18px] rounded-lg border bg-card p-3" :aria-label="t('viewer.arenaTitle')">
+  <section v-if="store.arenaPair" class="mx-4.5 mt-4.5 rounded-lg border bg-card p-3" :aria-label="t('viewer.arenaTitle')">
     <div class="mb-3 flex flex-wrap items-center gap-2">
       <ScaleIcon class="size-4 text-muted-foreground" />
       <span class="text-sm font-semibold">{{ t('viewer.arenaTitle') }}</span>

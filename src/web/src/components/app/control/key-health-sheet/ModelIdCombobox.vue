@@ -96,7 +96,7 @@ function pick(id: string) {
           <ChevronsUpDownIcon class="size-3.5" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" :collision-padding="12" class="w-[min(360px,calc(100vw-2rem))] p-0">
+      <PopoverContent align="end" :collision-padding="12" flush class="w-[min(360px,calc(100vw-2rem))]">
         <Command>
           <CommandInput :placeholder="t('keyModel.searchModels')" />
           <CommandList class="max-h-[min(50vh,320px)]">

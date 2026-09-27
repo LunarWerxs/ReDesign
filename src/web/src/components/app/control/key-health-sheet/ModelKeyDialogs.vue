@@ -125,7 +125,7 @@ const emit = defineEmits<{
           <div class="grid gap-1.5">
             <Label for="model-color">{{ t('keyModel.color') }}</Label>
             <div class="flex items-center gap-2">
-              <Input id="model-color" v-model="modelForm.color" type="color" class="h-9 w-12 p-1" />
+              <Input id="model-color" v-model="modelForm.color" type="color" variant="swatch" class="h-9 w-12" />
               <Input v-model="modelForm.color" pattern="#[0-9a-fA-F]{6}" />
             </div>
           </div>
@@ -141,7 +141,7 @@ const emit = defineEmits<{
             <span>{{ t('keyModel.temperature') }}</span>
           </label>
           <div v-if="modelForm.supportsTemperature" class="ms-auto flex min-w-32 items-center gap-2">
-            <Label for="model-temperature" class="text-sm">{{ t('keyModel.temp') }}</Label>
+            <Label for="model-temperature"><span class="text-sm">{{ t('keyModel.temp') }}</span></Label>
             <Input
               id="model-temperature"
               v-model="modelForm.temperature"
@@ -162,8 +162,7 @@ const emit = defineEmits<{
           <Button
             v-if="modelForm.id"
             type="button"
-            variant="ghost"
-            class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            variant="destructive"
             :disabled="modelSaving"
             @click="emit('remove-model')"
           >

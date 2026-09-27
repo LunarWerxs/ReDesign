@@ -53,6 +53,11 @@ jobs:
       # there. Linux only: the rule reads source, so running it three times says the same thing.
       - if: runner.os == 'Linux'
         run: bun run check:spawntimeout
+      # src/web carries both a bun.lock and an npm package-lock.json, and the web job's `npm ci`
+      # refuses a tree where they disagree. Checking it here names the drift directly instead of
+      # leaving it to surface as an install failure. Linux only: it reads two files, no registry.
+      - if: runner.os == 'Linux'
+        run: bun run check:weblock
       - run: bun test tests
         env:
           MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
@@ -71,9 +76,14 @@ jobs:
           node-version: "24"
           cache: "npm"
           cache-dependency-path: src/web/package-lock.json
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
       - run: npm ci
-      # `build` does NOT type-check (it is check:i18n + vite build, and vite strips types without
-      # checking them), so vue-tsc needs its own step. Covers src/ and the test/ specs.
-      - run: npm run typecheck
-      - run: npm run test # Vitest: pure-lib units + component render (no backend needed)
+      # The root's check:web, the same lanes a local `bun run check` runs: vue-tsc over src/ and the
+      # test/ specs (`build` does NOT type-check - vite strips types without checking them), the
+      # i18n key check, and Vitest (pure-lib units + component render, no backend needed). It
+      # delegates into src/web with `--cwd`, so the `npm ci` tree above is the one it runs.
+      - run: bun run check:web
+        working-directory: .
       - run: npm run build # vite bundle (build script runs check:i18n first)

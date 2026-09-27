@@ -36,13 +36,13 @@ function useWinningStack() {
 
 <template>
   <div v-if="standings.length" class="px-3.5 pb-2 pt-1">
-    <p class="pb-1 text-[11.5px] text-muted-foreground">{{ t('viewer.arenaBoardTitle', { count: store.arenaBoard?.votes || 0 }) }}</p>
+    <p class="pb-1 text-2xs text-muted-foreground">{{ t('viewer.arenaBoardTitle', { count: store.arenaBoard?.votes || 0 }) }}</p>
     <ol class="m-0 list-none p-0">
-      <li v-for="(s, i) in standings.slice(0, SHOWN)" :key="s.modelId" class="flex items-center gap-2 py-0.5 text-[12px]">
-        <span class="w-4 shrink-0 text-right text-muted-foreground/70">{{ i + 1 }}</span>
+      <li v-for="(s, i) in standings.slice(0, SHOWN)" :key="s.modelId" class="flex items-center gap-2 py-0.5 text-xs">
+        <span class="w-4 shrink-0 text-end text-muted-foreground/70">{{ i + 1 }}</span>
         <span class="min-w-0 flex-1 truncate" :title="s.modelId">{{ s.label }}</span>
         <span class="shrink-0 tabular-nums font-medium">{{ s.rating }}</span>
-        <span class="w-12 shrink-0 text-right tabular-nums text-muted-foreground">{{ s.wins }}-{{ s.losses }}</span>
+        <span class="w-12 shrink-0 text-end tabular-nums text-muted-foreground">{{ s.wins }}-{{ s.losses }}</span>
       </li>
     </ol>
     <Button

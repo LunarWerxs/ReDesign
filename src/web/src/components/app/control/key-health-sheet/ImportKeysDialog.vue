@@ -60,9 +60,11 @@ async function runImport() {
   <Dialog v-model:open="open">
     <DialogContent class="sm:max-w-lg">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <SparklesIcon class="size-4 text-primary" />
-          {{ t('keyImport.title') }}
+        <DialogTitle>
+          <span class="flex items-center gap-2">
+            <SparklesIcon class="size-4 text-primary" />
+            {{ t('keyImport.title') }}
+          </span>
         </DialogTitle>
         <DialogDescription>{{ t('keyImport.description') }}</DialogDescription>
       </DialogHeader>
@@ -71,7 +73,7 @@ async function runImport() {
         v-model="text"
         :placeholder="t('keyImport.placeholder')"
         rows="5"
-        class="font-mono text-xs"
+        variant="mono"
         spellcheck="false"
         autocomplete="off"
         @keydown.meta.enter="runImport"
@@ -79,18 +81,18 @@ async function runImport() {
       />
 
       <div v-if="results.length" class="grid max-h-56 gap-1 overflow-y-auto rounded-md border bg-muted/20 p-2">
-        <div class="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div class="px-1 pb-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
           {{ t('keyImport.resultsTitle') }}
         </div>
         <div
           v-for="(r, i) in results"
           :key="i"
-          class="flex items-center gap-2 rounded px-1 py-1 text-xs"
+          class="flex items-center gap-2 rounded p-1 text-xs"
         >
           <span class="font-mono text-muted-foreground">{{ r.mask }}</span>
           <span v-if="r.label" class="font-medium">{{ r.label }}</span>
-          <span v-if="r.probed" class="text-[10px] text-muted-foreground/70">· {{ t('keyImport.verified') }}</span>
-          <span class="ms-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium" :class="STATUS_META[r.status].cls">
+          <span v-if="r.probed" class="text-3xs text-muted-foreground/70">· {{ t('keyImport.verified') }}</span>
+          <span class="ms-auto shrink-0 rounded px-1.5 py-0.5 text-3xs font-medium" :class="STATUS_META[r.status].cls">
             {{ t(STATUS_META[r.status].label) }}
           </span>
         </div>

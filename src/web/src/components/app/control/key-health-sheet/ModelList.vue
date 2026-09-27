@@ -98,7 +98,7 @@ async function restoreModel(model: Model) {
 
 <template>
   <div class="mb-2 flex items-center gap-2">
-    <h3 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.modelsAndKeys') }}</h3>
+    <h3 class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.modelsAndKeys') }}</h3>
     <span class="text-xs text-muted-foreground">{{ activeModels.length }}</span>
     <div class="ms-auto flex items-center gap-1">
       <Tooltip>
@@ -145,7 +145,7 @@ async function restoreModel(model: Model) {
   <button
     v-if="!hasAnyKeys && activeModels.length"
     type="button"
-    class="mb-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-3 text-start transition-colors hover:bg-primary/10"
+    class="mb-3 flex w-full items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-start transition-colors hover:bg-primary/10"
     @click="emit('import-keys')"
   >
     <SparklesIcon class="size-5 shrink-0 text-primary" />
@@ -160,171 +160,177 @@ async function restoreModel(model: Model) {
 
   <!-- Each model carries its own key pool inline; expand to manage keys. Drag the grip to reorder. -->
   <div ref="modelsParent" class="grid gap-2.5">
+    <!-- as-child: the card chrome sits on a plain div the Collapsible renders as, so the
+         drag parent's children (and the DOM) stay one element per model. -->
     <Collapsible
       v-for="model in modelList"
       :key="model.id"
       v-slot="{ open: modelOpen }"
       :default-open="false"
-      class="overflow-hidden rounded-lg border bg-card"
+      as-child
     >
-      <div class="flex items-center gap-2 px-3 py-2 text-xs">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="model-drag -ms-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
-              :aria-label="t('keyModel.dragToReorder')"
-            >
-              <GripVerticalIcon class="size-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{{ t('keyModel.dragToReorder') }}</TooltipContent>
-        </Tooltip>
-        <span class="size-2.5 shrink-0 rounded-full" :style="{ background: model.color || '#888' }" />
-        <span class="grid min-w-0 flex-1 gap-0.5">
-          <span class="truncate text-sm font-semibold">{{ model.label }}</span>
-          <span class="truncate text-muted-foreground">
-            {{ providerLabel(model.provider) }} · {{ model.apiModel }} · {{ poolLabel(model.keyEnv) }}
+      <div class="overflow-hidden rounded-lg border bg-card">
+        <div class="flex items-center gap-2 px-3 py-2 text-xs">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="model-drag -ms-1 flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/40 outline-none transition-colors hover:text-muted-foreground active:cursor-grabbing"
+                :aria-label="t('keyModel.dragToReorder')"
+              >
+                <GripVerticalIcon class="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('keyModel.dragToReorder') }}</TooltipContent>
+          </Tooltip>
+          <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': model.color }" />
+          <span class="grid min-w-0 flex-1 gap-0.5">
+            <span class="truncate text-sm font-semibold">{{ model.label }}</span>
+            <span class="truncate text-muted-foreground">
+              {{ providerLabel(model.provider) }} · {{ model.apiModel }} · {{ poolLabel(model.keyEnv) }}
+            </span>
           </span>
-        </span>
-        <!-- "Disabled" is the one badge that states a problem, so it's also the fix: clicking it
-             opens the same edit dialog as the pencil, where the enable switch lives. The
-             key-count badge stays inert (its affordance is the expander below it). -->
-        <Tooltip v-if="!model.enabled">
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              class="shrink-0 cursor-pointer rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              :aria-label="t('keyModel.enableModel', { label: model.label })"
-              @click="emit('edit-model', model)"
-            >
-              {{ t('keyModel.disabled') }}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{{ t('keyModel.enableModel', { label: model.label }) }}</TooltipContent>
-        </Tooltip>
-        <span
-          v-else
-          class="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium"
-          :class="isRunnable(model) ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'"
-        >
-          {{ modelKeys(model) }}
-        </span>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              variant="ghost"
-              size="icon-xs"
-              :aria-label="t('keyModel.editModel')"
-              @click="emit('edit-model', model)"
-            >
-              <PencilIcon class="size-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{{ t('keyModel.editModel') }}</TooltipContent>
-        </Tooltip>
-        <CollapsibleTrigger as-child>
-          <button
-            type="button"
-            class="grid size-6 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-            :title="tooltipsEnabled ? (modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')) : undefined"
-            :aria-label="modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')"
+          <!-- "Disabled" is the one badge that states a problem, so it's also the fix: clicking it
+               opens the same edit dialog as the pencil, where the enable switch lives. The
+               key-count badge stays inert (its affordance is the expander below it). -->
+          <Tooltip v-if="!model.enabled">
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                class="shrink-0 cursor-pointer rounded-md bg-muted px-2 py-1 text-2xs font-medium text-muted-foreground outline-none transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                :aria-label="t('keyModel.enableModel', { label: model.label })"
+                @click="emit('edit-model', model)"
+              >
+                {{ t('keyModel.disabled') }}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{{ t('keyModel.enableModel', { label: model.label }) }}</TooltipContent>
+          </Tooltip>
+          <span
+            v-else
+            class="shrink-0 rounded-md px-2 py-1 text-2xs font-medium"
+            :class="isRunnable(model) ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'"
           >
-            <ChevronDownIcon class="size-4 transition-transform" :class="modelOpen ? 'rotate-180' : ''" />
-          </button>
-        </CollapsibleTrigger>
-      </div>
-
-      <CollapsibleContent class="border-t">
-        <div class="flex items-center gap-2 bg-muted/30 px-3 py-1.5">
-          <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.keys') }}</span>
-          <span class="flex items-center gap-1.5">
-            <Tooltip v-for="b in badges(poolForModel(model))" :key="b.label">
-              <TooltipTrigger as-child>
-                <span
-                  class="grid size-5 place-items-center rounded-full text-[11px] font-semibold text-white"
-                  :class="b.cls"
-                  >{{ b.n }}</span
-                >
-              </TooltipTrigger>
-              <TooltipContent>{{ b.label }}</TooltipContent>
-            </Tooltip>
+            {{ modelKeys(model) }}
           </span>
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
-                class="ms-auto"
                 variant="ghost"
                 size="icon-xs"
-                :aria-label="t('keyModel.addApiKey')"
-                @click="emit('add-key', model.keyEnv || '')"
+                :aria-label="t('keyModel.editModel')"
+                @click="emit('edit-model', model)"
               >
-                <PlusIcon class="size-3.5" />
+                <PencilIcon class="size-3.5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{{ t('keyModel.addApiKey') }}</TooltipContent>
+            <TooltipContent>{{ t('keyModel.editModel') }}</TooltipContent>
           </Tooltip>
+          <CollapsibleTrigger as-child>
+            <button
+              type="button"
+              class="grid size-6 cursor-pointer place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              :title="tooltipsEnabled ? (modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')) : undefined"
+              :aria-label="modelOpen ? t('keyModel.hideKeys') : t('keyModel.showKeys')"
+            >
+              <ChevronDownIcon class="size-4 transition-transform" :class="modelOpen ? 'rotate-180' : ''" />
+            </button>
+          </CollapsibleTrigger>
         </div>
-        <div class="px-3 py-1">
-          <p v-if="!poolForModel(model)?.entries?.length" class="py-2 text-xs text-muted-foreground">
-            {{ t('keyModel.noKeysInPool') }}
-          </p>
-          <div
-            v-for="(k, i) in sortedEntries(poolForModel(model)?.entries || [])"
-            :key="i"
-            class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
-          >
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <span
-                  class="size-2.5 shrink-0 rounded-full"
-                  :class="keyDot[k.status] || 'bg-muted-foreground'"
-                />
-              </TooltipTrigger>
-              <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
-            </Tooltip>
-            <code class="font-mono">{{ k.mask }}</code>
-            <span class="text-muted-foreground" :title="t('keyModel.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
-            <!-- i18n-ignore -->
-            <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyModel.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
-            <span class="flex-1" />
-            <Tooltip v-if="k.lastError">
-              <TooltipTrigger as-child>
-                <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
-              </TooltipTrigger>
-              <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
-            </Tooltip>
+
+        <CollapsibleContent>
+          <div class="flex items-center gap-2 border-t bg-muted/30 px-3 py-1.5">
+            <span class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.keys') }}</span>
+            <span class="flex items-center gap-1.5">
+              <Tooltip v-for="b in badges(poolForModel(model))" :key="b.label">
+                <TooltipTrigger as-child>
+                  <span
+                    class="grid size-5 place-items-center rounded-full text-2xs font-semibold text-white"
+                    :class="b.cls"
+                    >{{ b.n }}</span
+                  >
+                </TooltipTrigger>
+                <TooltipContent>{{ b.label }}</TooltipContent>
+              </Tooltip>
+            </span>
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
+                  class="ms-auto"
                   variant="ghost"
                   size="icon-xs"
-                  :aria-label="t('keyModel.editApiKey')"
-                  class="opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-                  @click="emit('edit-key', model.keyEnv || '', k)"
+                  :aria-label="t('keyModel.addApiKey')"
+                  @click="emit('add-key', model.keyEnv || '')"
                 >
-                  <PencilIcon class="size-3.5" />
+                  <PlusIcon class="size-3.5" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>{{ t('keyModel.editApiKey') }}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  :aria-label="t('keyModel.deleteApiKey')"
-                  class="text-destructive opacity-0 transition-opacity group-hover/key:opacity-100 focus-visible:opacity-100"
-                  @click="deleteKey(model.keyEnv || '', k)"
-                >
-                  <Trash2Icon class="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ t('keyModel.deleteApiKey') }}</TooltipContent>
+              <TooltipContent>{{ t('keyModel.addApiKey') }}</TooltipContent>
             </Tooltip>
           </div>
-        </div>
-      </CollapsibleContent>
+          <div class="px-3 py-1">
+            <p v-if="!poolForModel(model)?.entries?.length" class="py-2 text-xs text-muted-foreground">
+              {{ t('keyModel.noKeysInPool') }}
+            </p>
+            <div
+              v-for="(k, i) in sortedEntries(poolForModel(model)?.entries || [])"
+              :key="i"
+              class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
+            >
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <span
+                    class="size-2.5 shrink-0 rounded-full"
+                    :class="keyDot[k.status] || 'bg-muted-foreground'"
+                  />
+                </TooltipTrigger>
+                <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
+              </Tooltip>
+              <code class="font-mono">{{ k.mask }}</code>
+              <span class="text-muted-foreground" :title="t('keyModel.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
+              <!-- i18n-ignore -->
+              <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyModel.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
+              <span class="flex-1" />
+              <Tooltip v-if="k.lastError">
+                <TooltipTrigger as-child>
+                  <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
+                </TooltipTrigger>
+                <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
+              </Tooltip>
+              <!-- Hover-revealed key actions: the reveal sits on a plain wrapper so the Buttons keep
+                   their own styling; has-focus-visible keeps them reachable by keyboard. -->
+              <span class="inline-flex shrink-0 items-center gap-2 opacity-0 transition-opacity group-hover/key:opacity-100 has-focus-visible:opacity-100">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      :aria-label="t('keyModel.editApiKey')"
+                      @click="emit('edit-key', model.keyEnv || '', k)"
+                    >
+                      <PencilIcon class="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ t('keyModel.editApiKey') }}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      :aria-label="t('keyModel.deleteApiKey')"
+                      @click="deleteKey(model.keyEnv || '', k)"
+                    >
+                      <Trash2Icon class="size-3.5 text-destructive" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{{ t('keyModel.deleteApiKey') }}</TooltipContent>
+                </Tooltip>
+              </span>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </div>
     </Collapsible>
 
     <p v-if="!activeModels.length" class="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
@@ -334,7 +340,7 @@ async function restoreModel(model: Model) {
 
   <div v-if="archivedModels.length" class="mt-3 rounded-lg border border-dashed">
     <div class="flex items-center justify-between border-b px-3 py-2">
-      <h4 class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.removed') }}</h4>
+      <h4 class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.removed') }}</h4>
       <span class="text-xs text-muted-foreground">{{ archivedModels.length }}</span>
     </div>
     <div class="grid divide-y">
@@ -343,7 +349,7 @@ async function restoreModel(model: Model) {
         :key="model.id"
         class="flex min-w-0 items-center gap-2 px-3 py-2 text-xs"
       >
-        <span class="size-2.5 shrink-0 rounded-full" :style="{ background: model.color || '#888' }" />
+        <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': model.color }" />
         <span class="min-w-0 flex-1 truncate">
           <span class="font-semibold">{{ model.label }}</span>
           <span class="text-muted-foreground"> · {{ providerLabel(model.provider) }}</span>

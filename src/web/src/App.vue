@@ -35,7 +35,8 @@ const isViewerRoute = computed(() => route.name === 'Viewer');
 // The Settings sidebar pushes the page content. The shell is centered at
 // --container-max (AppContainer/AppTopbar) EXCEPT on the Viewer route, whose
 // OutputGrid body is full-bleed, so shellMaxWidth is disabled there.
-const { containerStyle } = usePushPanel(settingsOpen, {
+// The shift reaches the template as --push-shift (read by pe-(--push-shift)), not a style object.
+const { shiftPx } = usePushPanel(settingsOpen, {
   shellMaxWidth: () => (isViewerRoute.value ? null : 800),
 });
 // Only deep-link to a run this session is actually on: the one being viewed, or the one just
@@ -97,7 +98,7 @@ onMounted(async () => {
 
 <template>
   <TooltipProvider :delay-duration="120">
-    <div class="min-h-dvh bg-background text-foreground transition-[padding] duration-300 ease-in-out" :style="containerStyle">
+    <div class="push-shell min-h-dvh bg-background text-foreground pe-(--push-shift)" :style="{ '--push-shift': `${shiftPx}px` }">
       <!-- no :sidebar here; the header must never reserve the progress column and squish
            its own logo/status/settings when a run starts (progress lives below the content) -->
       <AppTopbar :viewer-to="viewerTo" :bordered="false" contained>
@@ -139,7 +140,8 @@ onMounted(async () => {
             <PopoverContent
               align="end"
               :collision-padding="12"
-              class="max-h-[min(80vh,620px)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto p-0"
+              flush
+              class="max-h-[min(80vh,620px)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto"
               @interact-outside="onViewFlyoutInteractOutside"
               @focus-outside="onViewFlyoutInteractOutside"
             >

@@ -16,7 +16,7 @@ function pngFile(name = "shot.png"): File {
   return new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
 }
 
-function mountTarget(props: Record<string, unknown> = {}) {
+function mountTarget(props: Partial<InstanceType<typeof ImageDropTarget>["$props"]> = {}) {
   return mount(ImageDropTarget, {
     attachTo: document.body,
     props: {

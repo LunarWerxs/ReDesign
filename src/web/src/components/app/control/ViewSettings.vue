@@ -252,9 +252,6 @@ async function deleteRuns(ids: string[]): Promise<RunDeleteResponse | null> {
   return result;
 }
 
-const rowTriggerClass =
-  'w-full h-auto data-[size=default]:h-auto justify-between gap-3 rounded-none border-0 bg-transparent dark:bg-transparent px-3.5 py-[7px] text-[13px] font-normal text-popover-foreground shadow-none ring-0 outline-none transition-colors hover:bg-accent dark:hover:bg-accent focus-visible:bg-accent focus-visible:ring-0 [&>svg]:hidden';
-
 // The row triggers are full-width (they span the flyout), so the popper would inherit
 // that width via --reka-select-trigger-width and balloon to the full flyout width. Break
 // that coupling for these menus: size the option list to its own content instead.
@@ -295,17 +292,17 @@ function selectCustomInput(event: FocusEvent) {
   <div class="divide-y divide-border">
     <!-- Project -->
     <section class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.project') }}
       </p>
       <button
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-1.75 text-start outline-none transition-colors hover:bg-accent"
         :title="t('viewSettings.switchRunTitle')"
         @click="openRunPicker"
       >
-        <span class="shrink-0 text-[13px] text-muted-foreground">{{ t('viewSettings.currentTask') }}</span>
-        <span class="flex min-w-0 flex-1 items-center justify-end gap-1 text-[13px] font-medium text-foreground">
+        <span class="shrink-0 text-ui text-muted-foreground">{{ t('viewSettings.currentTask') }}</span>
+        <span class="flex min-w-0 flex-1 items-center justify-end gap-1 text-ui font-medium text-foreground">
           <span class="truncate" :title="currentTask">{{ currentTask }}</span>
           <ChevronDownIcon class="size-3 shrink-0 text-muted-foreground/60" />
         </span>
@@ -314,45 +311,45 @@ function selectCustomInput(event: FocusEvent) {
 
     <!-- Actions: run-level retry / download, only meaningful with a run actually open -->
     <section v-if="store.runId && (hasRetryableJobs || hasSuccessfulOutputs || canRepeatOriginal)" class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.actionsSection') }}
       </p>
       <button
         v-if="canRepeatOriginal"
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-1.75 text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
         :disabled="store.isLive || repeatingOriginal"
         :title="store.isLive ? t('viewer.repeatOriginalWaitTitle') : t('viewer.repeatOriginalTitle')"
         @click="repeatOriginal"
       >
-        <span class="text-[13px] text-muted-foreground">{{ t('viewer.repeatOriginal') }}</span>
+        <span class="text-ui text-muted-foreground">{{ t('viewer.repeatOriginal') }}</span>
         <RotateCcwIcon class="size-3.5 shrink-0 text-muted-foreground/60" :class="repeatingOriginal ? 'animate-spin' : ''" />
       </button>
       <button
         v-if="hasRetryableJobs"
         type="button"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-1.75 text-start outline-none transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
         :disabled="store.isLive || retryingAll"
         :title="store.isLive ? t('viewSettings.retryFailedWaitTitle') : t('viewSettings.retryFailedTitle')"
         @click="retryFailed"
       >
-        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.retryFailed') }}</span>
+        <span class="text-ui text-muted-foreground">{{ t('viewSettings.retryFailed') }}</span>
         <RefreshCwIcon class="size-3.5 shrink-0 text-muted-foreground/60" :class="retryingAll ? 'animate-spin' : ''" />
       </button>
       <a
         v-if="hasSuccessfulOutputs"
         :href="downloadAllUrl"
-        class="flex w-full items-center justify-between gap-3 px-3.5 py-[7px] text-start outline-none transition-colors hover:bg-accent"
+        class="flex w-full items-center justify-between gap-3 px-3.5 py-1.75 text-start outline-none transition-colors hover:bg-accent"
         :title="t('viewSettings.downloadAllTitle')"
       >
-        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.downloadAll') }}</span>
+        <span class="text-ui text-muted-foreground">{{ t('viewSettings.downloadAll') }}</span>
         <DownloadIcon class="size-3.5 shrink-0 text-muted-foreground/60" />
       </a>
     </section>
 
     <!-- Display -->
     <section class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.display') }}
       </p>
       <Select
@@ -363,16 +360,16 @@ function selectCustomInput(event: FocusEvent) {
         @update:open="(isOpen) => setSelectOpen(row, isOpen)"
         @update:model-value="(v) => setChoice(row, String(v))"
       >
-        <SelectTrigger :class="rowTriggerClass" :title="row.title">
-          <span class="text-[13px] text-muted-foreground">{{ row.label }}</span>
-          <span class="flex items-center gap-1 text-[13px] font-medium text-foreground">
+        <SelectTrigger variant="row" :title="row.title">
+          <span class="text-ui text-muted-foreground">{{ row.label }}</span>
+          <span class="flex items-center gap-1 text-ui font-medium text-foreground">
             <span>{{ choiceValue(row) }}</span>
             <ChevronDownIcon class="size-3 text-muted-foreground/60" />
           </span>
         </SelectTrigger>
         <SelectContent position="popper" align="end" :side-offset="4" :class="selectContentClass">
           <SelectItem v-for="o in row.options" :key="o.v" :value="o.v">{{ o.label }}</SelectItem>
-          <div v-if="row.custom" class="mt-1 border-t px-2 py-2" @click.stop @pointerdown.stop>
+          <div v-if="row.custom" class="mt-1 border-t p-2" @click.stop @pointerdown.stop>
             <form class="flex items-center gap-1.5" @submit.prevent="applyCustomChoice(row)">
               <Input
                 v-model="customInputs[row.key]"
@@ -381,11 +378,10 @@ function selectCustomInput(event: FocusEvent) {
                 :max="row.custom.max"
                 :step="row.custom.step"
                 :placeholder="row.custom.placeholder"
-                class="h-7 text-[12px]"
                 @focus="selectCustomInput"
                 @keydown.stop
               />
-              <span v-if="row.custom.suffix" class="shrink-0 text-[12px] text-muted-foreground">
+              <span v-if="row.custom.suffix" class="shrink-0 text-xs text-muted-foreground">
                 {{ row.custom.suffix }}
               </span>
               <Button type="button" variant="ghost" size="xs" class="shrink-0" @click.stop.prevent="applyCustomChoice(row)">
@@ -399,7 +395,7 @@ function selectCustomInput(event: FocusEvent) {
 
     <!-- Layout -->
     <section class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.layout') }}
       </p>
       <Select
@@ -410,9 +406,9 @@ function selectCustomInput(event: FocusEvent) {
         @update:open="(isOpen) => setSelectOpen(row, isOpen)"
         @update:model-value="(v) => setChoice(row, String(v))"
       >
-        <SelectTrigger :class="rowTriggerClass" :title="row.title">
-          <span class="text-[13px] text-muted-foreground">{{ row.label }}</span>
-          <span class="flex items-center gap-1 text-[13px] font-medium text-foreground">
+        <SelectTrigger variant="row" :title="row.title">
+          <span class="text-ui text-muted-foreground">{{ row.label }}</span>
+          <span class="flex items-center gap-1 text-ui font-medium text-foreground">
             <span>{{ choiceValue(row) }}</span>
             <ChevronDownIcon class="size-3 text-muted-foreground/60" />
           </span>
@@ -425,37 +421,37 @@ function selectCustomInput(event: FocusEvent) {
 
     <!-- Filters -->
     <section class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.filters') }}
       </p>
       <FilterSelect kind="models" variant="row" />
       <FilterSelect kind="prompts" variant="row" />
       <div
-        class="flex cursor-pointer items-center justify-between px-3.5 py-[7px] transition-colors hover:bg-accent"
+        class="flex cursor-pointer items-center justify-between px-3.5 py-1.75 transition-colors hover:bg-accent"
         :title="t('viewSettings.showHiddenTitle')"
         @click="store.showHiddenItems = !store.showHiddenItems"
       >
-        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.showHidden') }}</span>
+        <span class="text-ui text-muted-foreground">{{ t('viewSettings.showHidden') }}</span>
         <Switch :model-value="store.showHiddenItems" size="sm" class="pointer-events-none" />
       </div>
     </section>
 
     <!-- Status -->
     <section class="py-1">
-      <p class="px-3.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <p class="px-3.5 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
         {{ t('viewSettings.status') }}
       </p>
       <div
-        class="flex cursor-pointer items-center justify-between px-3.5 py-[7px] transition-colors hover:bg-accent"
+        class="flex cursor-pointer items-center justify-between px-3.5 py-1.75 transition-colors hover:bg-accent"
         :title="t('viewSettings.showErrorsTitle')"
         @click="store.showErrors = !store.showErrors"
       >
-        <span class="text-[13px] text-muted-foreground">{{ t('viewSettings.errors') }}</span>
-        <span class="text-[13px] font-medium" :class="errorCount ? 'text-destructive' : 'text-muted-foreground'">
+        <span class="text-ui text-muted-foreground">{{ t('viewSettings.errors') }}</span>
+        <span class="text-ui font-medium" :class="errorCount ? 'text-destructive' : 'text-muted-foreground'">
           {{ errorsValue }}
         </span>
       </div>
-      <p v-if="starTallyReadout" class="px-3.5 pb-2 pt-1 text-[11.5px] text-muted-foreground/70">
+      <p v-if="starTallyReadout" class="px-3.5 pb-2 pt-1 text-xs text-muted-foreground/70">
         {{ starTallyReadout }}
       </p>
       <ArenaLeaderboard />

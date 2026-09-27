@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { ChevronDownIcon, PlayIcon, SquareIcon, Loader2Icon, ListPlusIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
+import { ButtonGroup } from '@/components/ui/button-group';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -90,7 +91,7 @@ const estimateTitle = computed(() => {
         :aria-label="t('runControls.costCeiling')"
       />
     </label>
-    <span class="basis-full text-end text-[11px] text-muted-foreground">
+    <span class="basis-full text-end text-2xs text-muted-foreground">
       {{ t('runControls.costCeilingHint') }}
     </span>
     <Button v-if="store.running" variant="destructive" :title="t('runControls.stopRun')" @click="store.cancelRun()">
@@ -111,12 +112,11 @@ const estimateTitle = computed(() => {
     </Button>
 
     <!-- Idle → split Run button: primary runs now, the ▾ menu parks or runs the parked queue. -->
-    <div v-else class="flex items-stretch">
+    <ButtonGroup v-else divider="on-primary">
       <!-- Label is ALWAYS "Run": the click runs the current batch PLUS anything parked, so a
            "Run queue (N)" label here would misrepresent it as running only the parked ones —
            that lives in the ▾ menu below (runQueue), which never adds the current selection. -->
       <Button
-        class="rounded-e-none"
         :disabled="busy"
         :title="heldCount ? t('runControls.runNowWithQueueHint', { count: heldCount }) : t('runControls.runNowHint')"
         @click="store.runNow()"
@@ -128,7 +128,6 @@ const estimateTitle = computed(() => {
       <DropdownMenu>
         <DropdownMenuTrigger as-child>
           <Button
-            class="rounded-s-none border-s border-l-primary-foreground/25 px-2"
             :disabled="busy"
             :aria-label="t('runControls.moreRunOptions')"
             :title="t('runControls.moreRunOptions')"
@@ -141,18 +140,18 @@ const estimateTitle = computed(() => {
             <ListPlusIcon class="size-4" />
             <span class="flex flex-col">
               <span>{{ t('runControls.addToQueue') }}</span>
-              <span class="text-[11px] text-muted-foreground">{{ t('runControls.addToQueueHint') }}</span>
+              <span class="text-2xs text-muted-foreground">{{ t('runControls.addToQueueHint') }}</span>
             </span>
           </DropdownMenuItem>
           <DropdownMenuItem v-if="heldCount" @click="store.runQueue()">
             <PlayIcon class="size-4" />
             <span class="flex flex-col">
               <span>{{ t('runControls.runQueueWithCount', { count: heldCount }) }}</span>
-              <span class="text-[11px] text-muted-foreground">{{ t('runControls.runQueueOnlyHint') }}</span>
+              <span class="text-2xs text-muted-foreground">{{ t('runControls.runQueueOnlyHint') }}</span>
             </span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </ButtonGroup>
   </div>
 </template>

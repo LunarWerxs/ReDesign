@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, runThumbnailUrl } from '@/lib/api';
 import { formatAgo } from '@/lib/relativeTime';
@@ -235,7 +235,7 @@ watch(
 </script>
 
 <template>
-  <div class="p-[18px]">
+  <div class="p-4.5">
     <div class="mb-4 flex min-h-8 items-center gap-2">
       <div class="flex items-baseline gap-2">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -284,10 +284,12 @@ watch(
       </div>
     </div>
 
-    <div v-if="runs.length" class="relative mb-4">
-      <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-      <Input v-model="search" :placeholder="t('runGallery.searchPlaceholder')" class="h-8 ps-8" />
-    </div>
+    <InputGroup v-if="runs.length" class="mb-4 h-8">
+      <InputGroupAddon>
+        <SearchIcon />
+      </InputGroupAddon>
+      <InputGroupInput v-model="search" :placeholder="t('runGallery.searchPlaceholder')" />
+    </InputGroup>
 
     <p v-if="!runs.length" class="py-16 text-center text-sm text-muted-foreground">
       {{ t('runGallery.empty') }}
@@ -298,8 +300,7 @@ watch(
 
     <div
       v-else
-      class="grid gap-[18px]"
-      style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))"
+      class="run-gallery-grid grid gap-4.5"
     >
       <div
         v-for="run in filteredRuns"
@@ -324,10 +325,10 @@ watch(
           @click="activate(run)"
         />
 
-        <div class="relative aspect-[4/3] overflow-hidden bg-muted">
+        <div class="relative aspect-4/3 overflow-hidden bg-muted">
           <span
             v-if="selectionMode"
-            class="pointer-events-none absolute left-2 top-2 z-20 grid size-4 place-items-center rounded-[4px] border bg-background shadow-sm"
+            class="pointer-events-none absolute left-2 top-2 z-20 grid size-4 place-items-center rounded-sm border bg-background shadow-sm"
             :class="
               isSelected(run.runId)
                 ? 'border-primary bg-primary text-primary-foreground'
@@ -340,15 +341,14 @@ watch(
 
           <div
             v-else-if="canDelete(run)"
-            class="absolute right-2 top-2 z-20 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100"
+            class="absolute right-2 top-2 z-20 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
           >
             <Tooltip>
               <TooltipTrigger as-child>
                 <Button
                   data-run-again
-                  variant="outline"
+                  variant="overlay"
                   size="icon-sm"
-                  class="bg-background/90 text-foreground shadow-sm backdrop-blur hover:bg-accent"
                   :disabled="runningAgainIds.has(run.runId)"
                   :aria-label="t('runGallery.runAgain', { title: runTitle(run) })"
                   @click.stop="runAgain(run)"
@@ -364,9 +364,8 @@ watch(
               <TooltipTrigger as-child>
                 <Button
                   data-run-delete
-                  variant="outline"
+                  variant="overlay-destructive"
                   size="icon-sm"
-                  class="bg-background/90 text-destructive shadow-sm backdrop-blur hover:bg-destructive hover:text-destructive-foreground"
                   :aria-label="t('runGallery.deleteRun', { title: runTitle(run) })"
                   @click.stop="requestDelete([run.runId])"
                   @keydown.stop
@@ -402,7 +401,7 @@ watch(
             :src="thumbUrl(run)"
             alt=""
             loading="lazy"
-            class="relative size-full object-cover object-top transition-[opacity,transform] duration-500 ease-out group-hover:scale-[1.03]"
+            class="relative size-full object-cover object-top transition duration-500 ease-out group-hover:scale-[1.03]"
             :class="isLoaded(run) ? 'opacity-100' : 'opacity-0'"
             @load="onThumbLoad(run)"
             @error="onThumbError(run)"
@@ -419,8 +418,8 @@ watch(
 
         <div class="flex min-w-0 items-center gap-2 border-t px-3 py-2.5">
           <span class="grid min-w-0 flex-1 gap-px">
-            <span class="truncate text-[13px] font-bold">{{ runTitle(run) }}</span>
-            <span class="truncate text-[11px] text-muted-foreground/70">
+            <span class="truncate text-ui font-bold">{{ runTitle(run) }}</span>
+            <span class="truncate text-2xs text-muted-foreground/70">
               {{ runAgo(run) || run.runId }}
             </span>
           </span>

@@ -30,6 +30,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -195,13 +196,13 @@ function useCustom() {
 <template>
   <Popover v-model:open="popoverOpen">
     <PopoverTrigger as-child>
-      <Button variant="outline" class="min-w-[150px] justify-between" :title="t('promptSelect.choosePromptsTitle')">
+      <Button variant="outline" class="min-w-37.5 justify-between" :title="t('promptSelect.choosePromptsTitle')">
         <span>{{ t('promptSelect.prompts') }}</span>
         <span class="ms-auto text-muted-foreground">{{ promptCountLabel }}</span>
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))] p-2">
+    <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))]">
       <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('promptSelect.prompts') }}</strong>
         <div class="ms-auto flex items-center gap-1.5">
@@ -252,10 +253,12 @@ function useCustom() {
       </div>
 
       <div class="px-1 pb-1.5">
-        <div class="relative">
-          <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input v-model="search" :placeholder="t('promptSelect.searchPlaceholder')" class="h-8 ps-8" />
-        </div>
+        <InputGroup class="h-8">
+          <InputGroupInput v-model="search" :placeholder="t('promptSelect.searchPlaceholder')" />
+          <InputGroupAddon>
+            <SearchIcon class="size-3.5" />
+          </InputGroupAddon>
+        </InputGroup>
       </div>
 
       <div class="grid max-h-[min(50vh,380px)] grid-cols-1 gap-0.5 overflow-y-auto overflow-x-hidden pe-1">
@@ -265,7 +268,7 @@ function useCustom() {
 
         <!-- Selected tier: ticked + starred, starred first -->
         <template v-if="pinned.length || (anyPinned && !q)">
-          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
             <CheckIcon class="size-3 text-muted-foreground" />
             {{ t('promptSelect.selected') }}
           </div>
@@ -277,7 +280,7 @@ function useCustom() {
         <template v-if="rest.length">
           <button
             type="button"
-            class="mt-0.5 flex items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
+            class="mt-0.5 flex items-center gap-1.5 rounded-md p-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
             @click="showAll = !showAll"
           >
             <ChevronDownIcon class="size-3.5 transition-transform" :class="restOpen ? 'rotate-0' : '-rotate-90'" />

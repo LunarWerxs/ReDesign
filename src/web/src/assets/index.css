@@ -64,6 +64,12 @@
     U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* App z-index scale, read as z-(--z-*). The kit's overlays sit at z-50; the paste flyout
+   (PasteMenu.vue) opens above them: its full-screen click-catcher, then the menu itself. */
+:root {
+  --z-paste-backdrop: 60;
+  --z-paste-menu: 61;
+}
 
 @layer components {
   .page-enter-active,
@@ -77,6 +83,81 @@
     opacity: 0;
     transform: translateY(4px);
   }
+
+  /* Height-animated disclosure: a one-row grid whose track goes 0fr -> 1fr, so the panel
+     animates to its natural height without measuring it. The single child needs
+     overflow-hidden to clip while collapsed; add .is-open to expand. The easing is
+     Tailwind's ease-out curve, written out so it matches the old utility classes. */
+  .grid-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 300ms cubic-bezier(0, 0, 0.2, 1);
+  }
+  .grid-collapse.is-open {
+    grid-template-rows: 1fr;
+  }
+
+  /* Input tile grids (InputGrid.vue): as many columns as fit. The current session's tiles
+     stretch to fill the row; the compact previous-session tiles stay between 104 and 124px. */
+  .input-tile-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .input-tile-grid-compact {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 124px));
+  }
+
+  /* Run gallery (RunGallery.vue): as many 240px-minimum thumbnail cards as fit the row. */
+  .run-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+
+  /* AppTopbar's sliding active-segment pill. The component measures the active link and sets
+     --indicator-x / --indicator-w inline; width is a layout property, so the transition lives
+     here as a named rule rather than a transition-[...] utility. Tailwind's ease-out curve. */
+  .topbar-indicator {
+    width: var(--indicator-w, 0px);
+    transform: translateX(var(--indicator-x, 0px));
+    transition:
+      transform 200ms cubic-bezier(0, 0, 0.2, 1),
+      width 200ms cubic-bezier(0, 0, 0.2, 1);
+  }
+
+  /* App.vue: the Settings sidebar pushes the page by animating its inline-end padding
+     (usePushPanel). */
+  .push-shell {
+    transition-property: padding;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ReferenceBlock.vue: the grid-rows 0fr<->1fr collapse, kept mounted (inert while closed) so
+     the panel's state survives a toggle; shell/ExpandTransition is the v-if flavour of the same
+     trick. It animates a layout property, so it lives here as a named class rather than a
+     transition-[...] utility. Tailwind's ease-out curve. */
+  .reference-expand {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 300ms cubic-bezier(0, 0, 0.2, 1);
+  }
+  .reference-expand[data-state='open'] {
+    grid-template-rows: 1fr;
+  }
+  .reference-tiles {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}
+
+/* Star / favourite accent for the pin-to-top toggles (ModelRow, PromptRow). Tailwind's amber-400,
+   declared as a named theme colour so call sites use text-favorite instead of the raw palette. */
+@theme {
+  --color-favorite: oklch(82.8% 0.189 84.429);
+}
+
+/* Model colour dot (ModelRow, ModelList, OutputCard, ErrorCard): the call site sets the model's
+   own colour as --model-color inline; a model without one falls back to a neutral grey (#888).
+   `inline` so bg-model-dot reads --model-color on the element itself, not on :root. */
+@theme inline {
+  --color-model-dot: var(--model-color, oklch(62.68% 0 0));
 }
 
 @media (prefers-reduced-motion: reduce) {

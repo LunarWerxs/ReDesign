@@ -26,7 +26,7 @@ function modelLabel(id: string) {
   return modelMap.value.get(id)?.label || id;
 }
 function modelColor(id: string) {
-  return modelMap.value.get(id)?.color || '#888';
+  return modelMap.value.get(id)?.color ?? ''; // no colour: bg-model-dot falls back to its theme grey
 }
 function promptLabel(id: string) {
   return promptMap.value.get(id)?.label || id;
@@ -53,11 +53,11 @@ const emptyMsg = computed(() => {
 </script>
 
 <template>
-  <div v-if="store.manifest?.mock" class="mx-[18px] mt-[18px] flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+  <div v-if="store.manifest?.mock" class="mx-4.5 mt-4.5 flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
     <Badge variant="secondary">{{ t('runFlyout.mockBadge') }}</Badge>
     {{ t('viewer.mockRunNotice') }}
   </div>
-  <div v-if="store.manifest" class="mx-[18px] mt-[18px] flex items-center gap-3 text-xs text-muted-foreground">
+  <div v-if="store.manifest" class="mx-4.5 mt-4.5 flex items-center gap-3 text-xs text-muted-foreground">
     <label class="flex items-center gap-1"><input type="checkbox" :checked="store.review.keep" @change="store.setReviewKeep(($event.target as HTMLInputElement).checked)"> {{ t('viewer.keepRun') }}</label>
     <a class="underline" :href="`/api/runs/${encodeURIComponent(store.manifest.runId)}/download?shortlist=1`">{{ t('viewer.downloadShortlist') }}</a>
     <!-- A/B duel entry: only offered once 2+ models have finished outputs of one input. -->
@@ -74,8 +74,8 @@ const emptyMsg = computed(() => {
   <ArenaDuel />
   <div
     v-if="store.grouped.length"
-    class="grid gap-[18px] p-[18px]"
-    :style="{ gridTemplateColumns: `repeat(${store.cols}, minmax(0, 1fr))` }"
+    class="grid grid-cols-(--grid-cols) gap-4.5 p-4.5"
+    :style="{ '--grid-cols': `repeat(${store.cols}, minmax(0, 1fr))` }"
   >
     <template v-for="group in store.grouped" :key="group.input.id">
       <div class="col-span-full">

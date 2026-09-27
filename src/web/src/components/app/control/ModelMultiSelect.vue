@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import { CheckIcon, ChevronDownIcon, PlusIcon, SearchIcon } from '@lucide/vue';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import ModelRow from './ModelRow.vue';
 import { useControlStore } from '@/stores/control';
 import { providerLabel } from '@/lib/providers';
@@ -79,7 +79,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
 <template>
   <Popover v-model:open="pickerOpen">
     <PopoverTrigger as-child>
-      <Button variant="outline" class="min-w-[150px] justify-between" :title="t('modelSelect.chooseModelsTitle')">
+      <Button variant="outline" class="min-w-37.5 justify-between" :title="t('modelSelect.chooseModelsTitle')">
         <span>{{ t('modelSelect.models') }}</span>
         <span class="ms-auto text-muted-foreground"
           >{{ store.selModels.length }}/{{ store.runnableModelIds.length }}</span
@@ -87,7 +87,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))] p-2">
+    <PopoverContent align="start" :collision-padding="12" class="w-[min(520px,calc(100vw-2rem))]">
       <div class="flex items-center gap-2 px-1 pb-1">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ t('modelSelect.models') }}</strong>
         <div class="ms-auto flex gap-1.5">
@@ -97,10 +97,12 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
       </div>
 
       <div class="px-1 pb-1.5">
-        <div class="relative">
-          <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input v-model="search" :placeholder="t('modelSelect.searchPlaceholder')" class="h-8 ps-8" />
-        </div>
+        <InputGroup class="h-8">
+          <InputGroupAddon>
+            <SearchIcon />
+          </InputGroupAddon>
+          <InputGroupInput v-model="search" :placeholder="t('modelSelect.searchPlaceholder')" />
+        </InputGroup>
       </div>
 
       <div class="grid max-h-[min(50vh,380px)] gap-0.5 overflow-y-auto pe-1">
@@ -110,7 +112,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
 
         <!-- Selected tier: ticked + starred, starred first, no provider sub-headings -->
         <template v-if="pinned.length || (anyPinned && !q)">
-          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div class="flex items-center gap-1.5 px-1 pt-0.5 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
             <CheckIcon class="size-3 text-muted-foreground" />
             {{ t('modelSelect.selected') }}
           </div>
@@ -122,7 +124,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
         <template v-if="rest.length">
           <button
             type="button"
-            class="mt-0.5 flex items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
+            class="mt-0.5 flex items-center gap-1.5 rounded-md p-1 text-2xs font-semibold uppercase tracking-wider text-muted-foreground outline-none hover:text-foreground"
             @click="showAll = !showAll"
           >
             <ChevronDownIcon class="size-3.5 transition-transform" :class="restOpen ? 'rotate-0' : '-rotate-90'" />
@@ -131,7 +133,7 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
           </button>
           <div v-show="restOpen" class="grid gap-0.5">
             <template v-for="g in restGroups" :key="g.provider">
-              <div class="px-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">{{ g.label }}</div>
+              <div class="px-1 pt-1 text-3xs font-medium uppercase tracking-wider text-muted-foreground/70">{{ g.label }}</div>
               <ModelRow v-for="m in g.models" :key="m.id" :model="m" />
             </template>
           </div>
@@ -139,9 +141,13 @@ const anyPinned = computed(() => store.models.some((m) => m.starred || store.sel
       </div>
 
       <div class="mt-1 border-t pt-1">
-        <Button variant="ghost" size="sm" class="w-full justify-start text-muted-foreground" @click="openBrowse">
-          <PlusIcon class="size-3.5" />
-          {{ t('browseModels.trigger') }}
+        <Button variant="ghost" size="sm" class="w-full justify-start" @click="openBrowse">
+          <!-- display:contents keeps the icon and label as the button's own flex items; the span
+               only carries the muted colour, back to foreground on hover like ghost itself -->
+          <span class="contents text-muted-foreground group-hover/button:text-foreground">
+            <PlusIcon class="size-3.5" />
+            {{ t('browseModels.trigger') }}
+          </span>
         </Button>
       </div>
     </PopoverContent>

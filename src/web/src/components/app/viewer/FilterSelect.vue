@@ -59,13 +59,13 @@ function hideAll() {
       <button
         v-if="props.variant === 'row'"
         type="button"
-        class="flex w-full items-center justify-between px-3.5 py-[7px] outline-none transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+        class="flex w-full items-center justify-between px-3.5 py-1.75 outline-none transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
         :title="t('filter.chooseVisible', { noun })"
         :disabled="!items.length"
       >
-        <span class="text-[13px] text-muted-foreground">{{ label }}</span>
-        <span class="flex items-center gap-2 text-[13px] font-medium text-foreground">
-          <span class="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11.5px] text-muted-foreground">
+        <span class="text-ui text-muted-foreground">{{ label }}</span>
+        <span class="flex items-center gap-2 text-ui font-medium text-foreground">
+          <span class="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
             {{ visibleCount }} / {{ items.length }}
           </span>
           <ChevronDownIcon class="size-3 text-muted-foreground/60" />
@@ -75,7 +75,7 @@ function hideAll() {
         v-else
         variant="outline"
         size="sm"
-        class="min-w-[154px] justify-between"
+        class="min-w-38.5 justify-between"
         :title="t('filter.chooseVisible', { noun })"
         :disabled="!items.length"
       >
@@ -84,7 +84,7 @@ function hideAll() {
         <ChevronDownIcon class="size-4 text-muted-foreground" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent align="start" :collision-padding="12" class="w-[min(340px,calc(100vw-2rem))] p-2">
+    <PopoverContent align="start" :collision-padding="12" class="w-[min(340px,calc(100vw-2rem))]">
       <div class="flex items-center gap-2 px-1 pb-2">
         <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ label }}</strong>
         <div class="ms-auto flex gap-1.5">
@@ -104,7 +104,7 @@ function hideAll() {
           @keydown="onRowKeydown($event, item.id)"
         >
           <Checkbox class="pointer-events-none" :model-value="isVisible(item)" tabindex="-1" />
-          <span v-if="item.color" class="size-2.5 shrink-0 rounded-full" :style="{ background: item.color }" />
+          <span v-if="item.color" class="size-2.5 shrink-0 rounded-full bg-(--item-color)" :style="{ '--item-color': item.color }" />
           <span class="min-w-0 flex-1 truncate font-semibold">{{ item.label }}</span>
         </div>
       </div>

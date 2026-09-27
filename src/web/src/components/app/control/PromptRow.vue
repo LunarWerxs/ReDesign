@@ -44,28 +44,30 @@ function onRowKeydown(e: KeyboardEvent) {
       <span v-if="prompt.description" class="min-w-0 flex-1 truncate text-xs text-muted-foreground">· {{ prompt.description }}</span>
     </span>
 
-    <!-- Edit (opens the dialog, where Delete also lives): revealed on hover. -->
-    <Tooltip>
-      <TooltipTrigger as-child>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          :aria-label="t('promptSelect.editPrompt')"
-          class="opacity-0 transition-opacity group-hover/prompt:opacity-100 focus-visible:opacity-100"
-          @click.stop="emit('edit', prompt)"
-          @keydown.stop
-        >
-          <PencilIcon class="size-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{{ t('promptSelect.editPrompt') }}</TooltipContent>
-    </Tooltip>
+    <!-- Edit (opens the dialog, where Delete also lives): revealed on hover. The reveal lives on a
+         plain wrapper so the Button keeps its own styling; has-focus-visible keeps keyboard reach. -->
+    <span class="inline-flex shrink-0 opacity-0 transition-opacity group-hover/prompt:opacity-100 has-focus-visible:opacity-100">
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            :aria-label="t('promptSelect.editPrompt')"
+            @click.stop="emit('edit', prompt)"
+            @keydown.stop
+          >
+            <PencilIcon class="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ t('promptSelect.editPrompt') }}</TooltipContent>
+      </Tooltip>
+    </span>
 
     <!-- Star toggle: pin this prompt to the top tier. Never toggles the row. -->
     <button
       type="button"
-      class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground/50 outline-none transition-colors hover:text-amber-400 focus-visible:text-amber-400"
-      :class="prompt.starred ? 'text-amber-400' : ''"
+      class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground/50 outline-none transition-colors hover:text-favorite focus-visible:text-favorite"
+      :class="prompt.starred ? 'text-favorite' : ''"
       :aria-label="prompt.starred ? t('promptSelect.unstar') : t('promptSelect.star')"
       :title="prompt.starred ? t('promptSelect.unstar') : t('promptSelect.star')"
       @click.stop="store.togglePromptStarred(prompt.id)"

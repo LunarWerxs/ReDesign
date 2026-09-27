@@ -185,62 +185,66 @@ watch(
 
 <template>
   <Dialog v-model:open="dialogOpen">
-    <DialogContent class="max-h-[min(86vh,760px)] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-      <DialogHeader class="border-b px-5 pb-4 pt-5 pe-14">
-        <div class="flex min-w-0 items-start justify-between gap-3">
-          <div class="min-w-0">
-            <DialogTitle class="truncate">
-              {{ title }}
-              <span class="ms-1 font-normal text-muted-foreground">{{ runs.length }}</span>
-            </DialogTitle>
-            <DialogDescription>{{ description }}</DialogDescription>
-          </div>
+    <DialogContent flush class="max-h-[min(86vh,760px)] overflow-hidden sm:max-w-2xl">
+      <div class="border-b px-5 pb-4 pt-5 pe-14">
+        <DialogHeader>
+          <div class="flex min-w-0 items-start justify-between gap-3">
+            <div class="min-w-0">
+              <DialogTitle>
+                <span class="block truncate">
+                  {{ title }}
+                  <span class="ms-1 font-normal text-muted-foreground">{{ runs.length }}</span>
+                </span>
+              </DialogTitle>
+              <DialogDescription>{{ description }}</DialogDescription>
+            </div>
 
-          <div v-if="runs.length && canDelete" class="flex shrink-0 items-center gap-1">
-            <template v-if="editMode">
-              <Button
-                variant="ghost"
-                size="xs"
-                :title="allSelected ? t('runFlyout.clearSelection') : t('runFlyout.selectAllRuns')"
-                @click="toggleAllSelection"
-              >
-                {{ allSelected ? t('runFlyout.none') : t('runFlyout.all') }}
-              </Button>
-              <Button variant="ghost" size="xs" :title="t('runFlyout.cancelEditing')" @click="cancelEdit">
-                <XIcon class="size-3.5" />
-                {{ t('runFlyout.cancel') }}
-              </Button>
-              <Button
-                variant="destructive"
-                size="xs"
-                :title="t('runFlyout.deleteSelectedRuns')"
-                :disabled="!selectedCount"
-                @click="deleteSelected"
-              >
-                <Trash2Icon class="size-3.5" />
-                {{ t('runFlyout.delete') }}
-              </Button>
-            </template>
-            <Tooltip v-else>
-              <TooltipTrigger as-child>
+            <div v-if="runs.length && canDelete" class="flex shrink-0 items-center gap-1">
+              <template v-if="editMode">
                 <Button
                   variant="ghost"
-                  size="icon-xs"
-                  :aria-label="t('runFlyout.selectRunsToDelete')"
-                  @click="beginEdit"
+                  size="xs"
+                  :title="allSelected ? t('runFlyout.clearSelection') : t('runFlyout.selectAllRuns')"
+                  @click="toggleAllSelection"
                 >
-                  <PencilIcon class="size-3.5" />
+                  {{ allSelected ? t('runFlyout.none') : t('runFlyout.all') }}
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>{{ t('runFlyout.selectRunsToDelete') }}</TooltipContent>
-            </Tooltip>
+                <Button variant="ghost" size="xs" :title="t('runFlyout.cancelEditing')" @click="cancelEdit">
+                  <XIcon class="size-3.5" />
+                  {{ t('runFlyout.cancel') }}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="xs"
+                  :title="t('runFlyout.deleteSelectedRuns')"
+                  :disabled="!selectedCount"
+                  @click="deleteSelected"
+                >
+                  <Trash2Icon class="size-3.5" />
+                  {{ t('runFlyout.delete') }}
+                </Button>
+              </template>
+              <Tooltip v-else>
+                <TooltipTrigger as-child>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    :aria-label="t('runFlyout.selectRunsToDelete')"
+                    @click="beginEdit"
+                  >
+                    <PencilIcon class="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{{ t('runFlyout.selectRunsToDelete') }}</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
-        </div>
 
-        <p v-if="editMode" class="pt-1 text-xs text-muted-foreground">
-          {{ t('runFlyout.selectedCount', { count: selectedCount }, selectedCount) }}
-        </p>
-      </DialogHeader>
+          <p v-if="editMode" class="pt-1 text-xs text-muted-foreground">
+            {{ t('runFlyout.selectedCount', { count: selectedCount }, selectedCount) }}
+          </p>
+        </DialogHeader>
+      </div>
 
       <div class="grid max-h-[min(68vh,620px)] gap-2 overflow-y-auto px-5 py-4">
         <p v-if="!runs.length" class="px-3 py-8 text-center text-sm text-muted-foreground">{{ t('runFlyout.noRunsYet') }}</p>
@@ -277,7 +281,7 @@ watch(
 
           <span class="grid min-w-0 gap-px">
             <span class="truncate text-xs font-bold">{{ runTitle(run) }}</span>
-            <span class="truncate font-mono text-[11px] text-muted-foreground/70">{{ run.runId }}</span>
+            <span class="truncate font-mono text-2xs text-muted-foreground/70">{{ run.runId }}</span>
           </span>
 
           <span class="flex-1" />
@@ -286,7 +290,7 @@ watch(
           <Badge v-if="run.status && run.status !== 'done'" variant="secondary">{{ run.status }}</Badge>
           <span
             v-if="runCostLabel(run)"
-            class="shrink-0 font-mono text-[11px] text-muted-foreground/70"
+            class="shrink-0 font-mono text-2xs text-muted-foreground/70"
             :title="runCostTitle(run)"
           >
             {{ runCostLabel(run) }}

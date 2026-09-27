@@ -20,74 +20,78 @@ const browseOpen = ref(false);
 <template>
   <Card>
     <CardHeader>
-      <CardTitle class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {{ t('options.title') }}
+      <CardTitle>
+        <span class="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {{ t('options.title') }}
+        </span>
       </CardTitle>
     </CardHeader>
-    <CardContent class="grid gap-3.5">
-      <div class="flex flex-wrap items-center gap-3">
-        <ModelMultiSelect @browse="browseOpen = true" />
-        <BrowseModelsDialog v-model:open="browseOpen" />
-        <PromptMultiSelect />
-        <div class="flex items-center gap-2" :title="t('options.advancedDescription')">
-          <Switch id="advanced-options" v-model="store.advancedOpen" />
-          <Label for="advanced-options" class="cursor-pointer">{{ t('options.advanced') }}</Label>
+    <CardContent>
+      <div class="grid gap-3.5">
+        <div class="flex flex-wrap items-center gap-3">
+          <ModelMultiSelect @browse="browseOpen = true" />
+          <BrowseModelsDialog v-model:open="browseOpen" />
+          <PromptMultiSelect />
+          <div class="flex items-center gap-2" :title="t('options.advancedDescription')">
+            <Switch id="advanced-options" v-model="store.advancedOpen" />
+            <Label for="advanced-options" class="cursor-pointer">{{ t('options.advanced') }}</Label>
+          </div>
         </div>
-      </div>
 
-      <div
-        class="grid transition-[grid-template-rows] duration-300 ease-out"
-        :style="{ gridTemplateRows: store.advancedOpen ? '1fr' : '0fr' }"
-        :aria-hidden="!store.advancedOpen"
-        :inert="!store.advancedOpen"
-      >
-        <div class="overflow-hidden">
-          <div class="grid gap-3 rounded-lg border border-dashed bg-muted/30 p-3">
-            <div class="flex flex-wrap items-center gap-3">
-              <div class="flex items-center gap-2" :title="t('options.mockDescription')">
-                <Switch id="mock" v-model="store.mock" />
-                <Label for="mock" class="cursor-pointer">{{ t('options.mock') }}</Label>
+        <div
+          class="grid-collapse"
+          :class="{ 'is-open': store.advancedOpen }"
+          :aria-hidden="!store.advancedOpen"
+          :inert="!store.advancedOpen"
+        >
+          <div class="overflow-hidden">
+            <div class="grid gap-3 rounded-lg border border-dashed bg-muted/30 p-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2" :title="t('options.mockDescription')">
+                  <Switch id="mock" v-model="store.mock" />
+                  <Label for="mock" class="cursor-pointer">{{ t('options.mock') }}</Label>
+                </div>
+                <div class="flex items-center gap-2" :title="t('options.selfCheckDescription')">
+                  <Switch id="self-check" v-model="store.selfCheck" />
+                  <Label for="self-check" class="cursor-pointer">{{ t('options.selfCheck') }}</Label>
+                </div>
+                <div class="flex items-center gap-2" :title="t('options.customPromptDescription')">
+                  <Switch id="custom-prompt" v-model="store.customOn" />
+                  <Label for="custom-prompt" class="cursor-pointer">{{ t('options.customPrompt') }}</Label>
+                </div>
+                <div class="flex items-center gap-2" :title="t('options.brandStyleGuideDescription')">
+                  <Switch id="brand-style-guide" v-model="store.brandOn" />
+                  <Label for="brand-style-guide" class="cursor-pointer">{{ t('options.brandStyleGuide') }}</Label>
+                </div>
               </div>
-              <div class="flex items-center gap-2" :title="t('options.selfCheckDescription')">
-                <Switch id="self-check" v-model="store.selfCheck" />
-                <Label for="self-check" class="cursor-pointer">{{ t('options.selfCheck') }}</Label>
+
+              <div
+                class="grid-collapse"
+                :class="{ 'is-open': store.customOn }"
+                :aria-hidden="!store.customOn"
+                :inert="!store.customOn"
+              >
+                <div class="overflow-hidden">
+                  <Textarea
+                    v-model="store.custom"
+                    :placeholder="t('options.customPlaceholder')"
+                  />
+                </div>
               </div>
-              <div class="flex items-center gap-2" :title="t('options.customPromptDescription')">
-                <Switch id="custom-prompt" v-model="store.customOn" />
-                <Label for="custom-prompt" class="cursor-pointer">{{ t('options.customPrompt') }}</Label>
+
+              <div
+                class="grid-collapse"
+                :class="{ 'is-open': store.brandOn }"
+                :aria-hidden="!store.brandOn"
+                :inert="!store.brandOn"
+              >
+                <div class="overflow-hidden">
+                  <BrandStyleGuideBlock />
+                </div>
               </div>
-              <div class="flex items-center gap-2" :title="t('options.brandStyleGuideDescription')">
-                <Switch id="brand-style-guide" v-model="store.brandOn" />
-                <Label for="brand-style-guide" class="cursor-pointer">{{ t('options.brandStyleGuide') }}</Label>
-              </div>
+
+              <ReferenceBlock />
             </div>
-
-            <div
-              class="grid transition-[grid-template-rows] duration-300 ease-out"
-              :style="{ gridTemplateRows: store.customOn ? '1fr' : '0fr' }"
-              :aria-hidden="!store.customOn"
-              :inert="!store.customOn"
-            >
-              <div class="overflow-hidden">
-                <Textarea
-                  v-model="store.custom"
-                  :placeholder="t('options.customPlaceholder')"
-                />
-              </div>
-            </div>
-
-            <div
-              class="grid transition-[grid-template-rows] duration-300 ease-out"
-              :style="{ gridTemplateRows: store.brandOn ? '1fr' : '0fr' }"
-              :aria-hidden="!store.brandOn"
-              :inert="!store.brandOn"
-            >
-              <div class="overflow-hidden">
-                <BrandStyleGuideBlock />
-              </div>
-            </div>
-
-            <ReferenceBlock />
           </div>
         </div>
       </div>

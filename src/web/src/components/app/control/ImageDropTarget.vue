@@ -76,7 +76,7 @@ function onDrop(e: DragEvent) {
     tabindex="0"
     class="grid cursor-pointer place-items-center gap-0.5 rounded-lg border border-dashed bg-muted/30 text-center transition-colors outline-none focus-visible:border-primary"
     :class="[
-      dense ? 'min-h-[64px] p-3' : 'min-h-[86px] p-4',
+      dense ? 'min-h-16 p-3' : 'min-h-21.5 p-4',
       dragOver ? 'border-primary bg-accent' : 'border-input hover:border-primary',
       uploading ? 'pointer-events-none opacity-75' : '',
     ]"

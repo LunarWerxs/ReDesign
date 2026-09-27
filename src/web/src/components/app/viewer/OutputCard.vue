@@ -135,30 +135,32 @@ const sub = () => {
     :class="itemHidden ? 'opacity-50 grayscale' : ''"
   >
     <div class="flex min-w-0 items-center gap-2.5 border-b px-3 py-2.5">
-      <span class="size-2.5 shrink-0 rounded-full" :style="{ background: modelColor || '#888' }" />
-      <span class="min-w-0 truncate text-[13px] font-bold">{{ modelLabel }}</span>
+      <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': modelColor }" />
+      <span class="min-w-0 truncate text-ui font-bold">{{ modelLabel }}</span>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ sub() }}</span>
       <Tooltip v-if="slopBadge">
         <TooltipTrigger as-child>
           <span
-            class="shrink-0 cursor-default rounded border px-1.5 text-[11px] font-medium"
+            class="shrink-0 cursor-default rounded border px-1.5 text-2xs font-medium"
             :class="slopBadge.cls"
             tabindex="0"
             :aria-label="`${t('viewer.slopTitle')}: ${slopBadge.text}`"
           >{{ slopBadge.text }}</span>
         </TooltipTrigger>
-        <TooltipContent class="max-w-xs text-[12px] leading-snug">
-          <p class="mb-1 font-bold">{{ t('viewer.slopTitle') }}</p>
-          <ul class="space-y-0.5">
-            <li v-for="(f, i) in job.slop?.findings ?? []" :key="i">{{ f.severity }} {{ f.rule }}: {{ f.message }}</li>
-          </ul>
-          <p v-if="slopRetryText" class="mt-1">{{ slopRetryText }}</p>
+        <TooltipContent class="max-w-xs">
+          <div class="leading-snug">
+            <p class="mb-1 font-bold">{{ t('viewer.slopTitle') }}</p>
+            <ul class="space-y-0.5">
+              <li v-for="(f, i) in job.slop?.findings ?? []" :key="i">{{ f.severity }} {{ f.rule }}: {{ f.message }}</li>
+            </ul>
+            <p v-if="slopRetryText" class="mt-1">{{ slopRetryText }}</p>
+          </div>
         </TooltipContent>
       </Tooltip>
       <span class="flex-1" />
       <span
         v-if="contrastBadge"
-        class="shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium"
+        class="shrink-0 rounded px-1.5 py-0.5 text-2xs font-medium"
         :class="contrastBadge.fail ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'"
         :title="contrastBadge.title"
       >{{ contrastBadge.label }}</span>

@@ -8,6 +8,7 @@ import { GripVerticalIcon, ImageIcon, SquareIcon, XIcon } from '@lucide/vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
@@ -141,14 +142,16 @@ const {
 
 <template>
   <Card v-if="store.runId">
-    <CardHeader class="flex flex-row items-start gap-2.5 border-b">
-      <CardTitle class="min-w-0 flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {{ t('progress.runProgress') }}
-        <span class="ms-1 inline-block max-w-full truncate align-bottom font-normal normal-case text-muted-foreground/70" :title="store.runId || ''">
-          {{ store.runTitle }}
-        </span>
+    <CardHeader class="flex flex-row items-start">
+      <CardTitle class="min-w-0 flex-1">
+        <div class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {{ t('progress.runProgress') }}
+          <span class="ms-1 inline-block max-w-full truncate align-bottom font-normal normal-case text-muted-foreground/70" :title="store.runId || ''">
+            {{ store.runTitle }}
+          </span>
+        </div>
       </CardTitle>
-      <div class="flex shrink-0 items-center gap-1.5">
+      <div class="ms-2.5 flex shrink-0 items-center gap-1.5">
         <Button v-if="store.running" variant="destructive" size="sm" @click="store.cancelRun()">
           <SquareIcon class="size-3.5" /> {{ t('progress.cancel') }}
         </Button>
@@ -159,6 +162,9 @@ const {
         </Button>
       </div>
     </CardHeader>
+    <!-- The header rule is a Separator rather than border-b on CardHeader: the card's gap-4
+         on either side of it reproduces the pb-4 CardHeader gives a bordered header. -->
+    <Separator />
     <CardContent>
       <Progress v-if="store.runStatus !== 'queued'" :model-value="store.progress.pct" class="mb-2.5" />
       <div class="mb-2.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -178,7 +184,7 @@ const {
            behind it. The server queues submissions FIFO; this is what makes that queue visible
            and steerable — click a chip to watch it, × to drop it before it starts. -->
       <div v-if="showQueue" class="mb-2.5 grid gap-1.5">
-        <span class="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
           {{ t('progress.queueLabel', { count: store.activeRuns.length }) }}
         </span>
         <div class="flex flex-wrap items-center gap-1.5 text-xs">
@@ -191,7 +197,7 @@ const {
             <span class="size-2 shrink-0 rounded-full" :class="runDot(runningRun.status)" />
             <button
               type="button"
-              class="max-w-[180px] truncate text-muted-foreground hover:text-foreground"
+              class="max-w-45 truncate text-muted-foreground hover:text-foreground"
               :title="t('progress.watchThisRun', { run: runningRun.runId })"
               @click="store.focusRun(runningRun.runId)"
             >
@@ -220,7 +226,7 @@ const {
               <span v-else class="size-2 shrink-0 rounded-full" :class="runDot(run.status)" />
               <button
                 type="button"
-                class="max-w-[180px] truncate text-muted-foreground hover:text-foreground"
+                class="max-w-45 truncate text-muted-foreground hover:text-foreground"
                 :title="t('progress.watchThisRun', { run: run.runId })"
                 @click="store.focusRun(run.runId)"
               >
@@ -229,23 +235,22 @@ const {
               </button>
               <Button
                 variant="ghost"
-                size="icon"
-                class="size-5 rounded-full text-muted-foreground hover:text-destructive"
+                size="icon-xs-round"
                 :title="t('progress.cancelQueued')"
                 @click="store.cancelRun(run.runId)"
               >
-                <XIcon class="size-3" />
+                <XIcon class="size-3 text-muted-foreground group-hover/button:text-destructive" />
               </Button>
             </span>
           </div>
         </div>
       </div>
-      <div v-bind="jobListContainer" class="max-h-[320px]">
+      <div v-bind="jobListContainer" class="max-h-80">
         <div v-bind="jobListWrapper">
           <Tooltip v-for="{ data: job } in visibleJobs" :key="job.id" :disabled="!jobTooltip(job)">
             <TooltipTrigger as-child>
               <div
-                class="mb-1.5 grid h-[30px] grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 text-xs"
+                class="mb-1.5 grid h-7.5 grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 text-xs"
               >
                 <span class="size-3 rounded-full" :class="dot(job.status)" />
                 <span class="truncate text-muted-foreground">
