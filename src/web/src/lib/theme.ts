@@ -1,6 +1,6 @@
 import { computed, getCurrentInstance, onBeforeUnmount, watch } from "vue";
 import { useStorage, usePreferredDark } from "@vueuse/core";
-import { prefersReducedMotion } from "./reduced-motion";
+import { prefersReducedMotion } from "./utils";
 
 /**
  * Shared theme composable for every LunarWerx app (RepoYeti · DevWebUI · Reimagine).

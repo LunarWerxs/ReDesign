@@ -23,7 +23,7 @@
 // onEnd runs exactly once per started drag, no matter which signal ends it.
 
 import { onBeforeUnmount, ref, type Ref } from "vue";
-import { prefersReducedMotion } from "./reduced-motion";
+import { prefersReducedMotion } from "./utils";
 
 export interface GripDragHandlers {
   /** Capture the drag's starting state. Return false to reject the drag (missing refs etc.);
