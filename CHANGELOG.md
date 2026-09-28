@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-27
+
 ### Added
 
 - **Anti-slop lint on generated HTML.** Every saved redesign is run through a deterministic rule
