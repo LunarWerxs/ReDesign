@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-## [1.7.0] - 2026-09-27
+## [1.7.1] - 2026-09-27
+
+Everything below is new since 1.6.8. The 1.7.0 tag exists but was never published: its release
+build stopped before compiling anything, on a CI lock that the release job and the CI job it calls
+both claimed. That is fixed here, and 1.7.1 is the same app.
 
 ### Added
 

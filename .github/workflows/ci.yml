@@ -14,8 +14,11 @@ on:
   # drifting from the ordinary PR/main contract.
   workflow_call:
 
+# A fixed `ci-` prefix, never ${{ github.workflow }}: under workflow_call that expression is the
+# CALLER's name, so Release's `checks` job claimed Release's own group and GitHub failed v1.7.0 as a
+# concurrency deadlock before any build ran.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
