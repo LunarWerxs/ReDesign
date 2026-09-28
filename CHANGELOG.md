@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The Discord link now opens RēDesign's own channel and gives you the RēDesign role** on joining,
+  instead of dropping you in the server's general room to find it yourself.
+
 ## [1.7.1] - 2026-09-27
 
 Everything below is new since 1.6.8. The 1.7.0 tag exists but was never published: its release

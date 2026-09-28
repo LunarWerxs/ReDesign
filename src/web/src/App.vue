@@ -173,7 +173,7 @@ onMounted(async () => {
         </Transition>
       </RouterView>
 
-      <AppFooter />
+      <AppFooter discord="https://discord.gg/E3PCUkPASv" />
 
       <KeyHealthSheet v-model:open="settingsOpen" @refresh="refreshCurrentSurface" />
     </div>
