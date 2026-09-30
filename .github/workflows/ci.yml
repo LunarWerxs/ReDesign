@@ -1,5 +1,8 @@
 name: CI
 
+# rust-ci-speed: ci not applied: misc/tray-host-native is the LunarWerx kit's tray host, synced from
+# lunarwerx-ui, which builds and tests it (.github/workflows/tray-host.yml); this copy is not built here.
+
 on:
   push:
     branches: [main]
