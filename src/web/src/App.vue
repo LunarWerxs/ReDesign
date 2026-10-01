@@ -5,10 +5,8 @@ import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import AppTopbar from '@/components/app/AppTopbar.vue';
 import StatusPill from '@/components/app/StatusPill.vue';
-import { LayoutGrid as AllRunsIcon, Settings as SettingsIcon, SlidersHorizontal as ViewOptionsIcon } from '@lucide/vue';
+import { LayoutGrid as AllRunsIcon, Settings as SettingsIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import ViewSettings from '@/components/app/control/ViewSettings.vue';
 import KeyHealthSheet from '@/components/app/control/KeyHealthSheet.vue';
 import { useTheme } from '@/lib/theme';
 import { usePushPanel } from '@/shell/usePushPanel';
@@ -46,16 +44,6 @@ const viewerTo = computed(() => {
   const id = viewerStore.runId || controlStore.runId;
   return id ? { path: '/viewer', query: { run: id } } : { path: '/viewer' };
 });
-
-// Keep the View flyout (a Popover) open when the interaction that would normally
-// dismiss it actually happens inside an overlay it spawned - the run-picker Dialog,
-// an AlertDialog, or a toast - so those coexist with the flyout instead of racing it.
-function onViewFlyoutInteractOutside(e: Event) {
-  const target = (e as CustomEvent).detail?.originalEvent?.target as HTMLElement | null;
-  if (target?.closest('[role="dialog"], [role="alertdialog"], [data-sonner-toaster]')) {
-    e.preventDefault();
-  }
-}
 
 function openSettings() {
   // Toggle: a second click on the gear closes the sidebar. The next-tick defer is kept
@@ -123,31 +111,6 @@ onMounted(async () => {
             </TooltipTrigger>
             <TooltipContent>{{ t('viewer.allRuns') }}</TooltipContent>
           </Tooltip>
-
-          <!-- View options: pulled out of the settings sheet into its own header flyout so
-               filtering/adjusting the gallery no longer means opening Settings. Viewer route only. -->
-          <Popover v-if="isViewerRoute">
-            <PopoverTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon"
-                :aria-label="t('viewSettings.viewOptions')"
-                :title="t('viewSettings.viewOptions')"
-              >
-                <ViewOptionsIcon class="size-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              :collision-padding="12"
-              flush
-              class="max-h-[min(80vh,620px)] w-[min(340px,calc(100vw-2rem))] overflow-y-auto"
-              @interact-outside="onViewFlyoutInteractOutside"
-              @focus-outside="onViewFlyoutInteractOutside"
-            >
-              <ViewSettings />
-            </PopoverContent>
-          </Popover>
 
           <Tooltip>
             <TooltipTrigger as-child>

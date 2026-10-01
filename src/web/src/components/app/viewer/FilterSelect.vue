@@ -13,10 +13,7 @@ interface FilterItem {
   color?: string;
 }
 
-const props = withDefaults(
-  defineProps<{ kind?: 'models' | 'prompts'; variant?: 'button' | 'row' }>(),
-  { kind: 'models', variant: 'button' },
-);
+const props = withDefaults(defineProps<{ kind?: 'models' | 'prompts' }>(), { kind: 'models' });
 
 const store = useViewerStore();
 
@@ -56,26 +53,9 @@ function hideAll() {
 <template>
   <Popover>
     <PopoverTrigger as-child>
-      <button
-        v-if="props.variant === 'row'"
-        type="button"
-        class="flex w-full items-center justify-between px-3.5 py-1.75 outline-none transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-        :title="t('filter.chooseVisible', { noun })"
-        :disabled="!items.length"
-      >
-        <span class="text-ui text-muted-foreground">{{ label }}</span>
-        <span class="flex items-center gap-2 text-ui font-medium text-foreground">
-          <span class="rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs text-muted-foreground">
-            {{ visibleCount }} / {{ items.length }}
-          </span>
-          <ChevronDownIcon class="size-3 text-muted-foreground/60" />
-        </span>
-      </button>
       <Button
-        v-else
         variant="outline"
         size="sm"
-        class="min-w-38.5 justify-between"
         :title="t('filter.chooseVisible', { noun })"
         :disabled="!items.length"
       >

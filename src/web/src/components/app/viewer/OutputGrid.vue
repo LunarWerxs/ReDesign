@@ -12,6 +12,7 @@ import ReferenceCard from './ReferenceCard.vue';
 import OutputCard from './OutputCard.vue';
 import ErrorCard from './ErrorCard.vue';
 import ArenaDuel from './ArenaDuel.vue';
+import ViewerToolbar from './ViewerToolbar.vue';
 import { t } from '@/i18n';
 
 const store = useViewerStore();
@@ -69,23 +70,10 @@ const emptyMsg = computed(() => {
 </script>
 
 <template>
+  <ViewerToolbar v-if="store.manifest" />
   <div v-if="store.manifest?.mock" class="mx-4.5 mt-4.5 flex items-center gap-2 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
     <Badge variant="secondary">{{ t('runFlyout.mockBadge') }}</Badge>
     {{ t('viewer.mockRunNotice') }}
-  </div>
-  <div v-if="store.manifest" class="mx-4.5 mt-4.5 flex items-center gap-3 text-xs text-muted-foreground">
-    <label class="flex items-center gap-1"><input type="checkbox" :checked="store.review.keep" @change="store.setReviewKeep(($event.target as HTMLInputElement).checked)"> {{ t('viewer.keepRun') }}</label>
-    <a class="underline" :href="`/api/runs/${encodeURIComponent(store.manifest.runId)}/download?shortlist=1`">{{ t('viewer.downloadShortlist') }}</a>
-    <!-- A/B duel entry: only offered once 2+ models have finished outputs of one input. -->
-    <button
-      v-if="store.canArena && !store.arenaPair"
-      type="button"
-      class="underline"
-      :title="t('viewer.arenaStartTitle')"
-      @click="store.nextArenaPair()"
-    >
-      {{ t('viewer.arenaStart') }}
-    </button>
   </div>
   <ArenaDuel />
   <div
