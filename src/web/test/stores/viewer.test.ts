@@ -290,7 +290,7 @@ describe("grouped", () => {
 });
 
 describe("one at a time", () => {
-  it("keeps its paging order when an output is starred, and moves on when the shown one is hidden", () => {
+  it("keeps its paging order when starring, moves on from a bad mark, and undo brings it back in place", () => {
     const store = useViewerStore();
     store.runId = "run1";
     store.manifest = manifest({ jobs: [job("a"), job("b"), job("c"), job("d", { status: "error" as JobStatus })] });
@@ -301,9 +301,14 @@ describe("one at a time", () => {
     expect(store.focusJob?.id).toBe("c");
     expect(store.focusList.map((j) => j.id)).toEqual(["a", "b", "c"]);
 
-    store.toggleFocusedHidden();
+    expect(store.toggleFocusedHidden()).toBe("bad");
     expect(store.focusJob?.id).toBe("b");
     expect(store.focusList.map((j) => j.id)).toEqual(["a", "b"]);
+
+    expect(store.undoMarkBad()).toBe(true);
+    expect(store.focusJob?.id).toBe("c");
+    expect(store.isItemHidden("c")).toBe(false);
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b", "c"]);
   });
 });
 

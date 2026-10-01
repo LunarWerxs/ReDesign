@@ -118,6 +118,21 @@ const contrastBadge = computed(() => {
   };
 });
 
+// Full screen, each button names its key (OutputGrid.vue's keyboard handler) and hide reads as
+// "mark bad", which is what culling with it means there.
+const starLabel = computed(() => (props.starred ? t('viewer.unstarItem') : t('viewer.starItem')) + (props.focused ? ' (S)' : ''));
+const openLabel = computed(() => t('viewer.openOutput') + (props.focused ? ' (O)' : ''));
+const hideLabel = computed(() => {
+  if (props.itemHidden) return t('viewer.restoreItem') + (props.focused ? ' (X)' : '');
+  return props.focused ? t('viewer.markBad') : t('viewer.hideItem');
+});
+
+// A click inside the shown page hands the keyboard to that sandboxed frame. Moving the pointer
+// off it hands the keyboard back, so the shortcuts work again without a click elsewhere.
+function reclaimKeys() {
+  if (props.focused && document.activeElement instanceof HTMLIFrameElement) document.activeElement.blur();
+}
+
 const sub = () => {
   let s = props.promptLabel;
   if (props.job.variant > 1) s += ` · v${props.job.variant}`;
@@ -179,24 +194,24 @@ const sub = () => {
               type="button"
               variant="ghost"
               size="icon-xs"
-              :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
+              :aria-label="starLabel"
               :aria-pressed="starred"
               @click.stop="$emit('toggle-star')"
             >
               <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{{ starred ? t('viewer.unstarItem') : t('viewer.starItem') }}</TooltipContent>
+          <TooltipContent>{{ starLabel }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.openOutput')">
+            <Button as-child variant="ghost" size="icon-xs" :aria-label="openLabel">
               <a :href="outputUrl(job.file || '')" target="_blank" rel="noreferrer">
                 <ExternalLinkIcon class="size-3.5" />
               </a>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{{ t('viewer.openOutput') }}</TooltipContent>
+          <TooltipContent>{{ openLabel }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
@@ -266,7 +281,7 @@ const sub = () => {
               type="button"
               variant="ghost"
               size="icon-xs"
-              :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
+              :aria-label="hideLabel"
               :aria-pressed="itemHidden"
               @click.stop="$emit('toggle-hidden')"
             >
@@ -275,7 +290,7 @@ const sub = () => {
               <XIcon v-else class="size-3.5 text-muted-foreground" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
+          <TooltipContent>{{ hideLabel }}</TooltipContent>
         </Tooltip>
         <Tooltip v-if="focused">
           <TooltipTrigger as-child>
@@ -287,6 +302,16 @@ const sub = () => {
         </Tooltip>
       </div>
     </div>
-    <ScaledFrame :raw-url="rawUrl" :title="frameTitle" :rw="rw" :ar="ar" :height="height" :scale="scale" :fill="focused" />
+    <ScaledFrame
+      :raw-url="rawUrl"
+      :title="frameTitle"
+      :rw="rw"
+      :ar="ar"
+      :height="height"
+      :scale="scale"
+      :fill="focused"
+      @pointerleave="reclaimKeys"
+    />
+    <slot name="footer" />
   </div>
 </template>

@@ -11,8 +11,12 @@
 - **One at a time.** Each output card has a full-screen button, and the viewer toolbar has a "One
   at a time" button: one redesign fills the window with the card's own toolbar (star, open, download,
   screenshot, contrast, hide), ← and → arrows with a "3 / 22" counter, and an X (or Esc) back to the
-  grid. The arrow keys page too. Starring while you page doesn't reshuffle the order, and hiding the
-  one on screen moves on to the next.
+  grid. Starring while you page doesn't reshuffle the order, and hiding the one on screen moves on
+  to the next.
+- **Keys for culling, one at a time.** ← → page, S stars (the shortlist), X marks bad (hides it and
+  moves on, with an Undo toast), Z takes the last bad mark back, N jumps to a note box under the
+  page, O opens it in a new tab, ? lists the keys and Esc goes back. Every button's tooltip names its
+  key. Clicking inside a design hands it the keyboard; moving the pointer off it hands it back.
 
 ### Changed
 

@@ -132,22 +132,42 @@ export const useViewerStore = defineStore('viewer', () => {
     focusOrder.value = visibleOutputs.value.map((j) => j.id);
     focusJobId.value = id ?? focusOrder.value[0] ?? null;
   }
+  // The output last marked bad from this view, so Z (or the toast's Undo) can bring it back.
+  const lastMarkedBad = ref<string | null>(null);
   function closeFocus() {
     focusJobId.value = null;
+    lastMarkedBad.value = null;
   }
   function stepFocus(delta: number) {
     const next = focusList.value[focusIndex.value + delta];
     if (next) focusJobId.value = next.id;
   }
-  /** Hide (or restore) the shown output; a hide that removes it from view moves on to the next. */
-  function toggleFocusedHidden() {
+  /**
+   * Mark the shown output bad (hide it) or, if it already is, restore it. A mark that removes it
+   * from view moves on to the next. Returns 'bad' or 'restored', or null with nothing shown.
+   */
+  function toggleFocusedHidden(): 'bad' | 'restored' | null {
     const id = focusJobId.value;
-    if (!id) return;
+    if (!id) return null;
+    if (isItemHidden(id)) {
+      toggleItemHidden(id);
+      return 'restored';
+    }
     const list = focusList.value;
     const i = focusIndex.value;
-    const dropsOut = !showHiddenItems.value && !isItemHidden(id);
     toggleItemHidden(id);
-    if (dropsOut) focusJobId.value = (list[i + 1] ?? list[i - 1])?.id ?? null;
+    lastMarkedBad.value = id;
+    if (!showHiddenItems.value) focusJobId.value = (list[i + 1] ?? list[i - 1])?.id ?? null;
+    return 'bad';
+  }
+  /** Take back the last bad mark and show that output again, in its old place. */
+  function undoMarkBad(): boolean {
+    const id = lastMarkedBad.value;
+    if (!id) return false;
+    lastMarkedBad.value = null;
+    if (isItemHidden(id)) toggleItemHidden(id);
+    focusJobId.value = id;
+    return true;
   }
 
   function reconcileItemState(m: Manifest | null) {
@@ -629,6 +649,7 @@ export const useViewerStore = defineStore('viewer', () => {
     closeFocus,
     stepFocus,
     toggleFocusedHidden,
+    undoMarkBad,
     loadRuns,
     loadMoreRuns,
     nextRunsCursor,
