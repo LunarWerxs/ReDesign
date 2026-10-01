@@ -233,6 +233,8 @@ export interface ManifestConfig {
   maxCostUsd?: number;
   /** The run rendered each output and let its model correct it once. */
   selfCheck?: boolean;
+  /** The ticked inputs (`inputIds`) went out as one screen: one redesign from all of them. */
+  combineInputs?: boolean;
 }
 
 export interface Manifest {
@@ -476,6 +478,8 @@ export interface RunRequest {
   mock: boolean;
   /** Render each output at desktop and phone width and let its model correct it once. */
   selfCheck?: boolean;
+  /** The ticked inputs are screenshots of one screen: one redesign from all of them. */
+  combineInputs?: boolean;
   reference?: { images: string[]; note: string | null };
   brandStyleGuide?: string | null;
   // The control panel always sends false: "Add to queue" parks the run, and only a

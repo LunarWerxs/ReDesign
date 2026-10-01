@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- **"These are one screen."** Tick two or more screenshots and a switch appears under them. Turn
+  it on and each model makes one redesign that sees all of them, instead of a separate redesign
+  per screenshot; the job count and cost estimate drop to match, and "Run again" remembers it.
+  `--combine-inputs` on the CLI, `combine_inputs` over MCP.
+
 ### Changed
 
 - **The Discord link now opens RēDesign's own channel and gives you the RēDesign role** on joining,

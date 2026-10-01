@@ -102,6 +102,9 @@ export function createControlState() {
   //     re-run yesterday's input alongside today's and bill for it. Pick each run.
   //   • mock — a sticky mock flag means a "real" run quietly produces nothing.
   const selInputs = ref<string[]>([]);
+  // "These are one screen": the ticked screenshots go out as ONE subject (one redesign per model
+  // and prompt that sees all of them). Session-only, like the ticks it describes.
+  const combineInputs = ref(false);
   const selModels = useStorage<string[]>('redesign.sel-models', []);
   const selPrompts = useStorage<string[]>('redesign.sel-prompts', []);
   const selReference = useStorage<string[]>('redesign.sel-reference', []);
@@ -244,13 +247,22 @@ export function createControlState() {
   const envNote = computed(() => `${models.value.length} models · ${inputs.value.length} inputs`);
   const jobList = computed(() => (focusedRun.value ? Array.from(focusedRun.value.jobs.values()) : []));
 
+  /** How many subjects the run redesigns: the ticked inputs, or one when they are one screen. */
+  const subjectCount = computed(() =>
+    combineInputs.value && selInputs.value.length > 1 ? 1 : selInputs.value.length,
+  );
+
   const estimate = computed(() => {
     const nP = selPrompts.value.length + (customOn.value && custom.value.trim() ? 1 : 0);
     // Total "model runs" = sum of each selected model's quantity (default 1).
     const modelRuns = selModels.value.reduce((sum, id) => sum + Math.max(1, modelQty.value[id] || 1), 0);
-    const count = selInputs.value.length * modelRuns * nP;
+    const count = subjectCount.value * modelRuns * nP;
+    const inputsText =
+      subjectCount.value < selInputs.value.length
+        ? `${selInputs.value.length} inputs as one screen`
+        : `${selInputs.value.length} inputs`;
     const text = count
-      ? `${count} job${count > 1 ? 's' : ''} (${selInputs.value.length} inputs × ${modelRuns} model runs × ${nP || 1} prompts)`
+      ? `${count} job${count > 1 ? 's' : ''} (${inputsText} × ${modelRuns} model runs × ${nP || 1} prompts)`
       : 'select inputs, models & a prompt';
     return { count, text };
   });
@@ -293,6 +305,7 @@ export function createControlState() {
     providerDefaults,
     // selection / options
     selInputs,
+    combineInputs,
     selModels,
     selPrompts,
     selReference,
@@ -337,6 +350,7 @@ export function createControlState() {
     runnableModelIds,
     envNote,
     jobList,
+    subjectCount,
     estimate,
     progress,
   };

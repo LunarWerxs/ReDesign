@@ -71,6 +71,7 @@ export const useControlStore = defineStore('control', () => {
     updateApplying: selfUpdate.updateApplying,
     // selection/options
     selInputs: state.selInputs,
+    combineInputs: state.combineInputs,
     selModels: state.selModels,
     selPrompts: state.selPrompts,
     selReference: state.selReference,

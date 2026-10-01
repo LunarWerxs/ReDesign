@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadModels, loadPrompts, resolveModels, resolvePrompts } from "../config";
 import type { Model } from "../config/models";
 import type { ResolvedPrompt } from "../config/prompts";
-import { currentInputDir, REFERENCE_DIR, resolveReferences, resolveSelection, listInputs, type InputItem } from "../inputResolver";
+import { combineInputs, currentInputDir, REFERENCE_DIR, resolveReferences, resolveSelection, listInputs, type InputItem } from "../inputResolver";
 import { ensureDir, resolveInside, normalizeSelectionIds, type SelectionInput } from "../util";
 import { assetCropsEnabled } from "./asset-crop";
 import { estimateRunCost } from "./cost";
@@ -27,7 +27,7 @@ interface RunSpec {
   referenceNote: string;
   visionHelper: Model | null;
   brandStyleGuide: string;
-  settings: { mock: boolean; variants: number; variantsByModel: Record<string, number>; maxImagesPerInput?: number; concurrency: number; poolConcurrency: number; timeoutMs: number; maxCostUsd?: number; selfCheck?: boolean };
+  settings: { mock: boolean; variants: number; variantsByModel: Record<string, number>; maxImagesPerInput?: number; concurrency: number; poolConcurrency: number; timeoutMs: number; maxCostUsd?: number; selfCheck?: boolean; combineInputs?: boolean };
   jobs: Job[];
   assets: Array<{ path: string; sha256: string; bytes: number }>;
   assetBytes: number;
@@ -149,7 +149,8 @@ function hasValidSettings(value: RunSpec): boolean {
     && Number.isInteger(settings.poolConcurrency) && settings.poolConcurrency >= 1 && settings.poolConcurrency <= RUN_LIMITS.poolConcurrency
     && Number.isFinite(settings.timeoutMs) && settings.timeoutMs > 0
     && (settings.maxCostUsd == null || (Number.isFinite(settings.maxCostUsd) && settings.maxCostUsd >= 0))
-    && (settings.selfCheck == null || typeof settings.selfCheck === "boolean");
+    && (settings.selfCheck == null || typeof settings.selfCheck === "boolean")
+    && (settings.combineInputs == null || typeof settings.combineInputs === "boolean");
 }
 
 /** Every input image, preview and reference must name an asset the spec actually carries. */
@@ -218,10 +219,11 @@ function resolveRunSettings(options: RunReimagineOptions) {
 
 /** Resolve inputs, models, prompts and references, then reject an empty or over-large combination. */
 function resolveRunSelection(options: RunReimagineOptions, variants: number, variantsByModel: Record<string, number>) {
-  const inputs = resolveSelection(listInputs(), options.inputs);
+  const picked = resolveSelection(listInputs(), options.inputs);
   const models = resolveModels(options.models);
   const prompts = resolvePrompts(options.prompts || {});
-  assertResolvedSelection(options.inputs, inputs.flatMap((input) => [input.id, input.name]), "input");
+  assertResolvedSelection(options.inputs, picked.flatMap((input) => [input.id, input.name]), "input");
+  const inputs = options.combineInputs === true ? combineInputs(picked) : picked;
   assertResolvedSelection(options.models, models.map((model) => model.id), "model");
   if (!inputs.length) throw invalid("No inputs matched the selection.");
   if (!models.length) throw invalid("No models matched the selection.");
@@ -272,7 +274,7 @@ async function prepareRunSpec(options: RunReimagineOptions, targetDir: string): 
   if (jobs.length > RUN_LIMITS.jobs) throw new Error(`run exceeds ${RUN_LIMITS.jobs} jobs`);
   const visionHelper = pickVisionHelper(options, models);
   const reference = options.reference;
-  const spec: RunSpec ={ version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }), ...(options.selfCheck === true ? { selfCheck: true } : {}) }, jobs, assets: assetList, assetBytes };
+  const spec: RunSpec ={ version: 1, createdAt: new Date().toISOString(), ...(options.label ? { label: options.label } : {}), inputs: durableInputs, models, prompts, systemContract: loadPrompts().systemContract, referenceRels, referenceNote: String(reference?.note || "").trim(), visionHelper, brandStyleGuide: String(options.brandStyleGuide || "").trim(), settings: { mock: !!options.mock, variants, variantsByModel, ...(requestedCap == null ? {} : { maxImagesPerInput: requestedCap }), concurrency, poolConcurrency, timeoutMs, ...(maxCostUsd == null ? {} : { maxCostUsd }), ...(options.selfCheck === true ? { selfCheck: true } : {}), ...(options.combineInputs === true ? { combineInputs: true } : {}) }, jobs, assets: assetList, assetBytes };
   writeSpec(targetDir, spec);
   return spec;
 }

@@ -191,6 +191,7 @@ function buildRunRequest(state: ControlState, autoStart: boolean): RunRequest | 
     },
     mock: state.mock.value,
     ...(state.selfCheck.value ? { selfCheck: true } : {}),
+    ...(state.subjectCount.value < state.selInputs.value.length ? { combineInputs: true } : {}),
     // autoStart:false parks the run (held) until runQueue(); true lets the server run it
     // now or fall in behind whatever's already generating.
     autoStart,
@@ -380,7 +381,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
     // Per-model job counts so the estimate honors each model's own quantity
     // (inputs × prompts × that model's copies) instead of an even split.
     const nP = state.selPrompts.value.length + (state.customOn.value && state.custom.value.trim() ? 1 : 0);
-    const base = state.selInputs.value.length * nP;
+    const base = state.subjectCount.value * nP;
     const jobCountByModel: Record<string, number> = {};
     // Self-check sends every vision job one follow-up call, so count those jobs twice,
     // the same way the server's summarizeRunSpec does for preflight and MCP.
@@ -407,7 +408,7 @@ export function createRunsActions(state: ControlState, deps: RunsDeps) {
 
   watch(
     () => [
-      state.selInputs.value.length,
+      state.subjectCount.value,
       [...state.selModels.value].sort().join(','),
       state.estimate.value.count,
       JSON.stringify(state.modelQty.value),

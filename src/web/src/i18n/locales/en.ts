@@ -326,6 +326,9 @@ export default {
     all: 'All',
     none: 'None',
     previousSessions: 'Previous sessions',
+    oneScreen: 'These are one screen',
+    oneScreenDescription:
+      'Make one redesign that sees all {count} selected screenshots, instead of a separate redesign for each.',
     noImagesFound: 'No images found yet.',
     removeThisInput: 'Remove this input',
     previewName: 'Preview {name}',

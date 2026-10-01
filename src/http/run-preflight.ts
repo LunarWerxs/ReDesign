@@ -90,6 +90,7 @@ function optionsFor(body: RunBody): RunReimagineOptions {
     timeoutMs: body.timeoutMs as number | undefined,
     reference: body.reference as ReferenceOptions | null | undefined,
     brandStyleGuide: body.brandStyleGuide, maxCostUsd: body.maxCostUsd, selfCheck: body.selfCheck === true,
+    combineInputs: body.combineInputs === true,
   };
 }
 

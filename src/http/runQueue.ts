@@ -10,6 +10,7 @@ import * as store from "../store";
 import { runReimagine } from "../runner";
 // `reference` arrives as untyped JSON off the wire; runReimagine validates the shape
 // itself, so this only names the target type instead of widening the whole body to any.
+import { sourceInputIds } from "../inputResolver";
 import { readRunSpec, type RunSpec } from "../runner/run-spec";
 import { getPreparedSummary, prepareRun, takePreparedRun, undoPreparedRun } from "./run-preflight";
 import type { SelectionInput } from "../util";
@@ -34,6 +35,7 @@ interface RunBody {
   timeoutMs?: number;
   mock?: boolean;
   selfCheck?: boolean;
+  combineInputs?: boolean;
   inputs?: SelectionInput;
   models?: SelectionInput;
   prompts?: { presets?: unknown; custom?: string };
@@ -118,7 +120,7 @@ function queuedManifest(runId: string, spec: RunSpec, position: number, held = f
     summary: spec.label ? { title: spec.label, source: "label" } : null,
     specVersion: spec.version,
     config: {
-      inputIds: spec.inputs.map((input) => input.id), modelIds: spec.models.map((model) => model.id),
+      inputIds: sourceInputIds(spec.inputs), modelIds: spec.models.map((model) => model.id),
       promptIds: spec.prompts.map((prompt) => prompt.id), ...spec.settings,
       reference: spec.referenceRels.length ? { images: spec.referenceRels, note: spec.referenceNote || null } : null,
       brandStyleGuide: spec.brandStyleGuide,

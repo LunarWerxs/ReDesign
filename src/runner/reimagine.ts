@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ensureDir, type SelectionInput } from "../util";
 import type { KeyManager } from "../keyManager";
-import { loadImages, loadReferenceImages, type InputItem, type LoadedImage } from "../inputResolver";
+import { loadImages, loadReferenceImages, sourceInputIds, type InputItem, type LoadedImage } from "../inputResolver";
 import { getAdapter } from "../providers";
 import { withProviderRun } from "../provider-call";
 import { recordProviderUsage } from "./cost";
@@ -56,6 +56,8 @@ interface RunReimagineOptions {
   maxCostUsd?: number;
   /** Render each output at desktop and phone widths and let its model correct it once. */
   selfCheck?: boolean;
+  /** The ticked inputs are screenshots of one screen: make one redesign from all of them. */
+  combineInputs?: boolean;
   /** Internal only: already resolved and persisted by queue admission. */
   preparedSpec?: RunSpec;
   ownership?: store.RunOwnershipClaim;
@@ -300,7 +302,7 @@ function buildRunManifest(
     mock: ro.mock,
     summary,
     config: {
-      inputIds: rs.inputItems.map((i) => i.id),
+      inputIds: sourceInputIds(rs.inputItems),
       modelIds: rs.models.map((m) => m.id),
       promptIds: rs.prompts.map((p) => p.id),
       variants: ro.variants,
@@ -536,7 +538,7 @@ async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: Ru
 
   const manifest = buildRunManifest(runId, summary, jobs, thumb, ro, rs, poolLimits, brandStyleGuide);
   manifest.specVersion = spec.version;
-  manifest.config = { ...manifest.config, timeoutMs, maxCostUsd: spec.settings.maxCostUsd, ...(spec.settings.selfCheck ? { selfCheck: true } : {}) };
+  manifest.config = { ...manifest.config, timeoutMs, maxCostUsd: spec.settings.maxCostUsd, ...(spec.settings.selfCheck ? { selfCheck: true } : {}), ...(spec.settings.combineInputs ? { combineInputs: true } : {}) };
   store.writeManifest(runId, manifest);
   onProgress({ type: "start", runId, total: jobs.length, manifest });
   const inputById = new Map(inputItems.map((i) => [i.id, i]));

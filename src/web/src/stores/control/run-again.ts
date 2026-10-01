@@ -46,6 +46,7 @@ export function createRunAgainActions(state: ControlState) {
     applyStagedBrand(state, config);
     applyStagedCostCeiling(state, config);
     state.selfCheck.value = config.selfCheck === true;
+    state.combineInputs.value = config.combineInputs === true;
 
     if (dropped.length) {
       toast(t('runAgain.prefilled'), { description: t('runAgain.droppedSummary', { items: dropped.join(', ') }) });

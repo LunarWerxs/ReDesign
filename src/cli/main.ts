@@ -93,6 +93,8 @@ ${C.bold("RēDesign")} (ReDesign), run UI screenshots through many AI models.
     --mock                  no real API calls, placeholder HTML (for testing)
     --self-check            render each output at desktop + phone width and let its model fix it
                             once (one extra call per vision job; needs Edge or Chrome)
+    --combine-inputs        the picked inputs are screenshots of one screen: make one redesign
+                            per model and prompt from all of them, not one per input
     --concurrency N         max parallel calls across the whole run
     --pool-concurrency N    max parallel calls per key pool/provider lane
     --max-images N          cap reference images per group

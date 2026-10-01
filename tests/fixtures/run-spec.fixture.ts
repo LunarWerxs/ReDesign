@@ -20,6 +20,11 @@ if (process.argv[2] === "clone") {
   fs.unlinkSync(path.join(root, "input", "source.png")); fs.writeFileSync(MODELS_FILE, JSON.stringify({ models: [] }));
   const clone = await cloneRunSpec(dir, path.join(root, "clone"), [spec.jobs[1]!.id]);
   process.stdout.write(`${JSON.stringify({ original: readRunSpec(dir), clone })}\n`);
+} else if (process.argv[2] === "combine") {
+  fs.writeFileSync(path.join(root, "input", "second.png"), Buffer.concat([png, Buffer.from("second")]));
+  const combinedDir = path.join(root, "combined");
+  const combined = await prepareRunSpec({ mock: true, combineInputs: true, inputs: { ids: ["source", "second"] }, models: { ids: ["vision"] }, prompts: { presets: ["one"] } }, combinedDir);
+  process.stdout.write(`${JSON.stringify({ combined, read: readRunSpec(combinedDir) })}\n`);
 } else if (process.argv[2] === "corrupt") {
   fs.appendFileSync(path.join(dir, spec.assets[0]!.path), "x");
   process.stdout.write(`${JSON.stringify({ read: readRunSpec(dir) })}\n`);

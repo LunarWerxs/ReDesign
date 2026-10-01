@@ -82,6 +82,7 @@ export async function runCmd(args: Args): Promise<void> {
     brandStyleGuide: readBrandStyleGuide(args),
     mock: !!args.mock || process.env.MOCK === "1",
     selfCheck: !!args["self-check"],
+    combineInputs: !!args["combine-inputs"],
     concurrency: Number.parseInt(String(args.concurrency), 10) || undefined,
     poolConcurrency: Number.parseInt(String(args["pool-concurrency"]), 10) || undefined,
     maxImagesPerInput: Number.parseInt(String(args["max-images"]), 10) || undefined,

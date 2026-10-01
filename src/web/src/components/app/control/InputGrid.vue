@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -89,6 +91,14 @@ function onPreviewOpenChange(open: boolean) {
             @preview="openPreview(it)"
           />
         </div>
+      </div>
+
+      <div v-if="store.selInputs.length > 1" class="mt-4 flex items-center gap-2">
+        <Switch id="combine-inputs" v-model="store.combineInputs" />
+        <Label for="combine-inputs" class="cursor-pointer">{{ t('input.oneScreen') }}</Label>
+        <span class="text-xs text-muted-foreground">
+          {{ t('input.oneScreenDescription', { count: store.selInputs.length }) }}
+        </span>
       </div>
 
       <p v-if="!store.inputs.length" class="text-xs text-muted-foreground">{{ t('input.noImagesFound') }}</p>

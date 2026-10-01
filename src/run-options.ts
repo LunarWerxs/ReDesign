@@ -46,6 +46,7 @@ export function buildMcpRunBody(input: Record<string, unknown>, inputName: "inpu
     mock: input.mock === true,
     // Only when asked for, so a plain recipe's wire body is unchanged.
     ...(input.self_check === true ? { selfCheck: true } : {}),
+    ...(input.combine_inputs === true ? { combineInputs: true } : {}),
     concurrency: input.concurrency,
     maxImages: input.max_images,
     label: input.label,

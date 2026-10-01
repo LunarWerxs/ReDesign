@@ -14,5 +14,6 @@ function fixture(mode: string) {
 describe("run specs", () => {
   it("snapshots durable selected assets and rejects hard concurrency caps", () => { const result = fixture("base"); expect(result.spec.jobs).toHaveLength(3); expect(result.spec.assets).toHaveLength(2); expect(result.spec.inputs[0].images[0]).toMatch(/^assets\/input\//); expect(result.cap).toContain("concurrency"); }, 60_000);
   it("clones an exact original variant after source catalog and input disappear", () => { const result = fixture("clone"); expect(result.clone.jobs).toHaveLength(1); expect(result.clone.jobs[0].variant).toBe(2); expect(result.clone.models).toHaveLength(1); expect(result.clone.assets).toHaveLength(2); }, 60_000);
+  it("makes one subject from inputs marked as one screen, and the saved spec reads back", () => { const { combined, read } = fixture("combine"); expect(combined.inputs).toHaveLength(1); expect(combined.inputs[0].images).toHaveLength(2); expect([...combined.inputs[0].sourceIds].sort()).toEqual(["second", "source"]); expect(combined.jobs).toHaveLength(1); expect(read?.settings.combineInputs).toBe(true); }, 60_000);
   it("rejects a spec whose copied asset was corrupted", () => { expect(fixture("corrupt").read).toBeNull(); }, 60_000);
 });

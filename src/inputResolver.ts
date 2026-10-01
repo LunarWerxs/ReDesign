@@ -54,6 +54,8 @@ interface InputItem {
   imageCount: number;
   images: string[];
   preview: string;
+  /** Set only on a subject built by combineInputs: the input ids it was made from. */
+  sourceIds?: string[];
 }
 
 // NOTE: a directory-mtime cache was tried here and removed again (2026-08-09). It fingerprinted the
@@ -261,6 +263,31 @@ function resolveSelection(items: InputItem[], selection: SelectionInput): InputI
   return items.filter((it) => set.has(it.id) || set.has(it.name));
 }
 
+/**
+ * Screenshots of the SAME screen, ticked one by one, become one subject: the shape a subfolder
+ * of input/ already has (listInputs), so each model and prompt makes one redesign that sees every
+ * picture instead of one redesign per picture. `sourceIds` keeps the ticked ids for "Run again".
+ */
+function combineInputs(items: InputItem[]): InputItem[] {
+  const first = items[0];
+  if (!first || items.length < 2) return items;
+  const images = [...new Set(items.flatMap((item) => item.images))];
+  return [{
+    id: `${first.id}-combined`,
+    name: `${first.name} + ${items.length - 1} more`,
+    type: "group",
+    imageCount: images.length,
+    images,
+    preview: first.preview,
+    sourceIds: items.flatMap((item) => item.sourceIds ?? [item.id]),
+  }];
+}
+
+/** The ids a person ticked: a combined subject's sources, otherwise the subject itself. */
+function sourceInputIds(items: InputItem[]): string[] {
+  return items.flatMap((item) => item.sourceIds ?? [item.id]);
+}
+
 // Map a list of dir-relative image paths to base64 payloads.
 interface LoadedImage extends ImagePayload {
   file: string;
@@ -341,6 +368,8 @@ export {
   saveUploadedImages,
   deleteInput,
   resolveSelection,
+  combineInputs,
+  sourceInputIds,
   loadImages,
   loadImagesFromDir,
   listReferences,
