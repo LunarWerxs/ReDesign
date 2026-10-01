@@ -391,6 +391,15 @@ function selectCustomInput(event: FocusEvent) {
           </div>
         </SelectContent>
       </Select>
+      <div
+        v-if="store.manifest"
+        class="flex cursor-pointer items-center justify-between px-3.5 py-1.75 transition-colors hover:bg-accent"
+        :title="t('viewSettings.oneAtATimeTitle')"
+        @click="store.focusJob ? store.closeFocus() : store.openFocus()"
+      >
+        <span class="text-ui text-muted-foreground">{{ t('viewSettings.oneAtATime') }}</span>
+        <Switch :model-value="!!store.focusJob" size="sm" class="pointer-events-none" />
+      </div>
     </section>
 
     <!-- Layout -->

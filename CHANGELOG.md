@@ -8,6 +8,11 @@
   it on and each model makes one redesign that sees all of them, instead of a separate redesign
   per screenshot; the job count and cost estimate drop to match, and "Run again" remembers it.
   `--combine-inputs` on the CLI, `combine_inputs` over MCP.
+- **One at a time.** Each output card has a full-screen button, and View options has a "One at a
+  time" switch: one redesign fills the window with the card's own toolbar (star, open, download,
+  screenshot, contrast, hide), ← and → arrows with a "3 / 22" counter, and an X (or Esc) back to the
+  grid. The arrow keys page too. Starring while you page doesn't reshuffle the order, and hiding the
+  one on screen moves on to the next.
 
 ### Changed
 

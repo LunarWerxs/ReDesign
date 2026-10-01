@@ -112,6 +112,44 @@ export const useViewerStore = defineStore('viewer', () => {
     return out;
   });
 
+  // ── One at a time: a single output full screen, paged with arrows ──
+  // The order is frozen when the view opens, so starring an output (which floats it to the top
+  // of the grid) never sends the pager back over outputs already seen. Outputs that appear later
+  // (a live run) join at the end; ones hidden or filtered away drop out.
+  const focusJobId = ref<string | null>(null);
+  const focusOrder = ref<string[]>([]);
+  const visibleOutputs = computed(() => grouped.value.flatMap((g) => g.jobs.filter((j) => j.status === 'ok')));
+  const focusList = computed(() => {
+    const byId = new Map(visibleOutputs.value.map((j) => [j.id, j]));
+    const ordered = focusOrder.value.flatMap((id) => byId.get(id) ?? []);
+    const seen = new Set(focusOrder.value);
+    return [...ordered, ...visibleOutputs.value.filter((j) => !seen.has(j.id))];
+  });
+  const focusIndex = computed(() => focusList.value.findIndex((j) => j.id === focusJobId.value));
+  const focusJob = computed(() => focusList.value[focusIndex.value] ?? null);
+
+  function openFocus(id?: string) {
+    focusOrder.value = visibleOutputs.value.map((j) => j.id);
+    focusJobId.value = id ?? focusOrder.value[0] ?? null;
+  }
+  function closeFocus() {
+    focusJobId.value = null;
+  }
+  function stepFocus(delta: number) {
+    const next = focusList.value[focusIndex.value + delta];
+    if (next) focusJobId.value = next.id;
+  }
+  /** Hide (or restore) the shown output; a hide that removes it from view moves on to the next. */
+  function toggleFocusedHidden() {
+    const id = focusJobId.value;
+    if (!id) return;
+    const list = focusList.value;
+    const i = focusIndex.value;
+    const dropsOut = !showHiddenItems.value && !isItemHidden(id);
+    toggleItemHidden(id);
+    if (dropsOut) focusJobId.value = (list[i + 1] ?? list[i - 1])?.id ?? null;
+  }
+
   function reconcileItemState(m: Manifest | null) {
     if (!m) return;
     const currentRunPrefix = `${m.runId}:`;
@@ -376,6 +414,8 @@ export const useViewerStore = defineStore('viewer', () => {
     stopPoll();
     // A route-driven reopen is an intentional revalidation, even if it names the current run.
     resetReview(id);
+    // The one-at-a-time view pages through one run's outputs; another run starts on its grid.
+    if (id !== runId.value) closeFocus();
     runId.value = id;
     // A duel pair belongs to the run it was drawn from; never carry it onto another run.
     arenaPair.value = null;
@@ -582,6 +622,13 @@ export const useViewerStore = defineStore('viewer', () => {
     review,
     isLive,
     grouped,
+    focusJob,
+    focusIndex,
+    focusList,
+    openFocus,
+    closeFocus,
+    stepFocus,
+    toggleFocusedHidden,
     loadRuns,
     loadMoreRuns,
     nextRunsCursor,

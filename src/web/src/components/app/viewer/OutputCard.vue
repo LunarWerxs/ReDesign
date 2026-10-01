@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CameraIcon, ContrastIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, FileTextIcon, LoaderCircleIcon, StarIcon, XIcon } from '@lucide/vue';
+import { CameraIcon, ContrastIcon, ExternalLinkIcon, DownloadIcon, EyeIcon, EyeOffIcon, FileTextIcon, LoaderCircleIcon, Maximize2Icon, StarIcon, XIcon } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl, designMdUrl, contrastUrl } from '@/lib/api';
@@ -23,9 +23,11 @@ const props = defineProps<{
   itemHidden: boolean;
   /** The open run, so a chosen output can be handed off as a DESIGN.md; no button without it. */
   runId?: string;
+  /** Shown full screen, one at a time: the `leading` slot carries the pager and X closes. */
+  focused?: boolean;
 }>();
 
-defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void }>();
+defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void; (e: 'focus'): void; (e: 'close'): void }>();
 
 const rawUrl = computed(() => outputRawUrl(props.job.file || '', { measure: props.height === 'auto' }));
 // Distinct accessible name per iframe — see the comment on ScaledFrame's title prop.
@@ -130,11 +132,17 @@ const sub = () => {
 </script>
 
 <template>
+  <!-- never dimmed full screen: a see-through overlay would show the grid behind it, and the eye
+       icon already says "hidden" there -->
   <div
-    class="flex flex-col overflow-hidden rounded-lg border bg-card transition-opacity"
-    :class="itemHidden ? 'opacity-50 grayscale' : ''"
+    class="flex flex-col overflow-hidden transition-opacity"
+    :class="[
+      focused ? 'fixed inset-0 z-50 bg-background' : 'rounded-lg border bg-card',
+      itemHidden && !focused ? 'opacity-50 grayscale' : '',
+    ]"
   >
     <div class="flex min-w-0 items-center gap-2.5 border-b px-3 py-2.5">
+      <slot name="leading" />
       <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': modelColor }" />
       <span class="min-w-0 truncate text-ui font-bold">{{ modelLabel }}</span>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ sub() }}</span>
@@ -242,7 +250,16 @@ const sub = () => {
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.contrastItem') }}</TooltipContent>
         </Tooltip>
-        <!-- hide ("close") stays the LAST control so the X sits at the card's top-right corner -->
+        <Tooltip v-if="!focused">
+          <TooltipTrigger as-child>
+            <Button type="button" variant="ghost" size="icon-xs" :aria-label="t('viewer.focusOpen')" @click.stop="$emit('focus')">
+              <Maximize2Icon class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.focusOpen') }}</TooltipContent>
+        </Tooltip>
+        <!-- the LAST control is an X at the top-right corner: hide on a card, back to the grid
+             full screen (where hide moves one step left and becomes an eye) -->
         <Tooltip>
           <TooltipTrigger as-child>
             <Button
@@ -254,13 +271,22 @@ const sub = () => {
               @click.stop="$emit('toggle-hidden')"
             >
               <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
+              <EyeOffIcon v-else-if="focused" class="size-3.5 text-muted-foreground" />
               <XIcon v-else class="size-3.5 text-muted-foreground" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
         </Tooltip>
+        <Tooltip v-if="focused">
+          <TooltipTrigger as-child>
+            <Button type="button" variant="ghost" size="icon-xs" :aria-label="t('viewer.focusClose')" @click.stop="$emit('close')">
+              <XIcon class="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ t('viewer.focusClose') }}</TooltipContent>
+        </Tooltip>
       </div>
     </div>
-    <ScaledFrame :raw-url="rawUrl" :title="frameTitle" :rw="rw" :ar="ar" :height="height" :scale="scale" />
+    <ScaledFrame :raw-url="rawUrl" :title="frameTitle" :rw="rw" :ar="ar" :height="height" :scale="scale" :fill="focused" />
   </div>
 </template>

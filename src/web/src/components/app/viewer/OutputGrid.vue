@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { useEventListener } from '@vueuse/core';
+import { ChevronLeftIcon, ChevronRightIcon } from '@lucide/vue';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useViewerStore } from '@/stores/viewer';
 import { armFrameFocusGuard, useFrameFocusGuard } from '@/composables/useFrameFocusGuard';
 import type { Model, Prompt } from '@/types';
@@ -40,6 +43,19 @@ async function retryJob(jobId: string) {
   const target = result?.runIds[0];
   if (target) void router.push({ path: '/viewer', query: { run: target } });
 }
+
+// One at a time: ←/→ page, Esc goes back to the grid. Typing in a note or a field is left alone.
+// A click inside the shown page gives the keyboard to that sandboxed frame, so the on-screen
+// arrows stay the way to page from there.
+useEventListener(window, 'keydown', (event: KeyboardEvent) => {
+  if (!store.focusJob || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+  const action = { ArrowLeft: () => store.stepFocus(-1), ArrowRight: () => store.stepFocus(1), Escape: () => store.closeFocus() }[event.key];
+  if (!action) return;
+  event.preventDefault();
+  action();
+});
 
 const emptyMsg = computed(() => {
   const m = store.manifest;
@@ -118,6 +134,7 @@ const emptyMsg = computed(() => {
           :run-id="store.manifest?.runId"
           @toggle-star="store.toggleItemStarred(job.id)"
           @toggle-hidden="store.toggleItemHidden(job.id)"
+          @focus="store.openFocus(job.id)"
         />
         <textarea
           class="col-span-full min-h-8 rounded border bg-background p-2 text-xs"
@@ -130,4 +147,55 @@ const emptyMsg = computed(() => {
   </div>
   <!-- v-html: emptyMsg is our own i18n string (it carries inline markup), never model output. -->
   <div v-else class="p-16 text-center text-muted-foreground" v-html="emptyMsg" />
+
+  <!-- One at a time: keyed per output so each one opens fresh (its own contrast and screenshot state). -->
+  <OutputCard
+    v-if="store.focusJob"
+    :key="store.focusJob.id"
+    focused
+    :job="store.focusJob"
+    :model-label="modelLabel(store.focusJob.modelId)"
+    :model-color="modelColor(store.focusJob.modelId)"
+    :prompt-label="promptLabel(store.focusJob.promptId)"
+    :rw="store.zoom"
+    :ar="store.aspect"
+    height="aspect"
+    :scale="1"
+    :starred="store.isItemStarred(store.focusJob.id)"
+    :item-hidden="store.isItemHidden(store.focusJob.id)"
+    :run-id="store.manifest?.runId"
+    @toggle-star="store.toggleItemStarred(store.focusJob.id)"
+    @toggle-hidden="store.toggleFocusedHidden()"
+    @close="store.closeFocus()"
+  >
+    <template #leading>
+      <div class="flex shrink-0 items-center gap-0.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          :aria-label="t('viewer.focusPrevious')"
+          :title="t('viewer.focusPrevious')"
+          :disabled="store.focusIndex <= 0"
+          @click="store.stepFocus(-1)"
+        >
+          <ChevronLeftIcon class="size-4" />
+        </Button>
+        <span class="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
+          {{ t('viewer.focusPosition', { index: store.focusIndex + 1, total: store.focusList.length }) }}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          :aria-label="t('viewer.focusNext')"
+          :title="t('viewer.focusNext')"
+          :disabled="store.focusIndex >= store.focusList.length - 1"
+          @click="store.stepFocus(1)"
+        >
+          <ChevronRightIcon class="size-4" />
+        </Button>
+      </div>
+    </template>
+  </OutputCard>
 </template>

@@ -289,6 +289,24 @@ describe("grouped", () => {
   });
 });
 
+describe("one at a time", () => {
+  it("keeps its paging order when an output is starred, and moves on when the shown one is hidden", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b"), job("c"), job("d", { status: "error" as JobStatus })] });
+
+    store.openFocus("b");
+    store.toggleItemStarred("b"); // floats b to the top of the grid
+    store.stepFocus(1);
+    expect(store.focusJob?.id).toBe("c");
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b", "c"]);
+
+    store.toggleFocusedHidden();
+    expect(store.focusJob?.id).toBe("b");
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b"]);
+  });
+});
+
 describe("item keys are scoped to the run", () => {
   it("does not leak a star from one run into another", () => {
     const store = useViewerStore();

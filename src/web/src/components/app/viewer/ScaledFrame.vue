@@ -8,7 +8,9 @@ import type { ViewerHeight } from '@/stores/viewer';
 // model-generated HTML can never reach our origin or API.
 // title is required: a run's grid holds dozens of identical-looking iframes, and without a
 // distinct accessible name a screen reader announces every one of them the same way.
-const props = defineProps<{ rawUrl: string; title: string; rw: number; ar: number; height: ViewerHeight; scale: number }>();
+// fill: take all the space the parent's flex column leaves (the one-at-a-time view) instead of
+// an aspect box; the page still renders rw wide, scaled to fit, and scrolls inside the frame.
+const props = defineProps<{ rawUrl: string; title: string; rw: number; ar: number; height: ViewerHeight; scale: number; fill?: boolean }>();
 
 const wrap = useTemplateRef<HTMLElement>('wrap');
 const frame = useTemplateRef<HTMLIFrameElement>('frame');
@@ -69,16 +71,27 @@ watch(
   },
 );
 
-useIframeScale(wrap, frame, () => ({
-  rw: props.rw,
-  ar: props.ar,
-  rh: resolvedHeight.value,
-  scale: previewScale.value,
-}));
+// Filling: the frame's own height is the box's height in page pixels (box height ÷ fit scale).
+// Read at apply time, which the composable's ResizeObserver re-runs whenever the box resizes.
+function fillHeight(): number | null {
+  const box = wrap.value;
+  return box?.clientWidth ? (box.clientHeight * props.rw) / box.clientWidth : null;
+}
+
+useIframeScale(wrap, frame, () =>
+  props.fill
+    ? { rw: props.rw, ar: props.ar, rh: fillHeight(), scale: 1 }
+    : { rw: props.rw, ar: props.ar, rh: resolvedHeight.value, scale: previewScale.value },
+);
 </script>
 
 <template>
-  <div ref="wrap" class="relative aspect-(--frame-aspect) overflow-hidden bg-white" :style="{ '--frame-aspect': String(frameAspect) }">
+  <div
+    ref="wrap"
+    class="relative overflow-hidden bg-white"
+    :class="fill ? 'min-h-0 flex-1' : 'aspect-(--frame-aspect)'"
+    :style="fill ? undefined : { '--frame-aspect': String(frameAspect) }"
+  >
     <!-- data-output-frame: claimed by composables/useFrameFocusGuard.ts, which undoes the
          scroll jump a preview causes when its content autofocuses itself on load. -->
     <iframe
