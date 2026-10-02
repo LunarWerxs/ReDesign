@@ -37,8 +37,6 @@ const sizes = [
   { v: '414', label: t('viewSettings.phone'), icon: SmartphoneIcon },
 ];
 const columnChoices = ['1', '2', '3', '4', '5'];
-// The kit toggle's "on" fill is the page colour in the dark theme; tint the chosen segment instead.
-const segmentOn = 'data-[state=on]:bg-primary/15 data-[state=on]:text-primary';
 
 const runTitle = computed(() => {
   const m = store.manifest;
@@ -133,8 +131,7 @@ function keepAdvancedOpen(e: Event) {
         v-for="n in columnChoices"
         :key="n"
         :value="n"
-        class="px-2.5 tabular-nums"
-        :class="segmentOn"
+        data-segment="count"
         :aria-label="t('viewSettings.columnsCount', { count: n })"
       >
         {{ n }}
@@ -153,7 +150,7 @@ function keepAdvancedOpen(e: Event) {
         v-for="s in sizes"
         :key="s.v"
         :value="s.v"
-        :class="segmentOn"
+        data-segment
         :aria-label="s.label"
         :title="t('viewSettings.sizeOption', { size: s.label, width: s.v })"
       >
@@ -182,7 +179,7 @@ function keepAdvancedOpen(e: Event) {
       v-if="retryableCount"
       variant="ghost"
       size="sm"
-      class="text-destructive"
+      data-retry-failed
       :disabled="store.isLive || retrying"
       :title="store.isLive ? t('viewSettings.retryFailedWaitTitle') : t('viewSettings.retryFailedTitle')"
       @click="retryFailed"

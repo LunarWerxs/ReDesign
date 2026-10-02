@@ -160,6 +160,21 @@
   --color-model-dot: var(--model-color, oklch(62.68% 0 0));
 }
 
+/* Viewer toolbar (ViewerToolbar.vue), set through data attributes because the kit components own
+   their own colour and type. Unlayered, so they win over the kit's utility classes. The kit
+   toggle's "on" fill is the page colour in the dark theme; the chosen segment is tinted instead.
+   The retry-failed button reads destructive at rest and as the kit ghost button on hover. */
+[data-segment][data-state='on'] {
+  background-color: color-mix(in oklab, var(--primary) 15%, transparent);
+  color: var(--primary);
+}
+[data-segment='count'] {
+  font-variant-numeric: tabular-nums;
+}
+[data-retry-failed]:not(:hover) {
+  color: var(--destructive);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .page-enter-active,
   .page-leave-active {
