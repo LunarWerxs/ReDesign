@@ -130,6 +130,8 @@ jobs:
         with:
           name: redesign-${{ matrix.target }}
           path: out/*
+          # Only carries the binaries to the publish job below; the release itself keeps them.
+          retention-days: 1
 
   release:
     timeout-minutes: 60
