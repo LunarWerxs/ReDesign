@@ -1,5 +1,88 @@
 {
- "closed": null,
+ "closed": {
+  "a": {
+   "commit": "88f73bd58ab21bbbbdd40c35fd0050688f75ff6e",
+   "def_hash": "7ddece0b5cb69f8a",
+   "dirty": false,
+   "id": "m-20261006T085800-d57fb1",
+   "load_after": 1.0,
+   "load_before": 0.998,
+   "machine": "MPC-HELL",
+   "metric": "product.shipped_bytes",
+   "project": "redesign",
+   "reason": null,
+   "seconds": 0.687,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/shipped_bytes.py": "459d5489308825a33a18ee9131302a8821a4f18b"
+    }
+   },
+   "started": "2026-10-06T08:58:00+00:00",
+   "status": "ok",
+   "value": 1841190
+  },
+  "applies_if": null,
+  "at": "2026-10-06T08:58:39+00:00",
+  "b": {
+   "commit": "62f6af409f4be0191602747a1cb378de666db1d3",
+   "def_hash": "7ddece0b5cb69f8a",
+   "dirty": false,
+   "id": "m-20261006T085832-9a64e1",
+   "load_after": 1.0,
+   "load_before": 1.0,
+   "machine": "MPC-HELL",
+   "metric": "product.shipped_bytes",
+   "project": "redesign",
+   "reason": null,
+   "seconds": 0.537,
+   "settings": {
+    "gate": "exact",
+    "kind": "size",
+    "measure_files": {
+     "scripts/rsi/shipped_bytes.py": "459d5489308825a33a18ee9131302a8821a4f18b"
+    }
+   },
+   "started": "2026-10-06T08:58:32+00:00",
+   "status": "ok",
+   "value": 1841020
+  },
+  "guards": [
+   {
+    "a": 0,
+    "b": 0,
+    "declared": false,
+    "metric": "arkitect_gating_errors",
+    "state": "ok"
+   },
+   {
+    "a": 486,
+    "b": 486,
+    "declared": false,
+    "metric": "arkitect_warnings",
+    "state": "ok"
+   },
+   {
+    "a": 110,
+    "b": 110,
+    "declared": false,
+    "metric": "arkitect_no_data",
+    "state": "ok"
+   },
+   {
+    "a": 5,
+    "b": 5,
+    "declared": false,
+    "metric": "deps_total",
+    "state": "ok"
+   }
+  ],
+  "method": "exact: 1841190 -> 1841020",
+  "note": "removed the never-called isRestartPending export (dead code)",
+  "pattern": null,
+  "verdict": "kept"
+ },
  "def_hash": "7ddece0b5cb69f8a",
  "id": "20261006-product-shipped-bytes-df1a",
  "idea": "remove the never-called isRestartPending export from src/auto-update.ts",
