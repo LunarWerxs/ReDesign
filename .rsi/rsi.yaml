@@ -1,6 +1,8 @@
 schema: hydra-rsi/1
-# Committed bytes of the product source (Bun server/CLI + Vue web app under src/, without tests or config).
-# Smaller shipped code means a lighter download and less to parse and maintain.
+# Committed bytes of the product source compiled into the release binary (Bun server/CLI + seed config JSON
+# + Vue web app under src/, without tests, dev scripts or build/tool config).
+# Smaller shipped code means a lighter download and less to parse and maintain. The binary is minified,
+# so only removed code is a real win; trimming comments or whitespace is not.
 metrics:
   - id: product.shipped_bytes
     kind: size
