@@ -1,0 +1,24 @@
+{
+ "closed": null,
+ "def_hash": "7ddece0b5cb69f8a",
+ "id": "20261006-product-shipped-bytes-df1a",
+ "idea": "remove the never-called isRestartPending export from src/auto-update.ts",
+ "lane": "normal",
+ "metric": "product.shipped_bytes",
+ "opened": {
+  "at": "2026-10-06T08:57:56+00:00",
+  "by": "blogi",
+  "commit": "88f73bd58ab21bbbbdd40c35fd0050688f75ff6e",
+  "machine": "MPC-HELL"
+ },
+ "pass_line": null,
+ "predict": {
+  "expect": 190.0,
+  "hi": 400.0,
+  "lo": 100.0,
+  "p_keep": 0.8
+ },
+ "probe_minutes": null,
+ "project": "redesign",
+ "schema": "hydra-rsi-trial/1"
+}

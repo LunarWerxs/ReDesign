@@ -92,11 +92,6 @@ export interface AutoUpdateRunResult {
   reason?: string;
 }
 
-/** True if an update was applied on disk but its restart is waiting for the app to go idle. */
-export function isRestartPending(): boolean {
-  return restartPending;
-}
-
 /** Fire the deferred relaunch now, if one is pending and no run is active. Safe to call
  *  speculatively (e.g. from runQueue.ts right after a run finishes); no-ops otherwise. */
 export function maybeApplyDeferredRestart(): boolean {
