@@ -48,8 +48,7 @@ function assertResolvedSelection(selection: SelectionInput, selected: string[], 
   if (selection == null) return;
   const ids = normalizeSelectionIds(selection, { extraKeys: ["rels", "images", "ids"] });
   if (ids.length === 1 && ids[0] === "all") return;
-  const selectedSet = new Set(selected);
-  const missing = ids.filter((id) => !selectedSet.has(id));
+  const missing = ids.filter((id) => !selected.includes(id));
   if (!ids.length || missing.length) throw invalid(`${label} selection is empty or unavailable: ${missing.join(", ")}`);
 }
 
@@ -287,9 +286,8 @@ function readRunSpec(dir: string): RunSpec | null {
 async function cloneRunSpec(sourceDir: string, targetDir: string, jobIds?: string[]): Promise<RunSpec> {
   const source = readRunSpec(sourceDir);
   if (!source) throw invalid("source run spec is missing or corrupt", 409);
-  const wanted = jobIds?.length ? new Set(jobIds) : null;
-  const selected = wanted ? source.jobs.filter((job) => wanted.has(job.id)) : source.jobs;
-  if (jobIds?.length && selected.length !== wanted?.size) throw new Error("requested job was not found in source spec");
+  const selected = jobIds?.length ? source.jobs.filter((job) => jobIds.includes(job.id)) : source.jobs;
+  if (jobIds?.length && selected.length !== new Set(jobIds).size) throw new Error("requested job was not found in source spec");
   if (!selected.length) throw new Error("no jobs selected");
   if (selected.length > RUN_LIMITS.jobs) throw new Error(`run exceeds ${RUN_LIMITS.jobs} jobs`);
   const assets = source.assets.map((asset) => ({ ...asset }));
