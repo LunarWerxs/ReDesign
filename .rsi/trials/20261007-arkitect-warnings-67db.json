@@ -1,0 +1,24 @@
+{
+ "closed": null,
+ "def_hash": "6e6ac7762091097c",
+ "id": "20261007-arkitect-warnings-67db",
+ "idea": "hoist loop-invariant TextEncoder and array scans into a shared encoder / Set in zip.ts, run-export.ts, run-spec.ts",
+ "lane": "normal",
+ "metric": "arkitect_warnings",
+ "opened": {
+  "at": "2026-10-07T09:38:10+00:00",
+  "by": "blogi",
+  "commit": "38ca080b37fb56c4b44fca57d8a76f14d99f4b25",
+  "machine": "MPC-HELL"
+ },
+ "pass_line": null,
+ "predict": {
+  "expect": 480.0,
+  "hi": 486.0,
+  "lo": 470.0,
+  "p_keep": 0.6
+ },
+ "probe_minutes": null,
+ "project": "redesign",
+ "schema": "hydra-rsi-trial/1"
+}

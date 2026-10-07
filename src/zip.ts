@@ -237,8 +237,9 @@ export async function buildZip(entries: ZipEntry[]): Promise<Uint8Array<ArrayBuf
   const centrals: Uint8Array[] = [];
   let offset = 0;
 
+  const nameEncoder = new TextEncoder();
   for (const entry of entries) {
-    const nameBytes = new TextEncoder().encode(entry.name);
+    const nameBytes = nameEncoder.encode(entry.name);
     const compressed = new Uint8Array(await deflate(entry.data));
     // DEFLATE can expand incompressible input; fall back to STORED so an entry never grows.
     const useDeflate = compressed.length < entry.data.length;

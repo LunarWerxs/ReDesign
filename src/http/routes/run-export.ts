@@ -7,6 +7,7 @@ import { buildZipStream, type ZipInputEntry, type ZipStreamEntry } from "../../z
 import type { Deps } from "../deps";
 import { requireSameOrigin } from "../origin-guard";
 
+const utf8 = new TextEncoder();
 const EXPORT_MAX_BYTES = 512 * 1024 * 1024;
 const EXPORT_MAX_ENTRIES = 0xffff - 1;
 function safeArchiveName(value: string): string { return value.replace(/[^\w.-]+/g, "_") || "run"; }
@@ -18,7 +19,7 @@ function archiveHref(name: string): string { return name.split("/").map((part) =
 function escapeHtml(value: string): string { return value.replace(/[&<>'"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[c] || c); }
 function comparisonIndex(items: { name: string; label: string }[]): Uint8Array {
   const rows = items.map(({ name, label }) => `<article><h2>${escapeHtml(label)}</h2><iframe sandbox src="${escapeHtml(archiveHref(name))}"></iframe></article>`).join("\n");
-  return new TextEncoder().encode(`<!doctype html><meta charset="utf-8"><title>Run comparison</title><style>body{font:14px system-ui;margin:20px;background:#eee}article{background:#fff;margin:16px 0;padding:12px}iframe{width:100%;height:700px;border:1px solid #ccc}</style><h1>Run comparison</h1>${rows}`);
+  return utf8.encode(`<!doctype html><meta charset="utf-8"><title>Run comparison</title><style>body{font:14px system-ui;margin:20px;background:#eee}article{background:#fff;margin:16px 0;padding:12px}iframe{width:100%;height:700px;border:1px solid #ccc}</style><h1>Run comparison</h1>${rows}`);
 }
 function isBelow(root: string, target: string): boolean { return target.startsWith(root + path.sep); }
 function jobLabel(job: NonNullable<store.Manifest["jobs"]>[number]): string {
@@ -94,7 +95,7 @@ async function bundlePlan(id: string, shortlistOnly: boolean): Promise<ZipInputE
     if (shortlistOnly && /\.html?$/i.test(name)) {
       const doc = await designMdFor(rootReal, abs, jobLabel(job), name, id);
       if (doc) {
-        const data = new TextEncoder().encode(doc);
+        const data = utf8.encode(doc);
         entries.push({ name: `${name.replace(/\.html?$/i, "")}.DESIGN.md`, data });
         designMds.set(String(job.id), data);
       }
@@ -102,7 +103,7 @@ async function bundlePlan(id: string, shortlistOnly: boolean): Promise<ZipInputE
   }
   const chosen = review.shortlist.find((jobId) => designMds.has(jobId));
   if (chosen) entries.push({ name: "DESIGN.md", data: designMds.get(chosen) as Uint8Array });
-  entries.push({ name: "review.json", data: new TextEncoder().encode(JSON.stringify(review, null, 2)) });
+  entries.push({ name: "review.json", data: utf8.encode(JSON.stringify(review, null, 2)) });
   async function walk(dir: string, prefix: string): Promise<void> {
     let children: fs.Dirent[];
     try { children = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
