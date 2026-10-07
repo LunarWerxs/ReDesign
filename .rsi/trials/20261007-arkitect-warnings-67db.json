@@ -1,5 +1,85 @@
 {
- "closed": null,
+ "closed": {
+  "a": {
+   "commit": "38ca080b37fb56c4b44fca57d8a76f14d99f4b25",
+   "def_hash": "6e6ac7762091097c",
+   "dirty": false,
+   "id": "m-20261007T093820-82d9b7",
+   "load_after": null,
+   "load_before": null,
+   "machine": "MPC-HELL",
+   "metric": "arkitect_warnings",
+   "project": "redesign",
+   "reason": null,
+   "seconds": null,
+   "settings": {
+    "arkitect_checks_total": 1394,
+    "arkitect_tool_version": null,
+    "gate": "exact",
+    "kind": "count",
+    "measure_files": {},
+    "measured_at": "2026-10-07T09:34:20+00:00",
+    "source": "index"
+   },
+   "started": "2026-10-07T09:38:20+00:00",
+   "status": "ok",
+   "value": 486
+  },
+  "applies_if": null,
+  "at": "2026-10-07T09:49:11+00:00",
+  "b": {
+   "commit": "2531ffc857ddd820ef04d8ac9ebaba6a1994defe",
+   "def_hash": "6e6ac7762091097c",
+   "dirty": false,
+   "id": "m-20261007T094829-f6c936",
+   "load_after": null,
+   "load_before": null,
+   "machine": "MPC-HELL",
+   "metric": "arkitect_warnings",
+   "project": "redesign",
+   "reason": null,
+   "seconds": null,
+   "settings": {
+    "arkitect_checks_total": 1462,
+    "arkitect_tool_version": null,
+    "gate": "exact",
+    "kind": "count",
+    "measure_files": {},
+    "measured_at": "2026-10-07T09:48:01+00:00",
+    "source": "index"
+   },
+   "started": "2026-10-07T09:48:29+00:00",
+   "status": "ok",
+   "value": 599
+  },
+  "guards": [
+   {
+    "a": 0,
+    "b": 2,
+    "declared": false,
+    "metric": "arkitect_gating_errors",
+    "state": "not comparable"
+   },
+   {
+    "a": 110,
+    "b": 118,
+    "declared": false,
+    "metric": "arkitect_no_data",
+    "state": "not comparable"
+   },
+   {
+    "a": 5,
+    "b": 5,
+    "declared": false,
+    "metric": "deps_total",
+    "state": "ok"
+   }
+  ],
+  "method": "arkitect_checks_total differs between the readings (1394 vs 1462): not comparable",
+  "note": "hoists were sound but B was read from a fresh Architect rerun (599, full roster) vs A from the stale Oct 3 scan (486), so the pair is not comparable",
+  "pattern": null,
+  "verdict": "inconclusive"
+ },
  "def_hash": "6e6ac7762091097c",
  "id": "20261007-arkitect-warnings-67db",
  "idea": "hoist loop-invariant TextEncoder and array scans into a shared encoder / Set in zip.ts, run-export.ts, run-spec.ts",
