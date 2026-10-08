@@ -60,7 +60,7 @@ function importPath(fromFile: string, target: string): string {
 // embedded the web assets and nothing from misc\, so no host could exist beside it and each app's
 // README simply wrote that down as a limitation. Filenames, not paths: materializeTrayToolkit()
 // looks these up by basename in the embedded map (mirrors trayToolkitFiles() in tray-bootstrap.mjs).
-const TRAY_TOOLKIT_FILES = ["lunarwerx-tray.exe", "ReDesign-Tray.json", "ReDesign.ico"];
+const TRAY_TOOLKIT_FILES = ["ReDesign-Tray.exe", "ReDesign-Tray.json", "ReDesign.ico"];
 
 function writeReleaseEntrypoint(): string {
   rmSync(TMP, { recursive: true, force: true });

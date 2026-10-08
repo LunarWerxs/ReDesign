@@ -31,7 +31,7 @@ icon-bearing GUI executable with the web app embedded and no console window. The
 is the smaller automatic-update transport.
 
 The system-tray icon comes with both downloads. It is drawn by a small separate launcher
-(`misc\lunarwerx-tray.exe`); the zip ships it beside the exe, and since 1.6.7 the single-file
+(`misc\ReDesign-Tray.exe`); the zip ships it beside the exe, and since 1.6.7 the single-file
 `redesign.exe` carries it inside the binary and writes it out beside its own state on first run, so
 either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.6.7 the bare exe
 had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still
