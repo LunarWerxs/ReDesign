@@ -130,9 +130,9 @@ console.log("→ compile daemon + embedded web app (bun --compile)");
 const releaseEntry = writeReleaseEntrypoint();
 try {
   if (isWin) {
-    await $`bun build --compile --minify --windows-hide-console --windows-icon=${join(ROOT, "misc", "ReDesign.ico")} --windows-title=${"RēDesign"} --windows-publisher=LunarWerx --windows-version=${`${pkg.version}.0`} --windows-description=${"AI UI redesign workbench"} ${releaseEntry} --outfile ${outBin}`;
+    await $`bun build --compile --bytecode --format=esm --compile-exec-argv=--disallow-code-generation-from-strings --minify --windows-hide-console --windows-icon=${join(ROOT, "misc", "ReDesign.ico")} --windows-title=${"RēDesign"} --windows-publisher=LunarWerx --windows-version=${`${pkg.version}.0`} --windows-description=${"AI UI redesign workbench"} ${releaseEntry} --outfile ${outBin}`;
   } else {
-    await $`bun build --compile --minify ${releaseEntry} --outfile ${outBin}`;
+    await $`bun build --compile --bytecode --format=esm --compile-exec-argv=--disallow-code-generation-from-strings --minify ${releaseEntry} --outfile ${outBin}`;
   }
 } finally {
   rmSync(TMP, { recursive: true, force: true });
