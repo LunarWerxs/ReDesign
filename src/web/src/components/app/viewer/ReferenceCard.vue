@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ExternalLinkIcon } from '@lucide/vue';
 import { inputUrl, outputRawUrl } from '@/lib/api';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { InputItem } from '@/types';
 import { t } from '@/i18n';
 
@@ -19,7 +19,7 @@ const assetUrl = (rel: string) =>
       <span class="text-ui font-bold">{{ t('viewer.original') }}</span>
       <span v-if="input.type === 'group'" class="text-xs text-muted-foreground">{{ t('viewer.refsCount', { count: input.imageCount ?? 0 }, input.imageCount ?? 0) }}</span>
       <span class="flex-1" />
-      <Tooltip>
+      <LazyTooltip>
         <TooltipTrigger as-child>
           <a
             :href="assetUrl(input.preview)"
@@ -31,7 +31,7 @@ const assetUrl = (rel: string) =>
           </a>
         </TooltipTrigger>
         <TooltipContent>{{ t('viewer.open') }}</TooltipContent>
-      </Tooltip>
+      </LazyTooltip>
     </div>
     <div class="max-h-175 overflow-auto bg-black">
       <img v-for="(rel, i) in images()" :key="i" loading="lazy" :src="assetUrl(rel)" alt="" class="block w-full" />

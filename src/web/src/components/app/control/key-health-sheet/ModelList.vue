@@ -16,7 +16,7 @@ import {
 } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { useTooltipConfig } from '@/lib/tooltip-config';
 import { t } from '@/i18n';
@@ -171,7 +171,7 @@ async function restoreModel(model: Model) {
     >
       <div class="overflow-hidden rounded-lg border bg-card">
         <div class="flex items-center gap-2 px-3 py-2 text-xs">
-          <Tooltip>
+          <LazyTooltip>
             <TooltipTrigger as-child>
               <button
                 type="button"
@@ -182,7 +182,7 @@ async function restoreModel(model: Model) {
               </button>
             </TooltipTrigger>
             <TooltipContent>{{ t('keyModel.dragToReorder') }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
           <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': model.color }" />
           <span class="grid min-w-0 flex-1 gap-0.5">
             <span class="truncate text-sm font-semibold">{{ model.label }}</span>
@@ -193,7 +193,7 @@ async function restoreModel(model: Model) {
           <!-- "Disabled" is the one badge that states a problem, so it's also the fix: clicking it
                opens the same edit dialog as the pencil, where the enable switch lives. The
                key-count badge stays inert (its affordance is the expander below it). -->
-          <Tooltip v-if="!model.enabled">
+          <LazyTooltip v-if="!model.enabled">
             <TooltipTrigger as-child>
               <button
                 type="button"
@@ -205,7 +205,7 @@ async function restoreModel(model: Model) {
               </button>
             </TooltipTrigger>
             <TooltipContent>{{ t('keyModel.enableModel', { label: model.label }) }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
           <span
             v-else
             class="shrink-0 rounded-md px-2 py-1 text-2xs font-medium"
@@ -213,7 +213,7 @@ async function restoreModel(model: Model) {
           >
             {{ modelKeys(model) }}
           </span>
-          <Tooltip>
+          <LazyTooltip>
             <TooltipTrigger as-child>
               <Button
                 variant="ghost"
@@ -225,7 +225,7 @@ async function restoreModel(model: Model) {
               </Button>
             </TooltipTrigger>
             <TooltipContent>{{ t('keyModel.editModel') }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
           <CollapsibleTrigger as-child>
             <button
               type="button"
@@ -242,7 +242,7 @@ async function restoreModel(model: Model) {
           <div class="flex items-center gap-2 border-t bg-muted/30 px-3 py-1.5">
             <span class="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">{{ t('keyModel.keys') }}</span>
             <span class="flex items-center gap-1.5">
-              <Tooltip v-for="b in badges(poolForModel(model))" :key="b.label">
+              <LazyTooltip v-for="b in badges(poolForModel(model))" :key="b.label">
                 <TooltipTrigger as-child>
                   <span
                     class="grid size-5 place-items-center rounded-full text-2xs font-semibold text-white"
@@ -251,9 +251,9 @@ async function restoreModel(model: Model) {
                   >
                 </TooltipTrigger>
                 <TooltipContent>{{ b.label }}</TooltipContent>
-              </Tooltip>
+              </LazyTooltip>
             </span>
-            <Tooltip>
+            <LazyTooltip>
               <TooltipTrigger as-child>
                 <Button
                   class="ms-auto"
@@ -266,7 +266,7 @@ async function restoreModel(model: Model) {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ t('keyModel.addApiKey') }}</TooltipContent>
-            </Tooltip>
+            </LazyTooltip>
           </div>
           <div class="px-3 py-1">
             <p v-if="!poolForModel(model)?.entries?.length" class="py-2 text-xs text-muted-foreground">
@@ -277,7 +277,7 @@ async function restoreModel(model: Model) {
               :key="i"
               class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
             >
-              <Tooltip>
+              <LazyTooltip>
                 <TooltipTrigger as-child>
                   <span
                     class="size-2.5 shrink-0 rounded-full"
@@ -285,22 +285,22 @@ async function restoreModel(model: Model) {
                   />
                 </TooltipTrigger>
                 <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
-              </Tooltip>
+              </LazyTooltip>
               <code class="font-mono">{{ k.mask }}</code>
               <span class="text-muted-foreground" :title="t('keyModel.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
               <!-- i18n-ignore -->
               <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyModel.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
               <span class="flex-1" />
-              <Tooltip v-if="k.lastError">
+              <LazyTooltip v-if="k.lastError">
                 <TooltipTrigger as-child>
                   <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
                 </TooltipTrigger>
                 <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
-              </Tooltip>
+              </LazyTooltip>
               <!-- Hover-revealed key actions: the reveal sits on a plain wrapper so the Buttons keep
                    their own styling; has-focus-visible keeps them reachable by keyboard. -->
               <span class="inline-flex shrink-0 items-center gap-2 opacity-0 transition-opacity group-hover/key:opacity-100 has-focus-visible:opacity-100">
-                <Tooltip>
+                <LazyTooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
@@ -312,8 +312,8 @@ async function restoreModel(model: Model) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{{ t('keyModel.editApiKey') }}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
+                </LazyTooltip>
+                <LazyTooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
@@ -325,7 +325,7 @@ async function restoreModel(model: Model) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{{ t('keyModel.deleteApiKey') }}</TooltipContent>
-                </Tooltip>
+                </LazyTooltip>
               </span>
             </div>
           </div>
@@ -354,7 +354,7 @@ async function restoreModel(model: Model) {
           <span class="font-semibold">{{ model.label }}</span>
           <span class="text-muted-foreground"> · {{ providerLabel(model.provider) }}</span>
         </span>
-        <Tooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               variant="ghost"
@@ -366,7 +366,7 @@ async function restoreModel(model: Model) {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('keyModel.restoreModel') }}</TooltipContent>
-        </Tooltip>
+        </LazyTooltip>
       </div>
     </div>
   </div>

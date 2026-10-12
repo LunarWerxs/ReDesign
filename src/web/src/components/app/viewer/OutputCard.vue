@@ -4,7 +4,7 @@ import { computed, ref } from 'vue';
 import { toast } from 'vue-sonner';
 import { outputUrl, outputRawUrl, downloadUrl, screenshotUrl, designMdUrl, contrastUrl } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
 import type { ViewerHeight } from '@/stores/viewer';
 import ScaledFrame from './ScaledFrame.vue';
@@ -161,7 +161,7 @@ const sub = () => {
       <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': modelColor }" />
       <span class="min-w-0 truncate text-ui font-bold">{{ modelLabel }}</span>
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ sub() }}</span>
-      <Tooltip v-if="slopBadge">
+      <LazyTooltip v-if="slopBadge">
         <TooltipTrigger as-child>
           <span
             class="shrink-0 cursor-default rounded border px-1.5 text-2xs font-medium"
@@ -179,7 +179,7 @@ const sub = () => {
             <p v-if="slopRetryText" class="mt-1">{{ slopRetryText }}</p>
           </div>
         </TooltipContent>
-      </Tooltip>
+      </LazyTooltip>
       <span class="flex-1" />
       <span
         v-if="contrastBadge"
@@ -188,7 +188,7 @@ const sub = () => {
         :title="contrastBadge.title"
       >{{ contrastBadge.label }}</span>
       <div class="flex shrink-0 items-center gap-0.5">
-        <Tooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -202,8 +202,8 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ starLabel }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button as-child variant="ghost" size="icon-xs" :aria-label="openLabel">
               <a :href="outputUrl(job.file || '')" target="_blank" rel="noreferrer">
@@ -212,8 +212,8 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ openLabel }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.downloadOutput')">
               <a :href="downloadUrl(job.file || '')">
@@ -222,8 +222,8 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.downloadOutput') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip v-if="runId && /\.html?$/i.test(job.file || '')">
+        </LazyTooltip>
+        <LazyTooltip v-if="runId && /\.html?$/i.test(job.file || '')">
           <TooltipTrigger as-child>
             <Button as-child variant="ghost" size="icon-xs" :aria-label="t('viewer.downloadDesignMd')">
               <a :href="designMdUrl(runId, String(job.id))">
@@ -232,8 +232,8 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.downloadDesignMd') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -248,8 +248,8 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.screenshotItem') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -264,18 +264,18 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.contrastItem') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip v-if="!focused">
+        </LazyTooltip>
+        <LazyTooltip v-if="!focused">
           <TooltipTrigger as-child>
             <Button type="button" variant="ghost" size="icon-xs" :aria-label="t('viewer.focusOpen')" @click.stop="$emit('focus')">
               <Maximize2Icon class="size-3.5 text-muted-foreground" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.focusOpen') }}</TooltipContent>
-        </Tooltip>
+        </LazyTooltip>
         <!-- the LAST control is an X at the top-right corner: hide on a card, back to the grid
              full screen (where hide moves one step left and becomes an eye) -->
-        <Tooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -291,15 +291,15 @@ const sub = () => {
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ hideLabel }}</TooltipContent>
-        </Tooltip>
-        <Tooltip v-if="focused">
+        </LazyTooltip>
+        <LazyTooltip v-if="focused">
           <TooltipTrigger as-child>
             <Button type="button" variant="ghost" size="icon-xs" :aria-label="t('viewer.focusClose')" @click.stop="$emit('close')">
               <XIcon class="size-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t('viewer.focusClose') }}</TooltipContent>
-        </Tooltip>
+        </LazyTooltip>
       </div>
     </div>
     <ScaledFrame

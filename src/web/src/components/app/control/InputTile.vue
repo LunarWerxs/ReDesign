@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CheckIcon, Trash2Icon } from '@lucide/vue';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { t } from '@/i18n';
 
 withDefaults(
@@ -46,7 +46,7 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
     @click="emit('toggle')"
     @keydown="onKeydown"
   >
-    <Tooltip v-if="removable">
+    <LazyTooltip v-if="removable">
       <TooltipTrigger as-child>
         <button
           type="button"
@@ -58,7 +58,7 @@ function onFooterClick(e: MouseEvent, previewable?: boolean) {
         </button>
       </TooltipTrigger>
       <TooltipContent>{{ t('input.removeThisInput') }}</TooltipContent>
-    </Tooltip>
+    </LazyTooltip>
     <span
       class="absolute right-2 top-2 z-10 grid size-5 place-items-center rounded-md border transition-colors"
       :class="selected ? 'border-primary bg-primary text-primary-foreground' : 'border-white/40 bg-black/50 text-transparent'"

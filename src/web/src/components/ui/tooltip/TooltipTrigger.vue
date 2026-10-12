@@ -2,7 +2,8 @@
 import type { TooltipTriggerProps } from "reka-ui"
 import { reactiveOmit } from "@vueuse/core"
 import { TooltipTrigger } from "reka-ui"
-import { computed, inject, onBeforeUnmount } from "vue"
+import { computed, inject, onBeforeUnmount, onMounted, useTemplateRef } from "vue"
+import { TOOLTIP_LAZY_KEY } from "./lazy"
 import type { TooltipTouchMode } from "./touch"
 import {
   LONG_PRESS_MS,
@@ -30,6 +31,11 @@ const props = withDefaults(
 
 const touchCtx = inject(TOOLTIP_TOUCH_KEY, null)
 const providerDisabled = inject(TOOLTIP_DISABLED_KEY, null)
+// Under a LazyTooltip that has not armed yet there is no reka root to trigger from. The gesture still runs here,
+// and a long press (or a tap, in tap mode) arms the LazyTooltip, which reveals the text once it has mounted.
+const lazy = inject(TOOLTIP_LAZY_KEY, null)
+const lazyClosed = computed(() => lazy?.closed.value === true)
+const trigger = useTemplateRef<{ $el: HTMLElement }>("trigger")
 
 // A touchscreen laptop keeps full hover behaviour — every gesture below is gated on the event's own
 // pointerType, not on this. It only decides whether to suppress the OS long-press artefacts
@@ -37,7 +43,7 @@ const providerDisabled = inject(TOOLTIP_DISABLED_KEY, null)
 const coarsePointer = useCoarsePointer()
 const suppressNativeHold = computed(() => props.touch !== "off" && coarsePointer.value)
 
-const active = computed(() => props.touch !== "off" && touchCtx !== null && !providerDisabled?.value)
+const active = computed(() => props.touch !== "off" && (touchCtx !== null || lazy !== null) && !providerDisabled?.value)
 
 /** The in-flight gesture: `pointerId` is null between gestures. */
 let pointerId: number | null = null
@@ -69,6 +75,10 @@ function reveal(): void {
   // switch to have been turned off with the other hand.
   if (!active.value) return
   revealed = true
+  if (lazyClosed.value) {
+    lazy?.arm(true)
+    return
+  }
   touchCtx?.revealByTouch(element)
 }
 
@@ -125,13 +135,38 @@ function onContextMenu(event: Event): void {
   if (pointerId !== null) event.preventDefault()
 }
 
+// The LazyTooltip that armed on this long press has just mounted this trigger. The finger is still on the
+// node the gesture started on (now gone), so the reveal and the hold are settled here, on the new node.
+onMounted(() => {
+  if (!lazy?.takeReveal()) return
+  const el = trigger.value?.$el
+  if (!(el instanceof HTMLElement)) return
+  touchCtx?.revealByTouch(el)
+  touchCtx?.endHold()
+  swallowNextClick(el)
+})
+
 onBeforeUnmount(endGesture)
 
 const forwarded = reactiveOmit(props, "touch")
 </script>
 
 <template>
+  <span
+    v-if="lazyClosed"
+    class="contents"
+    :class="{ 'select-none [-webkit-touch-callout:none]': suppressNativeHold }"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="endGesture"
+    @contextmenu="onContextMenu"
+  >
+    <slot />
+  </span>
   <TooltipTrigger
+    v-else
+    ref="trigger"
     data-slot="tooltip-trigger"
     v-bind="forwarded"
     :class="{ 'select-none [-webkit-touch-callout:none]': suppressNativeHold }"

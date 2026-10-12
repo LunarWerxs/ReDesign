@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { PencilIcon, SparklesIcon, StarIcon } from '@lucide/vue';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Prompt } from '@/types';
@@ -47,7 +47,7 @@ function onRowKeydown(e: KeyboardEvent) {
     <!-- Edit (opens the dialog, where Delete also lives): revealed on hover. The reveal lives on a
          plain wrapper so the Button keeps its own styling; has-focus-visible keeps keyboard reach. -->
     <span class="inline-flex shrink-0 opacity-0 transition-opacity group-hover/prompt:opacity-100 has-focus-visible:opacity-100">
-      <Tooltip>
+      <LazyTooltip>
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
@@ -60,7 +60,7 @@ function onRowKeydown(e: KeyboardEvent) {
           </Button>
         </TooltipTrigger>
         <TooltipContent>{{ t('promptSelect.editPrompt') }}</TooltipContent>
-      </Tooltip>
+      </LazyTooltip>
     </span>
 
     <!-- Star toggle: pin this prompt to the top tier. Never toggles the row. -->

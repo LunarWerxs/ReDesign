@@ -2,7 +2,7 @@
 import { EyeIcon, RotateCcwIcon, StarIcon, XIcon } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { Job } from '@/types';
 import type { ViewerHeight } from '@/stores/viewer';
 import { t } from '@/i18n';
@@ -46,7 +46,7 @@ const skipped = computed(() => props.job.status === 'skipped');
       <span class="min-w-0 truncate text-xs text-muted-foreground">{{ promptLabel }}</span>
       <span class="flex-1" />
       <div class="flex shrink-0 items-center gap-0.5">
-        <Tooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -60,8 +60,8 @@ const skipped = computed(() => props.job.status === 'skipped');
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ retryDisabled ? t('viewer.retryItemWaitTitle') : t('viewer.retryItemTitle') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -75,8 +75,8 @@ const skipped = computed(() => props.job.status === 'skipped');
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ starred ? t('viewer.unstarItem') : t('viewer.starItem') }}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
+        </LazyTooltip>
+        <LazyTooltip>
           <TooltipTrigger as-child>
             <Button
               type="button"
@@ -91,7 +91,7 @@ const skipped = computed(() => props.job.status === 'skipped');
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
-        </Tooltip>
+        </LazyTooltip>
       </div>
     </div>
     <div
@@ -101,14 +101,14 @@ const skipped = computed(() => props.job.status === 'skipped');
     >
       <div>
         <div>{{ skipped ? t('viewer.skipped') : t('viewer.failed') }}</div>
-        <Tooltip v-if="job.error">
+        <LazyTooltip v-if="job.error">
           <TooltipTrigger as-child>
             <!-- 140 chars is a preview only — the backend keeps up to 300, and the tooltip
                  below is what makes the rest of it reachable rather than silently truncated. -->
             <div class="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{{ job.error.slice(0, 140) }}</div>
           </TooltipTrigger>
           <TooltipContent class="max-w-xs whitespace-pre-wrap">{{ job.error }}</TooltipContent>
-        </Tooltip>
+        </LazyTooltip>
       </div>
     </div>
   </div>

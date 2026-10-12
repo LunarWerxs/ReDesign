@@ -3,7 +3,7 @@ import { computed, ref, useTemplateRef } from 'vue';
 import { FileTextIcon, Loader2Icon, XIcon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import { clipboardTextFiles, textAttachableFiles } from '@/composables/useTextAttachments';
@@ -135,7 +135,7 @@ function loadDefault() {
         >
           <FileTextIcon class="size-3.5 shrink-0 text-muted-foreground" />
           <span class="truncate" :title="a.name">{{ a.name }}</span>
-          <Tooltip>
+          <LazyTooltip>
             <TooltipTrigger as-child>
               <button
                 type="button"
@@ -147,7 +147,7 @@ function loadDefault() {
               </button>
             </TooltipTrigger>
             <TooltipContent>{{ t('options.removeAttachment') }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
         </span>
       </div>
     </div>

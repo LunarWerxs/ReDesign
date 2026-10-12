@@ -38,7 +38,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { api, runThumbnailUrl } from '@/lib/api';
 import { formatAgo } from '@/lib/relativeTime';
 import { useMinuteClock } from '@/composables/useMinuteClock';
@@ -343,7 +343,7 @@ watch(
             v-else-if="canDelete(run)"
             class="absolute right-2 top-2 z-20 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100"
           >
-            <Tooltip>
+            <LazyTooltip>
               <TooltipTrigger as-child>
                 <Button
                   data-run-again
@@ -359,8 +359,8 @@ watch(
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ t('runGallery.runAgain', { title: runTitle(run) }) }}</TooltipContent>
-            </Tooltip>
-            <Tooltip>
+            </LazyTooltip>
+            <LazyTooltip>
               <TooltipTrigger as-child>
                 <Button
                   data-run-delete
@@ -374,7 +374,7 @@ watch(
                 </Button>
               </TooltipTrigger>
               <TooltipContent>{{ t('runGallery.deleteRun', { title: runTitle(run) }) }}</TooltipContent>
-            </Tooltip>
+            </LazyTooltip>
           </div>
 
           <!-- Spinner / placeholder sit BEHIND the image as absolute layers. The image itself is

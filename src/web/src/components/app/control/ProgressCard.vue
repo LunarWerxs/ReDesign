@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
 import type { Job, JobStatus } from '@/types';
@@ -247,7 +247,7 @@ const {
       </div>
       <div v-bind="jobListContainer" class="max-h-80">
         <div v-bind="jobListWrapper">
-          <Tooltip v-for="{ data: job } in visibleJobs" :key="job.id" :disabled="!jobTooltip(job)">
+          <LazyTooltip v-for="{ data: job } in visibleJobs" :key="job.id" :disabled="!jobTooltip(job)">
             <TooltipTrigger as-child>
               <div
                 class="mb-1.5 grid h-7.5 grid-cols-[12px_1fr_auto] items-center gap-2.5 rounded-md border bg-muted/30 px-2.5 text-xs"
@@ -267,7 +267,7 @@ const {
               </div>
             </TooltipTrigger>
             <TooltipContent v-if="jobTooltip(job)" class="max-w-xs">{{ jobTooltip(job) }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
         </div>
       </div>
     </CardContent>

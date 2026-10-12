@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { StarIcon } from '@lucide/vue';
 import { toast } from 'vue-sonner';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import QtyStepper from './QtyStepper.vue';
 import { useControlStore } from '@/stores/control';
 import { t } from '@/i18n';
@@ -47,7 +47,7 @@ function onRowKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <Tooltip :disabled="runnable">
+  <LazyTooltip :disabled="runnable">
     <TooltipTrigger as-child>
       <div
         role="button"
@@ -94,5 +94,5 @@ function onRowKeydown(e: KeyboardEvent) {
       </div>
     </TooltipTrigger>
     <TooltipContent>{{ !model.enabled ? t('modelSelect.disabledInConfig') : t('modelSelect.noKeysAvailable') }}</TooltipContent>
-  </Tooltip>
+  </LazyTooltip>
 </template>

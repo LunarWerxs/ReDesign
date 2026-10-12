@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { ChevronDownIcon, PencilIcon, PlusIcon, Trash2Icon } from '@lucide/vue';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useControlStore } from '@/stores/control';
 import { useTooltipConfig } from '@/lib/tooltip-config';
 import { t } from '@/i18n';
@@ -52,7 +52,7 @@ function poolName(p: KeyPool) {
             <button type="button" class="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-2 text-start outline-none">
               <strong>{{ poolName(pool) }}</strong>
               <span class="flex items-center gap-1.5">
-                <Tooltip v-for="b in badges(pool)" :key="b.label">
+                <LazyTooltip v-for="b in badges(pool)" :key="b.label">
                   <TooltipTrigger as-child>
                     <span
                       class="grid size-5 place-items-center rounded-full text-2xs font-semibold text-white"
@@ -61,12 +61,12 @@ function poolName(p: KeyPool) {
                     >
                   </TooltipTrigger>
                   <TooltipContent>{{ b.label }}</TooltipContent>
-                </Tooltip>
+                </LazyTooltip>
               </span>
               <span class="ms-auto text-xs text-muted-foreground" :title="t('keyHealth.totalKeysInPool')">{{ pool.total }}</span>
             </button>
           </CollapsibleTrigger>
-          <Tooltip v-if="poolOpen">
+          <LazyTooltip v-if="poolOpen">
             <TooltipTrigger as-child>
               <Button
                 variant="ghost"
@@ -78,7 +78,7 @@ function poolName(p: KeyPool) {
               </Button>
             </TooltipTrigger>
             <TooltipContent>{{ t('keyHealth.addApiKey') }}</TooltipContent>
-          </Tooltip>
+          </LazyTooltip>
           <CollapsibleTrigger as-child>
             <button
               type="button"
@@ -97,7 +97,7 @@ function poolName(p: KeyPool) {
               :key="i"
               class="group/key flex items-center gap-2 border-t py-1.5 text-xs first:border-t-0"
             >
-              <Tooltip>
+              <LazyTooltip>
                 <TooltipTrigger as-child>
                   <span
                     class="size-2.5 shrink-0 rounded-full"
@@ -105,22 +105,22 @@ function poolName(p: KeyPool) {
                   />
                 </TooltipTrigger>
                 <TooltipContent>{{ dotLabel[k.status] || k.status }}</TooltipContent>
-              </Tooltip>
+              </LazyTooltip>
               <code class="font-mono">{{ k.mask }}</code>
               <span class="text-muted-foreground" :title="t('keyHealth.successesFailures')">✓{{ k.successes }} ✗{{ k.failures }}</span>
               <!-- i18n-ignore -->
               <span v-if="k.cooldownRemainingSec" class="text-muted-foreground" :title="t('keyHealth.cooldownRemaining')">{{ k.cooldownRemainingSec }}s</span>
               <span class="flex-1" />
-              <Tooltip v-if="k.lastError">
+              <LazyTooltip v-if="k.lastError">
                 <TooltipTrigger as-child>
                   <span class="truncate text-muted-foreground">{{ k.lastError.slice(0, 24) }}</span>
                 </TooltipTrigger>
                 <TooltipContent class="max-w-xs">{{ k.lastError }}</TooltipContent>
-              </Tooltip>
+              </LazyTooltip>
               <!-- Row actions fade in on row hover or keyboard focus; the fade lives on a plain
                    wrapper because Button owns its own effects. -->
               <span class="flex shrink-0 items-center opacity-0 transition-opacity group-hover/key:opacity-100 has-focus-visible:opacity-100">
-                <Tooltip>
+                <LazyTooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
@@ -132,10 +132,10 @@ function poolName(p: KeyPool) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{{ t('keyHealth.editApiKey') }}</TooltipContent>
-                </Tooltip>
+                </LazyTooltip>
               </span>
               <span class="flex shrink-0 items-center opacity-0 transition-opacity group-hover/key:opacity-100 has-focus-visible:opacity-100">
-                <Tooltip>
+                <LazyTooltip>
                   <TooltipTrigger as-child>
                     <Button
                       variant="ghost"
@@ -147,7 +147,7 @@ function poolName(p: KeyPool) {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>{{ t('keyHealth.deleteApiKey') }}</TooltipContent>
-                </Tooltip>
+                </LazyTooltip>
               </span>
             </div>
           </div>
