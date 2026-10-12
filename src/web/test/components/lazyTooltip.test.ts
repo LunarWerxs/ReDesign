@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { nextTick, defineComponent } from 'vue';
 import { mount } from '@vue/test-utils';
+import InfoHint from '@/shell/InfoHint.vue';
 import { LazyTooltip, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 describe('LazyTooltip', () => {
@@ -23,6 +24,22 @@ describe('LazyTooltip', () => {
     expect(active.tagName).toBe('BUTTON');
     expect(active.textContent).toBe('Run');
     expect(active.isConnected).toBe(true);
+
+    wrapper.unmount();
+  });
+
+  it('InfoHint renders its icon bare, then mounts the tooltip on first focus', async () => {
+    const wrapper = mount(InfoHint, { props: { text: 'More about this' }, attachTo: document.body });
+    expect(wrapper.findComponent(Tooltip).exists()).toBe(false);
+
+    const button = wrapper.get('button').element as HTMLButtonElement;
+    button.focus();
+    button.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.findComponent(Tooltip).exists()).toBe(true);
+    expect((document.activeElement as HTMLElement).getAttribute('aria-label')).toBe('More information');
 
     wrapper.unmount();
   });

@@ -41,7 +41,7 @@ function takeReveal(): boolean {
 }
 
 function onInterest(event: Event): void {
-  if (event instanceof PointerEvent && event.pointerType === "touch") return
+  if ("pointerType" in event && event.pointerType === "touch") return
   arm()
 }
 
