@@ -1,0 +1,627 @@
+// Shapes mirror the Node backend (server.js / runner.js / store.js / keyManager.js).
+// Kept intentionally permissive where the backend is loose.
+
+import type {
+  PromptBuilderCustomOptionCategory,
+  PromptBuilderModifierId as RegistryPromptBuilderModifierId,
+  PromptBuilderScopeId as RegistryPromptBuilderScopeId,
+} from '@/lib/prompt-builder-registry';
+
+export interface Model {
+  id: string;
+  label: string;
+  provider?: string;
+  apiModel?: string;
+  keyEnv?: string;
+  baseUrl?: string;
+  vision: boolean;
+  enabled: boolean;
+  starred?: boolean;
+  color?: string;
+  keys: number;
+  maxTokens?: number;
+  temperature?: number | null;
+  tokenParam?: string;
+  supportsTemperature?: boolean;
+}
+
+export interface AvailableModel {
+  id: string;
+  label: string;
+  source: 'provider' | 'catalog';
+  vision?: boolean;
+}
+
+export interface AvailableModelsResponse {
+  models: AvailableModel[];
+  source: 'provider' | 'catalog';
+}
+
+export type PromptBuilderScopeId = RegistryPromptBuilderScopeId;
+export type PromptBuilderModifierId = RegistryPromptBuilderModifierId;
+export type PromptBuilderOptionCategory = PromptBuilderCustomOptionCategory;
+
+/**
+ * A saved combination owns a snapshot of each selected custom option. This
+ * keeps an existing bookmark stable when its reusable source option is later
+ * edited or removed.
+ */
+export interface PromptBuilderCustomOptionSnapshot {
+  id: string;
+  label: string;
+  description?: string;
+  instruction: string;
+  category: PromptBuilderCustomOptionCategory;
+}
+
+/** A reusable custom choice in the user's Prompt Builder library. */
+export type PromptBuilderOption = PromptBuilderCustomOptionSnapshot;
+
+export interface PromptBuilderOptionSaveRequest {
+  id?: string;
+  label: string;
+  description?: string;
+  instruction: string;
+  category: PromptBuilderOptionCategory;
+}
+
+export interface PromptBuilderRecipe {
+  version: 1;
+  scope: PromptBuilderScopeId;
+  modifiers: PromptBuilderModifierId[];
+  customOptions?: PromptBuilderCustomOptionSnapshot[];
+}
+
+export interface Prompt {
+  id: string;
+  label: string;
+  description?: string;
+  user?: string;
+  starred?: boolean;
+  pickerHidden?: boolean;
+  builder?: PromptBuilderRecipe;
+  /** 'preset' | 'custom', set only on the copy recorded onto a run's manifest (src/config/prompts.ts
+   *  resolvePrompts) so "Run again" can tell a one-off custom prompt apart from a saved preset. */
+  source?: string;
+}
+
+export interface PromptSaveRequest {
+  id?: string;
+  label: string;
+  description?: string;
+  user: string;
+  starred?: boolean;
+  builder?: PromptBuilderRecipe;
+}
+
+export type InputType = 'image' | 'group';
+
+export interface InputItem {
+  id: string;
+  name: string;
+  type: InputType;
+  preview: string;
+  imageCount?: number;
+  images?: string[];
+}
+
+export interface ReferenceItem {
+  id: string;
+  name: string;
+  preview: string;
+}
+
+export interface BrandAttachment {
+  id: string;
+  name: string;
+  text: string;
+  truncated: boolean;
+}
+
+export type JobStatus =
+  | 'pending'
+  | 'queued'
+  | 'running'
+  | 'ok'
+  | 'error'
+  | 'skipped'
+  | 'cancelled';
+
+export interface JobCost {
+  modelId: string;
+  inputTokens: number;
+  outputTokens: number;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  currency: string;
+  estimate: boolean;
+  priced: boolean;
+}
+
+export interface Job {
+  id: string;
+  inputId: string;
+  modelId: string;
+  promptId: string;
+  variant: number;
+  status: JobStatus;
+  file?: string | null;
+  error?: string | null;
+  ms?: number;
+  /** Pre-flight wait (screenshot captioning for a text-only model), excluded from `ms`. */
+  prepMs?: number;
+  wrapped?: boolean;
+  truncated?: boolean;
+  usage?: unknown;
+  cost?: JobCost | null;
+  note?: string;
+  /** Anti-slop lint score of the saved output (server: src/runner/slop-lint.ts). */
+  slop?: JobSlop | null;
+  /** Present when a P0 finding earned the job its one re-prompt. */
+  slopRetry?: {
+    kept: boolean;
+    before: { p0: number; p1: number; p2: number };
+    after: { p0: number; p1: number; p2: number } | null;
+    firstFile: string | null;
+  };
+}
+
+export interface JobSlopFinding {
+  rule: string;
+  severity: 'P0' | 'P1' | 'P2';
+  message: string;
+  snippet: string;
+}
+
+export interface JobSlop {
+  p0: number;
+  p1: number;
+  p2: number;
+  findings: JobSlopFinding[];
+}
+
+export interface Counts {
+  total: number;
+  done?: number;
+  ok?: number;
+  error?: number;
+  skipped?: number;
+}
+
+export type RunStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled';
+
+export interface RunCost {
+  totalCost: number;
+  currency: string;
+  jobCount: number;
+  anyEstimatePricing: boolean;
+  anyUnpriced: boolean;
+  /** At least one provider response had incomplete token usage, so the total is a lower bound. */
+  anyPartialUsage?: boolean;
+  /** Cached-token accounting was incomplete for at least one provider response. */
+  anyCacheAccountingPartial?: boolean;
+}
+
+export interface RunSummaryMeta {
+  title?: string;
+  source?: string;
+}
+
+/**
+ * The submission a run was built from, recorded onto its manifest (src/runner/reimagine.ts) so
+ * the run stays reproducible from itself alone: the failed-job retry route rebuilds a
+ * resubmission from `config` (src/http/routes/runs.ts), and "Run again" (RunGallery.vue) maps it
+ * onto the control panel's selection state.
+ */
+export interface ManifestConfig {
+  inputIds?: string[];
+  modelIds?: string[];
+  promptIds?: string[];
+  variants?: number;
+  /** Per-model copy count override; a model absent here just uses the flat `variants` above. */
+  variantsByModel?: Record<string, number>;
+  concurrency?: number | null;
+  poolConcurrency?: number | null;
+  maxImagesPerInput?: number | null;
+  reference?: { images: string[]; count?: number; note: string | null } | null;
+  /** Already combined with any attachment text at submit time (stores/control/runs.ts
+   *  addToQueue) — there is no way to split attachments back out of it. */
+  brandStyleGuide?: string;
+  grounded?: boolean;
+  /** Optional ceiling copied onto a run so Run Again can preserve the original budget. */
+  maxCostUsd?: number;
+  /** The run rendered each output and let its model correct it once. */
+  selfCheck?: boolean;
+  /** The ticked inputs (`inputIds`) went out as one screen: one redesign from all of them. */
+  combineInputs?: boolean;
+}
+
+export interface Manifest {
+  runId: string;
+  /** Durable run snapshots own their assets under output/<runId>/assets/. */
+  specVersion?: number;
+  status: RunStatus;
+  createdAt?: string;
+  /** When the runner finished this run. Null while it is still queued/running. */
+  finishedAt?: string | null;
+  mock?: boolean;
+  summary?: RunSummaryMeta | null;
+  config?: ManifestConfig;
+  counts?: Counts;
+  cost?: RunCost;
+  // `held` means the run is parked in the queue and will not start until a "Run queue"
+  // press releases it (src/http/runQueue.ts releaseQueue). Absent on runs submitted by
+  // the MCP tools or CLI, which still start on their own.
+  queue?: { position?: number; held?: boolean } | null;
+  inputs: InputItem[];
+  prompts: Prompt[];
+  models: Model[];
+  jobs: Job[];
+  error?: string;
+}
+
+/** POST /api/runs/:id/retry response: which new run(s) the retried jobs landed in, grouped by
+ *  (input, prompt) so an exact reproduction of the failed set may span more than one run. */
+export interface RunRetryResponse {
+  runIds: string[];
+  jobCount: number;
+}
+
+export interface RunSummary {
+  runId: string;
+  createdAt?: string;
+  /** When the runner finished this run. Null while it is still queued/running. */
+  finishedAt?: string | null;
+  title?: string;
+  summary?: RunSummaryMeta | null;
+  status: RunStatus;
+  counts?: Counts;
+  cost?: RunCost;
+  total?: number;
+  mock?: boolean;
+  /** Queue state for a still-queued run, so a reload can resume it as parked vs released
+   *  (see stores/control/runs.ts resumeRuns). Absent once the run leaves the queue. */
+  queueHeld?: boolean;
+  queuePosition?: number | null;
+  /** The run's own durable thumbnail, relative to its run dir (/output/<runId>/<thumb>). */
+  thumb?: string | null;
+  /** Fallback thumbnail: first input screenshot, relative to input/. Gone once input/ is cleared. */
+  preview?: string | null;
+}
+export interface RunPage { runs: RunSummary[]; nextCursor: string | null; }
+
+export interface RunDeleteSkipped {
+  runId: string;
+  reason: string;
+}
+
+export interface RunDeleteResponse {
+  deleted: string[];
+  skipped: RunDeleteSkipped[];
+  runs: RunSummary[];
+}
+
+export type KeyStatus = 'ok' | 'dead' | 'no_balance' | 'cooldown' | 'untested';
+
+export interface KeyEntry {
+  id: string;
+  mask: string;
+  status: KeyStatus | string;
+  successes: number;
+  failures: number;
+  cooldownRemainingSec?: number;
+  lastError?: string | null;
+}
+
+export interface KeyPool {
+  pool: string;
+  total: number;
+  available: number;
+  dead: number;
+  noBalance: number;
+  cooling: number;
+  entries: KeyEntry[];
+}
+
+export interface KeySnapshot {
+  updatedAt?: string;
+  pools: KeyPool[];
+}
+
+export interface SpendToDate {
+  totalCost: number;
+  currency: string;
+  runCount: number;
+  anyEstimatePricing: boolean;
+  anyUnpriced: boolean;
+  pricingLastUpdated: string | null;
+}
+
+export interface EstimateRunCost {
+  totalCost: number;
+  totalCostLow: number;
+  totalCostHigh: number;
+  currency: string;
+  anyEstimatePricing: boolean;
+  anyUnpriced: boolean;
+  anyFromDefault: boolean;
+  byModel: Record<string, { jobs: number; totalCost: number; fromHistory: boolean }>;
+}
+
+/** One per-generation AI-observability trace row (see src/runner/cost.ts runTraces()). */
+export interface JobTrace {
+  runId: string;
+  jobId: string | null;
+  modelId: string;
+  provider: string | null;
+  promptId: string | null;
+  status: string;
+  latencyMs: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  currency: string;
+  priced: boolean;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface ModelTraceStats {
+  modelId: string;
+  calls: number;
+  errors: number;
+  avgLatencyMs: number | null;
+  totalCost: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+}
+
+export interface RecentTraces {
+  traces: JobTrace[];
+  byModel: Record<string, ModelTraceStats>;
+  runsConsidered: number;
+}
+
+export interface ProviderDefault {
+  baseUrl: string;
+  keyEnv: string;
+  color: string;
+}
+
+export interface BootstrapResponse {
+  models: Model[];
+  archivedModels?: Model[];
+  prompts: Prompt[];
+  builderOptions?: PromptBuilderOption[];
+  inputs: InputItem[];
+  references?: ReferenceItem[];
+  keys: KeySnapshot;
+  runs: RunSummary[];
+  spend?: SpendToDate;
+  providerDefaults: Record<string, ProviderDefault>;
+}
+
+export interface ModelSaveRequest {
+  id?: string;
+  label: string;
+  provider: string;
+  apiModel: string;
+  keyEnv: string;
+  baseUrl: string;
+  vision: boolean;
+  enabled: boolean;
+  maxTokens: number;
+  supportsTemperature: boolean;
+  temperature?: number | null;
+  tokenParam?: string;
+  color?: string;
+}
+
+export interface ModelSettingsResponse {
+  model?: Model;
+  id?: string;
+  models: Model[];
+  archivedModels: Model[];
+  keys: KeySnapshot;
+}
+
+export type ImportKeyStatus = 'added' | 'duplicate' | 'unknown' | 'no_service';
+
+export interface ImportKeyResult {
+  mask: string;
+  brand: string | null;
+  label: string;
+  pools: string[];
+  status: ImportKeyStatus;
+  probed: boolean;
+}
+
+export interface ImportKeysResponse {
+  results: ImportKeyResult[];
+  added: number;
+  keys: KeySnapshot;
+}
+
+export interface UploadImage {
+  name: string;
+  mime: string;
+  data: string;
+}
+
+export interface UploadResponse {
+  inputs: InputItem[];
+  addedIds?: string[];
+  saved?: unknown[];
+}
+
+export interface ReferenceUploadResponse {
+  references: ReferenceItem[];
+  addedIds?: string[];
+  saved?: unknown[];
+}
+
+export interface RunRequest {
+  inputs: { ids: string[] };
+  models: { ids: string[] };
+  prompts: { presets: string[]; custom: string | null };
+  // Per-model copy count, keyed by model id; only models generating > 1 copy are
+  // included. Omitted entirely when every model runs a single copy.
+  modelQuantities?: Record<string, number>;
+  /**
+   * OPTIONAL cap on images sent per input. The control panel never sends it (2026-07-21 — the
+   * "Max ref images" stepper was removed; every ticked image goes out), so it exists only for
+   * the CLI's `--max-images` and the MCP tool's `max_images`.
+   */
+  maxImages?: number;
+  mock: boolean;
+  /** Render each output at desktop and phone width and let its model correct it once. */
+  selfCheck?: boolean;
+  /** The ticked inputs are screenshots of one screen: one redesign from all of them. */
+  combineInputs?: boolean;
+  reference?: { images: string[]; note: string | null };
+  brandStyleGuide?: string | null;
+  // The control panel always sends false: "Add to queue" parks the run, and only a
+  // "Run queue" press starts it. Omitting the flag keeps the server's original
+  // submit-and-run behavior, which the MCP tools and CLI still rely on.
+  autoStart?: boolean;
+  /** Optional hard ceiling in USD; omitted means no client-requested ceiling. */
+  maxCostUsd?: number;
+}
+
+export interface RunPreflightResponse {
+  preflightId: string;
+  jobCount: number;
+  assetBytes: number;
+  estimatedCostUsd: number | null;
+  unknownPricing: boolean;
+  expiresAt: string;
+}
+
+export interface PreparedRunRequest {
+  preflightId: string;
+  autoStart?: boolean;
+}
+
+export interface RepeatRunResponse {
+  runId: string;
+}
+
+/** One model's row on the arena board (src/arena.ts): Elo rating from pairwise A/B votes. */
+export interface ArenaStanding {
+  modelId: string;
+  label: string;
+  rating: number;
+  wins: number;
+  losses: number;
+  games: number;
+}
+
+/** GET /api/arena, and the board every vote/undo returns. */
+export interface ArenaBoard {
+  votes: number;
+  standings: ArenaStanding[];
+}
+
+export interface ArenaVoteResult extends ArenaBoard {
+  vote: { winnerModelId: string; loserModelId: string; winnerLabel: string; loserLabel: string };
+}
+
+export interface HealthCheckResponse {
+  results?: unknown[];
+  keys: KeySnapshot;
+}
+
+export interface UpdateStatus {
+  ok: boolean;
+  service: 'redesign';
+  currentVersion: string;
+  currentCommit: string | null;
+  remoteCommit: string | null;
+  branch: string | null;
+  upstream: string | null;
+  remote: string | null;
+  dirty: boolean;
+  updateAvailable: boolean;
+  canApply: boolean;
+  checkedAt: number;
+  reason: string | null;
+}
+
+export interface UpdateApplyResult {
+  ok: boolean;
+  message: string;
+  restartRequired: boolean;
+  status: UpdateStatus;
+  output: string[];
+}
+
+// "Sync my settings with Connections" (opt-in cloud sync of theme; GET/PUT /api/settings/sync).
+export interface SyncStatusOk {
+  ok: true;
+  enabled: boolean;
+  connected: boolean;
+  name: string | null;
+  email: string | null;
+  picture: string | null;
+  lastSyncedAt: string | null;
+  version: number;
+  appearance: Record<string, unknown> | null;
+}
+
+// A handled failure, HTTP 200, shown inline/non-blocking (never thrown by the api layer).
+export interface SyncStatusError {
+  ok: false;
+  error: string;
+  retryAfterSeconds?: number;
+}
+
+export type SyncStatus = SyncStatusOk | SyncStatusError;
+
+export interface AuthMe {
+  ok: true;
+  connected: boolean;
+  name: string | null;
+  email: string | null;
+  picture: string | null;
+}
+
+// Local daemon settings (GET/PUT /api/settings), currently the auto-update notify + auto-apply
+// opt-ins + cadence (see src/auto-update.ts). Distinct from the Connections cloud-synced
+// appearance blob above (SyncStatus / /api/settings/sync).
+export interface AppSettings {
+  ok: true;
+  /** The running build's package.json version; '' when it couldn't be read. */
+  version: string;
+  /** Silent auto-apply + self-relaunch. OFF unless explicitly turned on. */
+  autoUpdate: boolean;
+  /** Tell the UI when an update is available (GET /api/events, "update_available"). ON by default. */
+  updateNotify: boolean;
+  autoUpdateIntervalSecs: number;
+  portableMode: boolean;
+  hideTrayIcon: boolean;
+  /** 0 = keep every run forever (the default). The cleanup sweep runs once at startup
+   *  (src/http/serve.ts), so a lower value takes effect on the next launch, not immediately. */
+  outputRetentionDays: number;
+  /** Read-only: current size of output/, walked on demand (src/store.ts outputBytes()). */
+  outputBytes: number;
+}
+
+// Server-Sent Events emitted by GET /api/runs/:id/events.
+export type RunEvent =
+  | { type: 'start'; runId: string; manifest: Manifest }
+  | { type: 'snapshot'; runId: string; manifest: Manifest }
+  | { type: 'job'; runId: string; job: Job }
+  | { type: 'done'; runId: string; manifest: Manifest }
+  | { type: 'error'; runId: string; message: string; manifest?: Manifest };
+
+// Server-Sent Events emitted by GET /api/events (src/bus.ts) — daemon-wide, not scoped to a run.
+// Today the only publisher is src/auto-update.ts's notify path.
+export type DaemonEvent = {
+  type: 'update_available';
+  from: string | null;
+  to: string | null;
+  canApply: boolean;
+  reason: string | null;
+};

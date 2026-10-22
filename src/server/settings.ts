@@ -1,0 +1,348 @@
+// Model/prompt settings snapshots for the API responses, plus the API-key
+// pool CRUD (persisted into .env). Split out of ../server.js, see that
+// file's requires.
+
+import fs from "node:fs";
+import { loadArchivedModels, loadModels, loadPrompts } from "../config";
+import type { Model } from "../config/models";
+import type { PromptBuilderOption } from "../config/prompts";
+import { brandLabel, parseKeyBlob, poolsForBrand, resolveKeyBrand, servicesFromModels } from "../keyDetect";
+import type { KeyManager, Snapshot } from "../keyManager";
+import { getKeyManager } from "../runner";
+import { ENV_FILE, getKeyPool, keyId, mapLimit, maskKey } from "../util";
+
+interface PublicPrompt {
+  id: string;
+  label: string;
+  description?: string;
+  user: string;
+  starred: boolean;
+  pickerHidden?: boolean;
+  builder?: {
+    version: 1;
+    scope: string;
+    modifiers: string[];
+    customOptions?: PromptBuilderOption[];
+  };
+}
+
+function publicPrompts(): PublicPrompt[] {
+  return loadPrompts().prompts.map((p2) => ({
+    id: p2.id,
+    label: p2.label,
+    description: p2.description,
+    user: p2.user,
+    starred: p2.starred === true,
+    ...(p2.pickerHidden ? { pickerHidden: true } : {}),
+    ...(p2.builder ? { builder: p2.builder } : {}),
+  }));
+}
+
+function publicPromptBuilderOptions(): PromptBuilderOption[] {
+  return loadPrompts().builderOptions || [];
+}
+
+interface PublicModel {
+  id: string;
+  label: string;
+  provider: string;
+  apiModel: string;
+  keyEnv: string;
+  baseUrl: string;
+  vision: boolean;
+  enabled: boolean;
+  starred: boolean;
+  color: string | undefined;
+  keys: number;
+  maxTokens: number;
+  temperature: number | undefined;
+  tokenParam: string | undefined;
+  supportsTemperature: boolean;
+}
+
+function publicModel(m: Model, km: KeyManager | null): PublicModel {
+  return {
+    id: m.id,
+    label: m.label,
+    provider: m.provider,
+    apiModel: m.apiModel,
+    keyEnv: m.keyEnv,
+    baseUrl: m.baseUrl,
+    vision: m.vision !== false,
+    enabled: m.enabled !== false,
+    starred: m.starred === true,
+    color: m.color,
+    keys: m.keyEnv ? (km ? km.poolSize(m.keyEnv) : getKeyPool(m.keyEnv).length) : 0,
+    maxTokens: m.maxTokens,
+    temperature: m.temperature,
+    tokenParam: m.tokenParam,
+    supportsTemperature: m.supportsTemperature !== false,
+  };
+}
+
+interface ModelSettings {
+  models: PublicModel[];
+  archivedModels: PublicModel[];
+}
+
+function modelSettings(): ModelSettings {
+  const km = getKeyManager();
+  const models = loadModels();
+  for (const m of models) km.registerPool(m.keyEnv);
+  return {
+    models: models.map((m) => publicModel(m, km)),
+    archivedModels: loadArchivedModels().map((m) => publicModel(m, null)),
+  };
+}
+
+function modelSettingsResponse(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...extra,
+    ...modelSettings(),
+    keys: keySnapshot(),
+  };
+}
+
+function activeKeyPoolNames(): Set<string> {
+  return new Set(loadModels().map((m) => m.keyEnv).filter(Boolean));
+}
+
+function filteredKeySnapshot(km: KeyManager = getKeyManager()): Snapshot {
+  const activePools = activeKeyPoolNames();
+  for (const poolName of activePools) km.registerPool(poolName);
+  const snapshot = km.snapshot();
+  return {
+    ...snapshot,
+    pools: snapshot.pools.filter((p2) => activePools.has(p2.pool)),
+  };
+}
+
+function keySnapshot(): Snapshot {
+  return filteredKeySnapshot(getKeyManager());
+}
+
+function registerActiveKeyPools(km: KeyManager = getKeyManager()): void {
+  for (const m of loadModels()) km.registerPool(m.keyEnv);
+}
+
+function escapeRegExp(s: string): string {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface StatusError extends Error {
+  status?: number;
+}
+
+function statusError(message: string, status: number): StatusError {
+  const err = new Error(message) as StatusError;
+  err.status = status;
+  return err;
+}
+
+function assertKeyPool(poolName: unknown): string {
+  const pool = String(poolName || "").trim();
+  if (!pool || !activeKeyPoolNames().has(pool)) throw statusError("unknown key pool", 400);
+  return pool;
+}
+
+function normalizeApiKey(value: unknown): string {
+  const key = String(value || "").trim();
+  if (!key) throw statusError("api key is required", 400);
+  if (/[\r\n,]/.test(key)) throw statusError("api key cannot contain commas or line breaks", 400);
+  return key;
+}
+
+function setEnvKeyPool(poolName: string, keys: string[]): void {
+  const value = keys.join(",");
+  const original = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, "utf8") : "";
+  const eol = original.includes("\r\n") ? "\r\n" : "\n";
+  const hadTrailingNewline = !original || /\r?\n$/.test(original);
+  const lines = original ? original.replace(/\r?\n$/, "").split(/\r?\n/) : [];
+  const assignRe = new RegExp(`^\\s*(?:export\\s+)?${escapeRegExp(poolName)}(?:_\\d+)?\\s*=`);
+  const next: string[] = [];
+  let wrote = false;
+
+  for (const line of lines) {
+    if (assignRe.test(line)) {
+      if (!wrote) {
+        next.push(`${poolName}=${value}`);
+        wrote = true;
+      }
+      continue;
+    }
+    next.push(line);
+  }
+  if (!wrote) {
+    if (next.length && next.at(-1) !== "") next.push("");
+    next.push(`${poolName}=${value}`);
+  }
+  // .env holds every provider's keys, so write it the way util.ts's writeJSON writes state files:
+  // temp file first, then an atomic rename. A crash or a kill mid-write would otherwise truncate
+  // the file and take every pool with it. Owner-only permissions (0600) are set on the temp file
+  // so the secret is never briefly readable by anyone else.
+  const tmp = `${ENV_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, next.join(eol) + (hadTrailingNewline ? eol : ""), { mode: 0o600 });
+  fs.renameSync(tmp, ENV_FILE);
+
+  const indexedRe = new RegExp(`^${escapeRegExp(poolName)}_\\d+$`);
+  for (const envKey of Object.keys(process.env)) {
+    if (envKey === poolName || indexedRe.test(envKey)) delete process.env[envKey];
+  }
+  process.env[poolName] = value;
+}
+
+function reloadKeyPool(poolName: string, forgetIds: string[] = []): Snapshot {
+  const km = getKeyManager();
+  if (forgetIds.length) km.forget(poolName, forgetIds);
+  km.reloadPool(poolName);
+  registerActiveKeyPools(km);
+  return filteredKeySnapshot(km);
+}
+
+interface SaveApiKeyInput {
+  pool: string;
+  id?: string;
+  key: string;
+}
+
+function saveApiKey({ pool, id, key }: SaveApiKeyInput): Snapshot {
+  const poolName = assertKeyPool(pool);
+  const nextKey = normalizeApiKey(key);
+  const existingId = String(id || "").trim();
+  const keys = getKeyPool(poolName);
+  const nextId = keyId(nextKey);
+
+  if (existingId) {
+    const idx = keys.findIndex((k) => keyId(k) === existingId);
+    if (idx === -1) throw statusError("api key not found", 404);
+    if (keys.some((k, i) => i !== idx && keyId(k) === nextId)) throw statusError("api key already exists in this pool", 409);
+    const oldId = keyId(keys[idx] as string);
+    keys[idx] = nextKey;
+    setEnvKeyPool(poolName, keys);
+    return reloadKeyPool(poolName, oldId === nextId ? [] : [oldId]);
+  }
+
+  if (keys.some((k) => keyId(k) === nextId)) throw statusError("api key already exists in this pool", 409);
+  keys.push(nextKey);
+  setEnvKeyPool(poolName, keys);
+  return reloadKeyPool(poolName);
+}
+
+interface DeleteApiKeyInput {
+  pool: string;
+  id: string;
+}
+
+function deleteApiKey({ pool, id }: DeleteApiKeyInput): Snapshot {
+  const poolName = assertKeyPool(pool);
+  const deleteId = String(id || "").trim();
+  if (!deleteId) throw statusError("id is required", 400);
+  const keys = getKeyPool(poolName);
+  const next = keys.filter((k) => keyId(k) !== deleteId);
+  if (next.length === keys.length) throw statusError("api key not found", 404);
+  setEnvKeyPool(poolName, next);
+  return reloadKeyPool(poolName, [deleteId]);
+}
+
+// ---------------------------------------------------------------------------
+// Paste-and-autodetect key import
+// ---------------------------------------------------------------------------
+interface ImportKeysInput {
+  text: string;
+}
+
+interface ImportKeyResult {
+  mask: string;
+  brand: string | null;
+  label: string;
+  pools: string[];
+  status: "added" | "duplicate" | "unknown" | "no_service";
+  probed: boolean;
+}
+
+interface ImportKeysResult {
+  results: ImportKeyResult[];
+  added: number;
+  keys: Snapshot;
+}
+
+/**
+ * Parse a pasted blob of keys, auto-detect the service each belongs to (by prefix,
+ * falling back to a live probe for ambiguous `sk-` keys), and add each to the
+ * right pool(s), deduping against what is already stored. Writes each touched .env
+ * pool once, then reloads the KeyManager. Returns a per-key result so the UI can
+ * show what happened.
+ */
+async function importKeys({ text }: ImportKeysInput): Promise<ImportKeysResult> {
+  const candidates = parseKeyBlob(String(text || ""));
+  const services = servicesFromModels(loadModels());
+
+  // Resolve every candidate's brand first (the probe is read-only, so this is
+  // safe to parallelize); apply the writes afterward, serialized per pool.
+  const resolved = await mapLimit(candidates, 4, (key) => resolveKeyBrand(key, services));
+
+  const staged = new Map<string, string[]>(); // pool -> keys to ensure present
+  const pending = candidates.map((key, i) => {
+    const r = resolved[i];
+    const res = r?.ok ? r.value : { brand: null, probed: false };
+    const pools = res.brand ? poolsForBrand(res.brand, services) : [];
+    for (const pool of pools) {
+      const list = staged.get(pool) || [];
+      list.push(key);
+      staged.set(pool, list);
+    }
+    return { key, brand: res.brand, probed: res.probed, pools };
+  });
+
+  const addedKeys = new Set<string>(); // `${pool}::${keyId}` newly written
+  for (const [pool, keys] of staged) {
+    const existing = getKeyPool(pool);
+    const ids = new Set(existing.map((k) => keyId(k)));
+    const next = [...existing];
+    for (const key of keys) {
+      const kid = keyId(key);
+      if (ids.has(kid)) continue;
+      ids.add(kid);
+      next.push(key);
+      addedKeys.add(`${pool}::${kid}`);
+    }
+    if (next.length !== existing.length) setEnvKeyPool(pool, next);
+  }
+
+  const km = getKeyManager();
+  for (const pool of staged.keys()) km.reloadPool(pool);
+  registerActiveKeyPools(km);
+
+  const results: ImportKeyResult[] = pending.map((p) => {
+    let status: ImportKeyResult["status"];
+    if (!p.brand) status = "unknown";
+    else if (!p.pools.length) status = "no_service";
+    else status = p.pools.some((pool) => addedKeys.has(`${pool}::${keyId(p.key)}`)) ? "added" : "duplicate";
+    return { mask: maskKey(p.key), brand: p.brand, label: p.brand ? brandLabel(p.brand) : "", pools: p.pools, status, probed: p.probed };
+  });
+
+  return { results, added: results.filter((r) => r.status === "added").length, keys: filteredKeySnapshot(km) };
+}
+
+export type {
+  DeleteApiKeyInput,
+  ImportKeyResult,
+  ImportKeysInput,
+  ImportKeysResult,
+  ModelSettings,
+  PublicModel,
+  PublicPrompt,
+  SaveApiKeyInput,
+};
+export {
+  deleteApiKey,
+  filteredKeySnapshot,
+  importKeys,
+  keySnapshot,
+  modelSettings,
+  modelSettingsResponse,
+  publicModel,
+  publicPromptBuilderOptions,
+  publicPrompts,
+  saveApiKey,
+};

@@ -1,0 +1,204 @@
+import { defineStore } from 'pinia';
+import { createControlState } from './control/state';
+import { createAppLifecycleActions } from './control/app-lifecycle';
+import { createSelectionContentActions } from './control/selection-content';
+import { createKeysModelsActions } from './control/keys-models';
+import { createRunsActions } from './control/runs';
+import { createSyncActions } from './control/sync';
+import { createAutoUpdateSettingsActions } from './control/auto-update-settings';
+import { createUpdateNotifyEventsActions } from './control/update-notify-events';
+import { createPortableModeSettingsActions } from './control/portable-mode-settings';
+import { createHideTraySettingsActions } from './control/hide-tray-settings';
+import { createOutputRetentionSettingsActions } from './control/output-retention-settings';
+import { createSettingsStore } from './control/settings-store';
+import { createRunAgainActions } from './control/run-again';
+import { useSelfUpdate } from '@/lib/useSelfUpdate';
+import { api } from '@/lib/api';
+import type { UpdateApplyResult, UpdateStatus } from '@/types';
+
+export const useControlStore = defineStore('control', () => {
+  const state = createControlState();
+  // Shared self-update state machine (check/apply guards), see @/lib/useSelfUpdate.
+  const selfUpdate = useSelfUpdate<UpdateStatus, UpdateApplyResult>(api);
+  const selectionContentActions = createSelectionContentActions(state);
+  const keysModelsActions = createKeysModelsActions(state);
+  const runsActions = createRunsActions(state, {
+    refreshKeys: keysModelsActions.refreshKeys,
+  });
+  // Created after runs so bootstrap can re-attach to whatever the server is still
+  // running (the daemon outlives the tab, see runs.ts resumeRuns).
+  const appLifecycleActions = createAppLifecycleActions(state, {
+    checkForUpdate: selfUpdate.checkForUpdate,
+    resumeRuns: runsActions.resumeRuns,
+  });
+  // "Sync my settings with Connections" (opt-in cloud sync of theme), see @/stores/control/sync.
+  const settingsStore = createSettingsStore();
+  const syncActions = createSyncActions(settingsStore);
+  // Auto-update notify + silent-apply opt-ins, see @/stores/control/auto-update-settings.
+  const autoUpdateSettingsActions = createAutoUpdateSettingsActions(settingsStore);
+  // Daemon-wide "update available" push, see @/stores/control/update-notify-events. Shares the
+  // manual applyUpdate() from useSelfUpdate so "Update now" (toast) and the Settings ▸ Updates
+  // button are the same code path.
+  const updateNotifyEventsActions = createUpdateNotifyEventsActions({ applyUpdate: selfUpdate.applyUpdate });
+  // Portable window opt-in, see @/stores/control/portable-mode-settings.
+  const portableModeSettingsActions = createPortableModeSettingsActions(settingsStore);
+  // Hide-tray-icon opt-in, see @/stores/control/hide-tray-settings.
+  const hideTraySettingsActions = createHideTraySettingsActions(settingsStore);
+  // Output retention (0/off + a disk-usage readout), see @/stores/control/output-retention-settings.
+  const outputRetentionSettingsActions = createOutputRetentionSettingsActions(settingsStore);
+  // "Run again" prefill (RunGallery.vue), see @/stores/control/run-again.
+  const runAgainActions = createRunAgainActions(state);
+
+  return {
+    // data
+    inputs: state.inputs,
+    models: state.models,
+    archivedModels: state.archivedModels,
+    prompts: state.prompts,
+    builderOptions: state.builderOptions,
+    builderOptionsLoaded: state.builderOptionsLoaded,
+    references: state.references,
+    keys: state.keys,
+    runs: state.runs,
+    deletingRunIds: state.deletingRunIds,
+    sessionInputIds: state.sessionInputIds,
+    spend: state.spend,
+    costEstimate: state.costEstimate,
+    costEstimateLoading: state.costEstimateLoading,
+    providerDefaults: state.providerDefaults,
+    updateStatus: selfUpdate.updateStatus,
+    updateChecking: selfUpdate.updateChecking,
+    updateApplying: selfUpdate.updateApplying,
+    // selection/options
+    selInputs: state.selInputs,
+    combineInputs: state.combineInputs,
+    selModels: state.selModels,
+    selPrompts: state.selPrompts,
+    selReference: state.selReference,
+    referenceOn: state.referenceOn,
+    mock: state.mock,
+    selfCheck: state.selfCheck,
+    modelQty: state.modelQty,
+    maxCostUsd: state.maxCostUsd,
+    customOn: state.customOn,
+    custom: state.custom,
+    advancedOpen: state.advancedOpen,
+    refNote: state.refNote,
+    brandOn: state.brandOn,
+    brandStyleGuide: state.brandStyleGuide,
+    brandStyleGuideDefault: state.brandStyleGuideDefault,
+    brandAttachments: state.brandAttachments,
+    // run progress (single-run views of the focused run, plus the queue behind it)
+    runId: state.runId,
+    runTitle: state.runTitle,
+    runStatus: state.runStatus,
+    queuePosition: state.queuePosition,
+    total: state.total,
+    running: state.running,
+    submitting: state.submitting,
+    startingQueue: state.startingQueue,
+    jobList: state.jobList,
+    activeRuns: state.activeRuns,
+    backlogRuns: state.backlogRuns,
+    anyRunActive: state.anyRunActive,
+    heldRuns: state.heldRuns,
+    queueRunning: state.queueRunning,
+    // live check
+    liveCheckArmed: state.liveCheckArmed,
+    liveCheckBusy: state.liveCheckBusy,
+    // settings sync
+    syncStatus: syncActions.syncStatus,
+    syncLoading: syncActions.syncLoading,
+    syncActionBusy: syncActions.syncActionBusy,
+    // auto-update opt-ins
+    autoUpdateEnabled: autoUpdateSettingsActions.autoUpdateEnabled,
+    updateNotifyEnabled: autoUpdateSettingsActions.updateNotifyEnabled,
+    autoUpdateLoading: autoUpdateSettingsActions.autoUpdateLoading,
+    appVersion: autoUpdateSettingsActions.appVersion,
+    // portable window opt-in
+    portableModeEnabled: portableModeSettingsActions.portableModeEnabled,
+    portableModeLoading: portableModeSettingsActions.portableModeLoading,
+    // hide tray icon opt-in
+    hideTrayIconEnabled: hideTraySettingsActions.hideTrayIconEnabled,
+    hideTrayIconLoading: hideTraySettingsActions.hideTrayIconLoading,
+    // output retention (+ disk usage readout)
+    outputRetentionDays: outputRetentionSettingsActions.outputRetentionDays,
+    outputBytes: outputRetentionSettingsActions.outputBytes,
+    outputRetentionLoading: outputRetentionSettingsActions.outputRetentionLoading,
+    // getters
+    runnableModels: state.runnableModels,
+    runnableModelIds: state.runnableModelIds,
+    envNote: state.envNote,
+    estimate: state.estimate,
+    progress: state.progress,
+    // actions
+    bootstrap: appLifecycleActions.bootstrap,
+    checkForUpdate: selfUpdate.checkForUpdate,
+    applyUpdate: selfUpdate.applyUpdate,
+    toggleInput: selectionContentActions.toggleInput,
+    toggleModel: selectionContentActions.toggleModel,
+    setModelQty: selectionContentActions.setModelQty,
+    togglePrompt: selectionContentActions.togglePrompt,
+    toggleReference: selectionContentActions.toggleReference,
+    selectAll: selectionContentActions.selectAll,
+    selectNone: selectionContentActions.selectNone,
+    uploadFiles: selectionContentActions.uploadFiles,
+    uploadReferences: selectionContentActions.uploadReferences,
+    addBrandAttachments: selectionContentActions.addBrandAttachments,
+    removeBrandAttachment: selectionContentActions.removeBrandAttachment,
+    saveBrandStyleGuideDefault: selectionContentActions.saveBrandStyleGuideDefault,
+    clearBrandStyleGuideDefault: selectionContentActions.clearBrandStyleGuideDefault,
+    deleteInput: selectionContentActions.deleteInput,
+    savePrompt: selectionContentActions.savePrompt,
+    deletePrompt: selectionContentActions.deletePrompt,
+    savePromptBuilderOption: selectionContentActions.savePromptBuilderOption,
+    deletePromptBuilderOption: selectionContentActions.deletePromptBuilderOption,
+    restoreDefaultPrompts: selectionContentActions.restoreDefaultPrompts,
+    togglePromptStarred: selectionContentActions.togglePromptStarred,
+    shutdownServer: appLifecycleActions.shutdownServer,
+    refreshRuns: runsActions.refreshRuns,
+    deleteRuns: runsActions.deleteRuns,
+    forgetDeletedRuns: runsActions.forgetDeletedRuns,
+    refreshKeys: keysModelsActions.refreshKeys,
+    saveKey: keysModelsActions.saveKey,
+    deleteKey: keysModelsActions.deleteKey,
+    importKeys: keysModelsActions.importKeys,
+    saveModel: keysModelsActions.saveModel,
+    toggleModelStarred: keysModelsActions.toggleModelStarred,
+    deleteModel: keysModelsActions.deleteModel,
+    restoreModel: keysModelsActions.restoreModel,
+    reorderModels: keysModelsActions.reorderModels,
+    liveCheck: keysModelsActions.liveCheck,
+    cancelLiveCheck: keysModelsActions.cancelLiveCheck,
+    resetLiveCheck: keysModelsActions.resetLiveCheck,
+    addToQueue: runsActions.addToQueue,
+    runNow: runsActions.runNow,
+    runQueue: runsActions.runQueue,
+    reorderQueue: runsActions.reorderQueue,
+    cancelRun: runsActions.cancelRun,
+    focusRun: runsActions.focusRun,
+    resumeRuns: runsActions.resumeRuns,
+    adoptHeldRun: runsActions.adoptHeldRun,
+    refreshCostEstimate: runsActions.refreshCostEstimate,
+    loadSyncStatus: syncActions.loadSyncStatus,
+    enableSync: syncActions.enableSync,
+    disableSync: syncActions.disableSync,
+    pullSync: syncActions.pullSync,
+    pushSync: syncActions.pushSync,
+    pushAppearance: syncActions.pushAppearance,
+    applyAppearance: syncActions.applyAppearance,
+    loadAutoUpdateSetting: autoUpdateSettingsActions.loadAutoUpdateSetting,
+    setAutoUpdate: autoUpdateSettingsActions.setAutoUpdate,
+    setUpdateNotify: autoUpdateSettingsActions.setUpdateNotify,
+    connectUpdateEvents: updateNotifyEventsActions.connect,
+    loadPortableModeSetting: portableModeSettingsActions.loadPortableModeSetting,
+    setPortableMode: portableModeSettingsActions.setPortableMode,
+    loadHideTrayIconSetting: hideTraySettingsActions.loadHideTrayIconSetting,
+    setHideTrayIcon: hideTraySettingsActions.setHideTrayIcon,
+    loadOutputRetentionSetting: outputRetentionSettingsActions.loadOutputRetentionSetting,
+    loadOutputStorage: outputRetentionSettingsActions.loadOutputStorage,
+    setOutputRetentionDays: outputRetentionSettingsActions.setOutputRetentionDays,
+    stageRunAgain: runAgainActions.stageRunAgain,
+    applyPendingRunAgain: runAgainActions.applyPendingRunAgain,
+  };
+});

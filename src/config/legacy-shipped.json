@@ -1,0 +1,362 @@
+{
+  "version": "1.6.6",
+  "models": {
+    "_comment": "Model registry. Each entry maps a friendly id to a provider adapter, the exact API model name, the env var holding its key pool, and provider quirks. Toggle `enabled` or `vision` without touching code. maxTokens is the OUTPUT budget, keep it generous because a full self-contained HTML page plus any model 'thinking' tokens must fit, or the document gets truncated (no closing </html>).",
+    "models": [
+      {
+        "id": "claude-opus-4-8",
+        "label": "Claude Opus 4.8",
+        "provider": "anthropic",
+        "apiModel": "claude-opus-4-8",
+        "keyEnv": "ANTHROPIC_API_KEYS",
+        "baseUrl": "https://api.anthropic.com/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "temperature": 1,
+        "supportsTemperature": true,
+        "enabled": true,
+        "starred": false,
+        "color": "#a06bff"
+      },
+      {
+        "id": "gpt-5.5",
+        "label": "GPT 5.5",
+        "provider": "openai",
+        "apiModel": "gpt-5.5",
+        "keyEnv": "OPENAI_API_KEYS",
+        "baseUrl": "https://api.openai.com/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_completion_tokens",
+        "supportsTemperature": false,
+        "enabled": true,
+        "color": "#10a37f"
+      },
+      {
+        "id": "gpt-5.6",
+        "label": "GPT 5.6 Sol",
+        "provider": "openai",
+        "apiModel": "gpt-5.6-sol",
+        "keyEnv": "OPENAI_API_KEYS",
+        "baseUrl": "https://api.openai.com/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_completion_tokens",
+        "supportsTemperature": false,
+        "enabled": true,
+        "starred": true,
+        "color": "#0d9373"
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "label": "GPT 5.6 Terra",
+        "provider": "openai",
+        "apiModel": "gpt-5.6-terra",
+        "keyEnv": "OPENAI_API_KEYS",
+        "baseUrl": "https://api.openai.com/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_completion_tokens",
+        "supportsTemperature": false,
+        "enabled": true,
+        "color": "#2fb380"
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "label": "GPT 5.6 Luna",
+        "provider": "openai",
+        "apiModel": "gpt-5.6-luna",
+        "keyEnv": "OPENAI_API_KEYS",
+        "baseUrl": "https://api.openai.com/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_completion_tokens",
+        "supportsTemperature": false,
+        "enabled": true,
+        "color": "#5ec9a0"
+      },
+      {
+        "id": "gemini-flash-latest",
+        "label": "Gemini Flash (Latest)",
+        "provider": "gemini",
+        "apiModel": "gemini-flash-latest",
+        "keyEnv": "GEMINI_FLASH_API_KEYS",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "vision": true,
+        "maxTokens": 24000,
+        "temperature": 1,
+        "supportsTemperature": true,
+        "enabled": true,
+        "color": "#ea4335"
+      },
+      {
+        "id": "gemini-pro-latest",
+        "label": "Gemini Pro (Latest)",
+        "provider": "gemini",
+        "apiModel": "gemini-pro-latest",
+        "keyEnv": "GEMINI_PRO_API_KEYS",
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "vision": true,
+        "maxTokens": 24000,
+        "temperature": 1,
+        "supportsTemperature": true,
+        "enabled": true,
+        "starred": true,
+        "color": "#4285f4"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro",
+        "provider": "deepseek",
+        "apiModel": "deepseek-v4-pro",
+        "keyEnv": "DEEPSEEK_API_KEYS",
+        "baseUrl": "https://api.deepseek.com/v1",
+        "_vision_note": "Confirmed text-only on 2026-06-08: its API rejects image_url content. With vision:false the runner feeds it an auto-generated caption from a vision model so it can still reimagine the real UI.",
+        "_reasoning_note": "Reasoning model, same class as Muse Spark: it burns hidden 'reasoning' tokens (billed inside completion/output) before emitting the visible answer, so a full self-contained HTML page PLUS that budget has to fit under maxTokens or the document truncates with no closing </html>. Raised 16000 -> 32000 on 2026-07-18 after 3 of 133 completed DeepSeek jobs in the local run history came back truncated at the limit; maxTokens is a ceiling, not a target, so this costs nothing on jobs that don't need it. That hidden reasoning pass is also the main reason this model is the slowest in a fan-out (~46s average vs ~15s for Claude/Gemini over that same history), on top of DeepSeek's own comparatively low output tok/s.",
+        "vision": false,
+        "maxTokens": 32000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "enabled": true,
+        "color": "#4d6bfe"
+      },
+      {
+        "_maxtokens_note": "Raised 8000 -> 16000 on 2026-07-28: at 8000 Qwen truncated 7 of 12 outputs mid-document (finish_reason=length, no closing </html>), which cost it real content in every measured run while every other model in this file sat at 16000-32000. A full self-contained HTML page does not fit in 8000.",
+        "id": "qwen-3.5-plus",
+        "label": "Qwen 3.5 Plus",
+        "provider": "qwen",
+        "apiModel": "qwen3.5-plus",
+        "keyEnv": "QWEN_API_KEYS",
+        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "enabled": true,
+        "color": "#615ced"
+      },
+      {
+        "_reasoning_note": "Muse Spark is a reasoning model: it burns 'reasoning' tokens (billed inside completion/output tokens) before emitting the visible answer, so maxTokens must stay generous. A full self-contained HTML page PLUS the reasoning budget has to fit or the document truncates (no closing </html>). Verified 2026-07-13 against api.meta.ai: OpenAI-compatible /chat/completions, Bearer auth, ingests image_url blocks (vision), accepts temperature, uses max_tokens.",
+        "id": "muse-spark-1.1",
+        "label": "Muse Spark 1.1",
+        "provider": "metaai",
+        "apiModel": "muse-spark-1.1",
+        "keyEnv": "METAAI_API_KEYS",
+        "baseUrl": "https://api.meta.ai/v1",
+        "vision": true,
+        "maxTokens": 32000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": true,
+        "starred": true,
+        "color": "#0866ff"
+      },
+      {
+        "_starter_note": "Off by default. Its pool exists so a pasted xAI key routes here; enable and confirm the apiModel to use it, or add a specific model via Browse & add.",
+        "id": "grok-4",
+        "label": "Grok 4",
+        "provider": "xai",
+        "apiModel": "grok-4",
+        "keyEnv": "XAI_API_KEYS",
+        "baseUrl": "https://api.x.ai/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": false,
+        "color": "#1f6feb"
+      },
+      {
+        "_starter_note": "Off by default. Its pool exists so a pasted Groq key routes here; enable and confirm the apiModel to use it, or add a specific model via Browse & add.",
+        "id": "groq-llama",
+        "label": "Llama 3.3 70B (Groq)",
+        "provider": "groq",
+        "apiModel": "llama-3.3-70b-versatile",
+        "keyEnv": "GROQ_API_KEYS",
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "vision": false,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": false,
+        "color": "#f55036"
+      },
+      {
+        "_starter_note": "Off by default. Its pool exists so a pasted Mistral key routes here; enable and confirm the apiModel to use it, or add a specific model via Browse & add.",
+        "id": "mistral-large",
+        "label": "Mistral Large",
+        "provider": "mistral",
+        "apiModel": "mistral-large-latest",
+        "keyEnv": "MISTRAL_API_KEYS",
+        "baseUrl": "https://api.mistral.ai/v1",
+        "vision": false,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": false,
+        "color": "#ff7000"
+      },
+      {
+        "_starter_note": "Off by default. Its pool exists so a pasted OpenRouter key routes here; enable and confirm the apiModel to use it, or add a specific model via Browse & add.",
+        "id": "openrouter-auto",
+        "label": "OpenRouter Auto",
+        "provider": "openrouter",
+        "apiModel": "openrouter/auto",
+        "keyEnv": "OPENROUTER_API_KEYS",
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "vision": true,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": false,
+        "color": "#6467f2"
+      },
+      {
+        "_starter_note": "Off by default. Its pool exists so a pasted Moonshot key routes here; enable and confirm the apiModel to use it, or add a specific model via Browse & add.",
+        "id": "moonshot-kimi",
+        "label": "Kimi K2 (Moonshot)",
+        "provider": "moonshot",
+        "apiModel": "kimi-k2-0711-preview",
+        "keyEnv": "MOONSHOT_API_KEYS",
+        "baseUrl": "https://api.moonshot.ai/v1",
+        "vision": false,
+        "maxTokens": 16000,
+        "tokenParam": "max_tokens",
+        "supportsTemperature": true,
+        "temperature": 1,
+        "enabled": false,
+        "color": "#16b8a6"
+      }
+    ],
+    "modelArchive": []
+  },
+  "prompts": {
+    "_comment": "Default prompt presets. `systemContract` is prepended to EVERY job to force a clean, self-contained HTML output that the iframe viewer can render. Add your own presets here or pass a custom prompt at run time.",
+    "systemContract": "You are a senior product designer and front-end engineer. You will be shown one or more screenshots of an existing UI (when multiple images are given, they are different views/states of the SAME interface, treat them as reference for one product). Your job is to REIMAGINE that interface, not merely transcribe it.\n\nHARD OUTPUT RULES:\n1. Respond with exactly ONE complete, self-contained HTML document and NOTHING else, no commentary, no explanation before or after.\n2. The document MUST start with <!DOCTYPE html> and be fully self-contained: all CSS in a <style> tag and all JS in a <script> tag. No build step.\n3. Do NOT reference local files. External resources are allowed ONLY from these CDNs if needed: fonts.googleapis.com, fonts.gstatic.com, cdn.jsdelivr.net, unpkg.com. Prefer pure CSS.\n4. Use realistic placeholder content that matches the product's domain. Inline SVG for icons. No <img> pointing at the original screenshot.\n5. Make it responsive and visually polished. It should look like a real, shippable screen, not a wireframe.\n6. Put a short HTML comment at the very top, like <!-- REIMAGINE: one-line summary of what you changed and why -->, then the document.",
+    "builderOptions": [],
+    "prompts": [
+      {
+        "id": "faithful-refresh",
+        "label": "Faithful Refresh",
+        "description": "Modernize the visual design while keeping the layout and information architecture recognizable.",
+        "user": "Recreate this screen as a polished, modern version of itself. Keep the same overall layout, structure, and feature set so it is clearly the same product, but elevate typography, spacing, color, depth, and micro-detailing to a 2026 design-system standard. Fix any obvious visual inconsistencies."
+      },
+      {
+        "id": "bold-reimagine",
+        "label": "Bold Reimagine",
+        "description": "Radically rethink the UX, new layout, interaction model, and visual language.",
+        "user": "Boldly reimagine this experience. You may restructure the layout, change the interaction model, and introduce a fresh visual language, as long as it still accomplishes the same user goal better than the original. Surprise me with a genuinely different and superior take. Add tasteful interactivity where it helps."
+      },
+      {
+        "id": "clarity-a11y",
+        "label": "Clarity & Accessibility",
+        "description": "Improve hierarchy, readability, contrast, and accessibility.",
+        "user": "Redesign this screen with a focus on clarity and accessibility: stronger visual hierarchy, generous readable typography, WCAG-AA color contrast, clear focus states, logical tab order, and ARIA where appropriate. Reduce cognitive load while keeping all functionality."
+      },
+      {
+        "id": "conversion",
+        "label": "Conversion-Optimized",
+        "description": "Optimize the screen around its single most important action.",
+        "user": "Identify the primary action a user is here to take, then redesign the screen to drive that action. Improve the funnel: clearer value, stronger primary CTA, less friction, smart defaults, and reassurance. Keep secondary actions available but visually subordinate.",
+        "starred": true
+      },
+      {
+        "id": "minimalist",
+        "label": "Minimalist",
+        "description": "Strip to essentials, calm, focused, lots of breathing room.",
+        "user": "Reimagine this as a minimalist, focused interface. Remove visual noise, collapse or defer anything non-essential, and let whitespace and a restrained palette carry the design. Every element must earn its place. Keep the core task effortless."
+      },
+      {
+        "id": "minimalist-two",
+        "label": "Minimalist Two",
+        "description": "Minimalism with stronger hierarchy and progressive disclosure.",
+        "user": "Reimagine this as a quieter minimalist interface with progressive disclosure and strong visual hierarchy. The default view must be visibly simpler and less busy than the source screenshot. Identify the single primary task, the current state, and only the few details needed immediately; keep those visible, clear, and easy to scan. Everything secondary, advanced, repetitive, or rarely used should be hidden behind one obvious control such as More, Settings, a compact dropdown, an overflow three-dot menu, an accordion, a drawer, or a contextual popover. Do not add new features, marketing copy, onboarding text, explanatory paragraphs, extra cards, decorative badges, duplicated actions, dashboards, or visible controls just to show capability. Use whitespace, muted color, restrained typography, alignment, grouping, and scale to create hierarchy instead of adding more UI. If in doubt, show less by default and make the next layer one intentional click or tap away."
+      },
+      {
+        "id": "material-3",
+        "label": "Material 3",
+        "description": "Rebuild it in Google's Material 3 (Material You) design language.",
+        "user": "Rebuild this screen in Google's Material 3 (Material You) design language. Use an M3 tonal color scheme derived from a single seed color, a primary plus secondary/tertiary accents and neutral surfaces, each with correct on-colors, and convey elevation with surface tints / tonal overlays rather than heavy drop shadows. Apply the M3 shape scale (rounded corners, ~12-28px, pill-shaped buttons) and show visible state layers on interactive elements (hover/focus/pressed). Use the M3 type scale (display / headline / title / body / label) with Roboto or Google Sans from fonts.googleapis.com, and Material Symbols (also from fonts.googleapis.com) or inline SVG for icons. Reach for real M3 components where they fit: filled / filled-tonal / outlined / text buttons, FABs, top app bar, navigation bar or rail, cards, chips, switches, sliders, and dialogs. Keep it accessible and responsive, it should look unmistakably like a polished Material 3 product.",
+        "pickerHidden": true
+      },
+      {
+        "id": "approachable",
+        "label": "Approachable",
+        "description": "Keep the important things visible; tuck the rest behind progressive disclosure.",
+        "user": "Reimagine this screen around clarity and progressive disclosure so a first-time, non-technical user finds it effortless. Keep the few genuinely important things always visible, obvious, and large: the primary action, the current state, and the information the user needs at a glance. Take everything secondary, advanced, or only occasionally needed and move it out of the way, behind a 'More' menu, an expandable section, a dropdown, a popover, a settings dialog/modal, or a hover / \u00e2\u2013\u00b8 disclosure with a help tooltip. Use plain-language labels, generous tap targets, sensible defaults, and gentle guidance (helper text, empty states, confirmations) so the user can't get lost or make a mistake. This is NOT extreme minimalism or hiding everything, nothing essential should be buried, it's an approachable, forgiving, 'anyone can use this' layout where the important stuff is front-and-center and the rest is one obvious click away."
+      },
+      {
+        "id": "playful",
+        "label": "Playful & Branded",
+        "description": "Inject personality, motion, and a memorable brand feel.",
+        "user": "Give this screen a distinctive, memorable personality: a confident brand palette, expressive typography, delightful motion and hover states, and small moments of joy, without sacrificing usability. Make it feel like a product people screenshot and share.",
+        "starred": true
+      }
+    ]
+  },
+  "promptDefaults": {
+    "_comment": "Factory prompt presets used by the UI's Restore defaults action. Edit this file if you want a different default prompt set.",
+    "prompts": [
+      {
+        "id": "faithful-refresh",
+        "label": "Faithful Refresh",
+        "description": "Modernize the visual design while keeping the layout and information architecture recognizable.",
+        "user": "Recreate this screen as a polished, modern version of itself. Keep the same overall layout, structure, and feature set so it is clearly the same product, but elevate typography, spacing, color, depth, and micro-detailing to a 2026 design-system standard. Fix any obvious visual inconsistencies."
+      },
+      {
+        "id": "bold-reimagine",
+        "label": "Bold Reimagine",
+        "description": "Radically rethink the UX, new layout, interaction model, and visual language.",
+        "user": "Boldly reimagine this experience. You may restructure the layout, change the interaction model, and introduce a fresh visual language, as long as it still accomplishes the same user goal better than the original. Surprise me with a genuinely different and superior take. Add tasteful interactivity where it helps."
+      },
+      {
+        "id": "clarity-a11y",
+        "label": "Clarity & Accessibility",
+        "description": "Improve hierarchy, readability, contrast, and accessibility.",
+        "user": "Redesign this screen with a focus on clarity and accessibility: stronger visual hierarchy, generous readable typography, WCAG-AA color contrast, clear focus states, logical tab order, and ARIA where appropriate. Reduce cognitive load while keeping all functionality."
+      },
+      {
+        "id": "conversion",
+        "label": "Conversion-Optimized",
+        "description": "Optimize the screen around its single most important action.",
+        "user": "Identify the primary action a user is here to take, then redesign the screen to drive that action. Improve the funnel: clearer value, stronger primary CTA, less friction, smart defaults, and reassurance. Keep secondary actions available but visually subordinate."
+      },
+      {
+        "id": "minimalist",
+        "label": "Minimalist",
+        "description": "Strip to essentials, calm, focused, lots of breathing room.",
+        "user": "Reimagine this as a minimalist, focused interface. Remove visual noise, collapse or defer anything non-essential, and let whitespace and a restrained palette carry the design. Every element must earn its place. Keep the core task effortless."
+      },
+      {
+        "id": "minimalist-two",
+        "label": "Minimalist Two",
+        "description": "Minimalism with stronger hierarchy and progressive disclosure.",
+        "user": "Reimagine this as a quieter minimalist interface with progressive disclosure and strong visual hierarchy. The default view must be visibly simpler and less busy than the source screenshot. Identify the single primary task, the current state, and only the few details needed immediately; keep those visible, clear, and easy to scan. Everything secondary, advanced, repetitive, or rarely used should be hidden behind one obvious control such as More, Settings, a compact dropdown, an overflow three-dot menu, an accordion, a drawer, or a contextual popover. Do not add new features, marketing copy, onboarding text, explanatory paragraphs, extra cards, decorative badges, duplicated actions, dashboards, or visible controls just to show capability. Use whitespace, muted color, restrained typography, alignment, grouping, and scale to create hierarchy instead of adding more UI. If in doubt, show less by default and make the next layer one intentional click or tap away."
+      },
+      {
+        "id": "material-3",
+        "label": "Material 3",
+        "description": "Rebuild it in Google's Material 3 (Material You) design language.",
+        "user": "Rebuild this screen in Google's Material 3 (Material You) design language. Use an M3 tonal color scheme derived from a single seed color, a primary plus secondary/tertiary accents and neutral surfaces, each with correct on-colors, and convey elevation with surface tints / tonal overlays rather than heavy drop shadows. Apply the M3 shape scale (rounded corners, ~12-28px, pill-shaped buttons) and show visible state layers on interactive elements (hover/focus/pressed). Use the M3 type scale (display / headline / title / body / label) with Roboto or Google Sans from fonts.googleapis.com, and Material Symbols (also from fonts.googleapis.com) or inline SVG for icons. Reach for real M3 components where they fit: filled / filled-tonal / outlined / text buttons, FABs, top app bar, navigation bar or rail, cards, chips, switches, sliders, and dialogs. Keep it accessible and responsive, it should look unmistakably like a polished Material 3 product.",
+        "pickerHidden": true
+      },
+      {
+        "id": "approachable",
+        "label": "Approachable",
+        "description": "Keep the important things visible; tuck the rest behind progressive disclosure.",
+        "user": "Reimagine this screen around clarity and progressive disclosure so a first-time, non-technical user finds it effortless. Keep the few genuinely important things always visible, obvious, and large: the primary action, the current state, and the information the user needs at a glance. Take everything secondary, advanced, or only occasionally needed and move it out of the way, behind a 'More' menu, an expandable section, a dropdown, a popover, a settings dialog/modal, or a hover / \u00e2\u2013\u00b8 disclosure with a help tooltip. Use plain-language labels, generous tap targets, sensible defaults, and gentle guidance (helper text, empty states, confirmations) so the user can't get lost or make a mistake. This is NOT extreme minimalism or hiding everything, nothing essential should be buried, it's an approachable, forgiving, 'anyone can use this' layout where the important stuff is front-and-center and the rest is one obvious click away."
+      },
+      {
+        "id": "playful",
+        "label": "Playful & Branded",
+        "description": "Inject personality, motion, and a memorable brand feel.",
+        "user": "Give this screen a distinctive, memorable personality: a confident brand palette, expressive typography, delightful motion and hover states, and small moments of joy, without sacrificing usability. Make it feel like a product people screenshot and share."
+      }
+    ]
+  }
+}

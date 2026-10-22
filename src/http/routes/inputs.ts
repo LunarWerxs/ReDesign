@@ -1,0 +1,47 @@
+/**
+ * GET /api/inputs, POST /api/inputs/upload (40 MB body cap), POST /api/inputs/delete.
+ * GET /input/*, GET /reference/* static file serving (subject images + style references).
+ * Ported from server.js + the /input, /reference routes.
+ */
+import type { Hono } from "hono";
+import type { Deps } from "../deps";
+import { requireSameOrigin } from "../origin-guard";
+import { jsonBodyLimit } from "../body-limit";
+import { serveFile } from "../fileServing";
+import { listInputs, listReferences, saveUploadedImages, deleteInput, currentInputDir, REFERENCE_DIR, type UploadInput } from "../../inputResolver";
+
+const UPLOAD_BODY_LIMIT_BYTES = Math.max(1, Number.parseInt(process.env.UPLOAD_LIMIT_MB || "", 10) || 40) * 1024 * 1024;
+const UPLOAD_IMAGE_LIMIT_BYTES = Math.max(1, Number.parseInt(process.env.UPLOAD_IMAGE_LIMIT_MB || "", 10) || 20) * 1024 * 1024;
+
+export function register(app: Hono, _deps: Deps): void {
+  app.get("/input/*", (c) => serveFile(c, currentInputDir(), new URL(c.req.url).pathname.slice("/input/".length)));
+  app.get("/reference/*", (c) => serveFile(c, REFERENCE_DIR, new URL(c.req.url).pathname.slice("/reference/".length)));
+
+  app.get("/api/inputs", (c) => c.json(listInputs()));
+  app.get("/api/inputs/limits", (c) => c.json({ bodyLimitBytes: UPLOAD_BODY_LIMIT_BYTES, imageLimitBytes: UPLOAD_IMAGE_LIMIT_BYTES }));
+
+  app.post("/api/inputs/upload", requireSameOrigin(), jsonBodyLimit(UPLOAD_BODY_LIMIT_BYTES), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { images?: UploadInput[]; image?: UploadInput };
+    const images = Array.isArray(body.images) ? body.images : body.image ? [body.image] : [];
+    return c.json(saveUploadedImages(images, { maxBytes: UPLOAD_IMAGE_LIMIT_BYTES }));
+  });
+
+  app.post("/api/reference/upload", requireSameOrigin(), jsonBodyLimit(UPLOAD_BODY_LIMIT_BYTES), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { images?: UploadInput[]; image?: UploadInput };
+    const images = Array.isArray(body.images) ? body.images : body.image ? [body.image] : [];
+    // reference/ is a flat pool of style images (no "group" folder concept, unlike
+    // input/), so re-list via listReferences() rather than returning saveUploadedImages'
+    // own InputItem-shaped `inputs`, which would misreport subfolders as groups.
+    const { saved } = saveUploadedImages(images, { inputDir: REFERENCE_DIR, maxBytes: UPLOAD_IMAGE_LIMIT_BYTES });
+    const references = listReferences();
+    const savedRels = new Set(saved.map((s) => s.rel));
+    const addedIds = references.filter((r) => savedRels.has(r.rel)).map((r) => r.id);
+    return c.json({ saved, addedIds, references });
+  });
+
+  app.post("/api/inputs/delete", requireSameOrigin(), async (c) => {
+    const body = ((await c.req.json().catch(() => ({}))) || {}) as { id?: string };
+    if (!body.id) return c.json({ error: "id is required" }, 400);
+    return c.json({ inputs: deleteInput(String(body.id)) });
+  });
+}

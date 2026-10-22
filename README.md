@@ -1,0 +1,148 @@
+[![RēDesign](.github/banner.png)](https://redes1gn.github.io/)
+
+# RēDesign
+
+**One screenshot in. A wall of AI redesigns out.**
+
+[![CI](https://github.com/LunarWerxs/ReDesign/actions/workflows/ci.yml/badge.svg)](https://github.com/LunarWerxs/ReDesign/actions/workflows/ci.yml)
+[![Built with Bun](https://img.shields.io/badge/built%20with-Bun-14151a?logo=bun&logoColor=white)](https://bun.sh)
+[![Site](https://img.shields.io/badge/site-redes1gn.github.io-a855f7)](https://redes1gn.github.io/)
+[![Discord](https://img.shields.io/badge/Discord-join_the_community-5865F2?logo=discord&logoColor=white)](https://discord.gg/PsWpeNUzhk)
+
+RēDesign is a self-hosted screenshot-to-redesign tool that fires one UI screenshot at several AI models in parallel and returns a gallery of self-contained HTML redesigns placed next to the original, so you can compare real design directions at once instead of pasting the same image into one chat tab after another.
+
+It runs on your own machine and talks only to the model APIs you give it keys for. An optional "Sync with Connections" toggle can carry your theme across devices; your API keys never leave your machine.
+
+## What it looks like
+
+Drop a screenshot into the control panel, pick the models and presets you want, and hit Run:
+
+![The RēDesign control panel: an input dropzone with model and prompt selectors and a Run button](.github/media/control-panel.png)
+
+Here are six of the redesigns a single run produced from one sample dashboard, courtesy of Claude, GPT, Gemini and Qwen:
+
+![Six real redesigns of the same sample dashboard, from dark editorial to stripped-back minimalist](.github/media/wall.png)
+
+## Quick start
+
+On Windows, download `redesign-windows-x64.exe` from
+[Releases](https://github.com/LunarWerxs/ReDesign/releases) and run it directly. It is an
+icon-bearing GUI executable with the web app embedded and no console window. The plain ZIP beside it
+is the smaller automatic-update transport.
+
+The system-tray icon comes with both downloads. It is drawn by a small separate launcher
+(`misc\ReDesign-Tray.exe`); the zip ships it beside the exe, and since 1.6.7 the single-file
+`redesign.exe` carries it inside the binary and writes it out beside its own state on first run, so
+either download gets you the icon, Quit and the auto-restart supervisor. (Before 1.6.7 the bare exe
+had none, and this line said so as though it were a decision.) `misc\Create-Shortcut.ps1` still
+makes a shortcut that launches through the tray host directly.
+
+To run from source on any supported OS, you need [Bun](https://bun.sh) 1.2 or newer.
+
+```sh
+bun install
+npm run build          # build the web UI (first run only)
+cp .env.example .env   # drop in your API keys
+bun run src/index.ts serve
+```
+
+Open http://127.0.0.1:5178, drop in a screenshot, tick a few models, hit Run. On Windows you can skip all that and just double-click `start.cmd`.
+
+## Why it is nice
+
+- **Every model at once.** Claude, GPT, Gemini, DeepSeek, Qwen, and Meta AI out of the box, plus any OpenAI-compatible endpoint you add. Star the handful you reach for so they sit up top, and leave the rest one click away in an "all models" drawer, the way VS Code Copilot does it. They all run in parallel, not one after another.
+- **Many takes per model, one run.** Ask a single model for three variants and another for one, all in the same fan-out. A bake-off is more useful when you can see a model's range, not just one roll of the dice.
+- **A stack of prompt presets.** Faithful refresh, bold reimagine, minimalist, conversion, and more. Or write your own.
+- **A viewer worth using.** Start from an all-runs thumbnail gallery, search it, filter by model or preset, set the column count, and preview at phone through desktop widths. Stars and hidden-output choices survive a refresh, and the original always sits first so you have something to compare against. Take a whole run away as a zip when you want to review it offline. **Compare A/B** shows two outputs of one screenshot from two models with their names hidden; each pick feeds a per-model Elo ranking in the Settings sidebar, which can turn the models that keep winning into your selected stack (agents read it through the `model_leaderboard` MCP tool). Once you have picked a winner, download its DESIGN.md (or take the shortlist zip, which carries one) so a coding agent can rebuild that look in your real app from its tokens, components and rules instead of guessing.
+- **One dead key doesn't cost you the batch.** If a model fails or gets skipped because its keys are cooling down, retry just those jobs rather than paying for the whole fan-out again. Any past run can also be reloaded into the control panel exactly as it was and run again.
+- **A queue you control.** Park several batches before spending keys, start them together, add more work behind a live run, and drag waiting batches into the order you want.
+- **Paste your keys, skip the setup.** Drop in one key or a whole pile at once. It works out which service each belongs to, checking live when a key could belong to more than one, and files them in the right pool. Give each provider a stack of keys and it cycles through them, quietly benching the ones that start failing, then bringing them back later.
+- **Checks what it made is readable.** One click on an output card rates its text contrast against WCAG AA from the rendered pixels, so light text over a photo or gradient gets flagged, not just bad CSS colours.
+- **Safe by design.** The HTML each model writes runs in a locked-down iframe. You can click around in it, but it cannot touch your data.
+- **It knows what it costs.** A per-run cost meter, plus an estimate before you hit Run, so a big fan-out never surprises you.
+- **It tells you when it's finished.** A fan-out runs for minutes, so if you have tabbed away it raises a desktop notification rather than a toast you will never see.
+- **Scriptable.** Everything in the UI has a command-line twin, and there is an MCP server so an AI agent can drive it too.
+
+## A little deeper
+
+- **All config, no code.** Models and prompts live in `~/.redesign/config/` (set `REDESIGN_HOME` to move it), seeded on first run and shared by the packaged app and a from-source checkout alike. Add a model, disable one, or point it at a newer version without touching the app. The copies under `src/config/` are the shipped seeds, not your live settings.
+- **Several screenshots of one screen.** Tick two or more inputs and a "These are one screen" switch appears under them. Turn it on and each model makes ONE redesign that sees every ticked screenshot (other states, other scroll positions, a dialog open) instead of one redesign per screenshot, and the job count drops to match (`--combine-inputs` on the CLI, `combine_inputs` over MCP). A subfolder of `input/` has always worked this way; the switch does it without moving files.
+- **Page through them one at a time.** The full-screen button on any output (or "One at a time" on the viewer toolbar) shows one redesign filling the window, with ← and → (buttons or arrow keys) to page, the usual star, open, download and screenshot buttons, and an X or Esc back to the grid. Keys make culling quick: S stars, X marks bad and moves on, Z undoes that, N writes a note, O opens it in a new tab, and ? lists them all.
+- **Reference images.** Drop or paste in a look you like, choose exactly which references to send, and every model borrows their mood and colors rather than their layout.
+- **Grounded by default.** Every run inventories the screenshot once with a vision model and hands that description to every model alongside the image, so redesigns keep the real content instead of quietly dropping a tab or inventing a metric. It measurably beat the ungrounded path on content fidelity, so it is simply how runs work now, with no switch to remember.
+- **An anti-slop lint on every output.** Each saved redesign is scored, locally and for free, against a fixed rule table of generic AI styling: purple or blue-to-cyan gradients, emoji standing in for icons, stock Tailwind indigo, default-sans display type, figures the original screenshot never showed, filler copy, raw hex instead of tokens, all caps with no tracking and stock images from other hosts. The gallery card shows the worst severity as a badge with every finding in its tooltip. A P0 finding re-prompts that one model once with the findings; the retry is shown only if it comes back cleaner, the first answer stays on disk, and the retry's cost counts toward the job and the run's spend ceiling. Set `REDESIGN_NO_SLOP_RETRY=1` to keep the badge but never re-prompt.
+- **Real logos and photos.** The same vision model also locates the screenshot's logos, product photos, avatars and illustrations, and they are cropped into the run's `assets/crops/` folder (a pixel-exact PNG for PNG screenshots). Every model is handed their relative URLs, so redesigns embed the real brand marks instead of placeholders or invented logos, and the crops travel with a downloaded zip (the full run or the shortlist). A single page downloaded on its own links its crops relatively, so keep it beside the run's `assets/` folder or download the zip for a self-contained copy. It costs one extra helper call per input; set `ASSET_CROPS=0` in `.env` to skip it.
+- **Self-check, when you want it.** Turn on Self-check under Advanced options (`--self-check` on the CLI, `self_check` over MCP) and each vision model gets one look at its own work: its output is rendered full-page at desktop and phone width in headless Edge or Chrome, and the model sees both renders next to the original and its own HTML, then sends back a corrected page. A revision that fails, refuses or truncates is thrown away and the first output stays, so the pass can only help. It costs one extra call per output, and the pre-run estimate counts it, as a lower bound: that call also sends the renders and the HTML, so it reads more input than the first. The renders are kept beside each output as `*.check-desktop.png` and `*.check-phone.png`.
+- **The stack.** Bun and Hono on the back end (one runtime dependency), a Vue 3 + Vite + Tailwind + shadcn-vue app on the front.
+- **Where your keys live.** In `.env` beside the app, written owner-only (`0600`), and nowhere else. They are never sent anywhere but the provider you configured, never written into a run's saved output or its key-health state, and they are stripped out of any provider error text before it is stored or shown. If you use the optional Connections sync, its session token is additionally encrypted at rest with DPAPI on Windows; on macOS and Linux that token is stored as a plain `0600` file.
+
+## From the command line
+
+```sh
+bun run src/index.ts run      # queue a run (add --mock for a free dry run)
+                              # --model-quantities id=n,id=n  per-model output counts
+                              # --brand-style-guide-file b.md  brand notes for every prompt
+                              # --self-check  each model reviews desktop + phone renders of its output once
+                              # --combine-inputs  the picked inputs are one screen: one redesign from all of them
+bun run src/index.ts models   # models and how many keys each has
+bun run src/index.ts keys     # key health
+bun run src/index.ts mcp      # start the MCP server for agents
+```
+
+## Privacy
+
+RēDesign pings LunarWerx's Studio endpoint (the same one its update check already uses) so we
+know roughly how many people run it. Each ping carries the app version, a coarse OS tag (e.g.
+`win11`, `macos`, `linux`), and a random install id generated once and stored locally. From that
+request, the server also derives and stores a coarse location (country, region, city, timezone),
+your network's ASN, locale, and a truncated user agent, but never an IP address. It never sends
+your account, your files, your screenshots, your API keys, or anything else about you or your
+machine. Set `REDESIGN_NO_PING=1` to turn it off entirely.
+
+## Tests
+
+```sh
+bun test tests
+bun run check:spawntimeout   # repo guardrail, also a CI step
+```
+
+Fully offline. No keys, no spend.
+
+`check:spawntimeout` fails a test, or a lifecycle hook, that reaches a subprocess while inheriting
+bun's 5s default. State one: `test(name, fn, 20_000)`, or `beforeAll(fn, 20_000)` for a hook, where
+the timeout is the second argument. Such a case times the machine rather than its own assertions,
+and a cold Windows CI runner runs that class roughly 10x slower than a dev box. The tray-launcher
+suite is the local example: five cases at 0.33-0.41s each here, one of which crossed 5s on
+windows-latest and held the whole daemon job red until it was given an allowance.
+
+## FAQ
+
+**Is RēDesign free?**
+For personal and other noncommercial use, yes. RēDesign is free under the PolyForm Noncommercial License, so you can run it, read and change the source, and share it for those purposes; commercial use needs a licence from LunarWerx (see [licensing](LICENSING.md)). Beyond that, the only cost is whatever you spend calling the AI provider APIs you bring your own keys for. A per-run cost meter and an estimate before you hit Run keep that visible.
+
+**Does it work offline?**
+RēDesign's control panel, queue, and viewer all run locally on your machine. Generating a redesign needs internet access to reach whichever AI provider APIs you've configured, since that's where the models run; there's no bundled local model. Its test suite, though, runs fully offline with no keys and no spend.
+
+**What are the system requirements?**
+To run the packaged app, just Windows (the plain exe or the tray build). To run from source on Windows, macOS, or Linux, you need Bun 1.2 or newer; the back end's only runtime dependency is Bun and Hono, so there's little else to install.
+
+**How is it different from v0 by Vercel?**
+v0 is Vercel's hosted AI app builder: you describe or upload a design and it generates and deploys an app on Vercel's own infrastructure. RēDesign instead runs on your machine, sends one screenshot to several AI models from different providers at once, and returns a gallery of independent HTML redesigns to compare side by side rather than one generated app.
+
+**How is it different from screenshot-to-code?**
+screenshot-to-code is a similar open source, self-hostable project (MIT) that turns a screenshot into HTML, React, or Vue code using OpenAI, Anthropic, Gemini, or Replicate, generating variants one at a time. RēDesign runs many models, and several variants per model, together in one parallel batch, with a queue, cost meter, and gallery viewer for comparing a whole run at once.
+
+**Is my data sent anywhere?**
+RēDesign pings LunarWerx's Studio endpoint (the same one its update check uses) with the app version, a coarse OS tag, and a random install id, so LunarWerx knows roughly how many people run it. It never sends your account, files, screenshots, or API keys, and you can disable the ping entirely with `REDESIGN_NO_PING=1`.
+
+**Where do my API keys live?**
+Your API keys live only in a `.env` file beside the app, written owner-only (`0600`) so other users on the machine can't read it. They're sent only to the provider you configured them for, never written into a saved run's output or key-health state, and stripped out of provider error text before it's stored or shown.
+
+**Can I drive it from the command line or with an AI agent?**
+Yes. Everything in the UI has a command-line twin (`bun run src/index.ts run`, `models`, `keys`, and more), so you can queue and manage runs entirely by script. There's also a built-in MCP server (`bun run src/index.ts mcp`) that lets an AI agent drive RēDesign the same way a human would from the control panel.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) © LunarWerx Studios, from 2026-10-22 on. The source is available and free for personal and other noncommercial use; commercial use needs a licence from LunarWerx ([request one](https://github.com/LunarWerxs/ReDesign/issues/new?template=licence_quote.yml)). Releases through 1.8.0 were MIT, and that grant stays in effect for those copies; see [licensing details](LICENSING.md).
+
+Made by [LunarWerx Studios](https://lunarwerx.com), who also build [RepoYeti](https://repoyeti.com), [SageThumbs](https://sagethumbs.lunarwerx.com), and [QuickDictate](https://quickdictate.lunarwerx.com). Live site: [redes1gn.github.io](https://redes1gn.github.io/).

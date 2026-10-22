@@ -1,0 +1,280 @@
+// RēDesign MCP tool table, a thin HTTP-client proxy to the RUNNING RēDesign server. Each tool
+// is a 1:1 wrapper over an endpoint that already exists in src/http/routes/*.ts (the Hono port of
+// the old server.js). The web UI, the CLI, and agents all
+// share this one source of truth: start the server first (`redesign serve`); point elsewhere with
+// REDESIGN_URL / PORT / HOST.
+//
+// The JSON-RPC 2.0 / MCP protocol + the stdio loop live in the SHARED, zero-dependency engine
+// ./mcp-stdio.mjs (part of the shared kit, edit it there, never here); ./stdio.ts wires
+// this tool table into it via a static import (the CJS version bridged with a dynamic import()).
+import type { McpEngineTool } from "../mcp-stdio.mjs";
+import { buildMcpRunBody } from "../run-options";
+
+// ── HTTP client over the running server (mirrors the CLI's serverBase in src/cli/lifecycle.ts) ──
+function base(): string {
+  if (process.env.REDESIGN_URL) return process.env.REDESIGN_URL;
+  const host = process.env.HOST && process.env.HOST !== "0.0.0.0" ? process.env.HOST : "127.0.0.1";
+  const port = process.env.PORT || 5178;
+  return `http://${host}:${port}`;
+}
+
+async function apiText(pathname: string, init?: RequestInit): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch(`${base()}${pathname}`, init);
+  } catch (e) {
+    throw new Error(
+      `couldn't reach the RēDesign server at ${base()}, start it with \`redesign serve\`. (${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+  const text = await res.text();
+  if (!res.ok) throw new Error(`RēDesign ${res.status}: ${text || res.statusText}`);
+  return text;
+}
+async function apiCall(pathname: string, init?: RequestInit): Promise<unknown> {
+  const text = await apiText(pathname, init);
+  return text ? JSON.parse(text) : {};
+}
+const get = (p: string): Promise<unknown> => apiCall(p);
+const post = (p: string, body?: unknown): Promise<unknown> =>
+  apiCall(p, {
+    method: "POST",
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+// JSON Schema helper (the engine advertises each tool's `inputSchema` verbatim in tools/list).
+const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({
+  type: "object" as const,
+  properties,
+  required,
+  additionalProperties: false,
+});
+const str = (v: unknown): string => String(v ?? "");
+
+function runSubmission(a: Record<string, unknown>, inputName: "input" | "inputs"): Record<string, unknown> {
+  if (a.preflight_id != null) {
+    const token = str(a.preflight_id).trim();
+    if (!token) throw new Error("preflight_id must be a non-empty token");
+    return { preflightId: token };
+  }
+  return buildMcpRunBody(a, inputName);
+}
+
+const runProperties = {
+  input: { type: "string", description: '"all" or comma-separated input ids (default all)' },
+  models: { type: "string", description: '"all" or comma-separated model ids (default all)' },
+  prompts: { type: "string", description: '"all" or comma-separated preset ids (default all; ignored if only custom is given)' },
+  custom: { type: "string", description: "a custom prompt to run alongside (or instead of) the presets" },
+  reference: { type: "string", description: '"all" or comma-separated reference image filenames from reference/ to feed as style guides' },
+  reference_note: { type: "string", description: "how the model should use the reference image(s)" },
+  variants: { type: "number", description: "outputs per model/prompt (default 1)" },
+  model_quantities: { type: "string", description: 'per-model output counts, "modelId=n,modelId=n"; overrides variants for the models it names' },
+  brand_style_guide: { type: "string", description: "brand/style notes appended to every prompt in this run (colors, type, tone)" },
+  mock: { type: "boolean", description: "no real API calls, placeholder HTML (pipeline test)" },
+  self_check: { type: "boolean", description: "render each output at desktop and phone width and let its model correct it once (one extra call per vision-model job)" },
+  combine_inputs: { type: "boolean", description: "the picked inputs are screenshots of ONE screen: make one redesign per model and prompt from all of them, not one per input" },
+  concurrency: { type: "number", description: "max parallel calls across the whole run" },
+  max_images: { type: "number", description: "cap reference images per input group" },
+  max_cost: { type: "number", description: "optional USD ceiling; must be finite and nonnegative" },
+  label: { type: "string", description: "tag added to the run id" },
+  preflight_id: { type: "string", description: "prepared run token from preflight_run; submit this exact recipe once, safely retry after a lost response" },
+};
+const { input: _inputProperty, ...batchRunPropertiesWithoutInput } = runProperties;
+const batchRunProperties = {
+  ...batchRunPropertiesWithoutInput,
+  inputs: { type: "string", description: '"all" or comma-separated input ids (default all)' },
+};
+
+export const TOOLS: McpEngineTool[] = [
+  {
+    name: "preflight_run",
+    description: "Validate and estimate a run without queueing it. Returns preflightId, resolved job count, and estimated cost; submit that token with run or batch_reimagine to avoid duplicate paid batches after a lost response.",
+    inputSchema: obj(batchRunProperties),
+    run: (a) => post("/api/run/preflight", buildMcpRunBody(a, "inputs")),
+  },
+  {
+    name: "snapshot",
+    description: "Full snapshot of the app: models, prompt presets, inputs, references, API key-pool health, and recent runs.",
+    inputSchema: obj(),
+    run: () => get("/api/bootstrap"),
+  },
+  {
+    name: "list_inputs",
+    description: "List discovered inputs (the screenshots / grouped screenshot sets found in ./input).",
+    inputSchema: obj(),
+    run: () => get("/api/inputs"),
+  },
+  {
+    name: "key_health",
+    description: "API key-pool health per provider (counts + cooldowns only, never the key values).",
+    inputSchema: obj(),
+    run: () => get("/api/keys"),
+  },
+  {
+    name: "list_runs",
+    description: "List recent runs (newest first) with their status and ok/error counts.",
+    inputSchema: obj(),
+    run: () => get("/api/runs"),
+  },
+  {
+    name: "get_run",
+    description: "Get one run's manifest by runId: status, per-job results, and the output directory.",
+    inputSchema: obj({ runId: { type: "string", description: "the run id, e.g. from list_runs or the run tool" } }, ["runId"]),
+    run: (a) => get(`/api/runs/${encodeURIComponent(str(a.runId))}`),
+  },
+  {
+    // Lets an agent rank a run's outputs by legibility, not only the human in the gallery.
+    name: "check_contrast",
+    description:
+      "WCAG text contrast of one generated output, judged from its rendered pixels so text over images, gradients and translucent layers counts. Returns passes, worstRatio and the failing text lines, worst first. Renders in headless Edge/Chrome.",
+    inputSchema: obj(
+      {
+        file: { type: "string", description: "the output HTML, relative to output/: a job's `file` from get_run" },
+        level: { type: "string", description: '"AA" (default) or "AAA"' },
+      },
+      ["file"],
+    ),
+    run: (a) => get(`/api/output/contrast?file=${encodeURIComponent(str(a.file))}${a.level === "AAA" ? "&level=AAA" : ""}`),
+  },
+  {
+    name: "run",
+    description:
+      'Queue a reimagine job: send input screenshot(s) through models × prompts and collect reimagined HTML. Returns { runId } immediately, poll get_run for progress. Set mock:true for a no-API-spend dry run.',
+    inputSchema: obj({
+      ...runProperties,
+    }),
+    // Build the /api/run body the same way the CLI's `run` verb builds its options
+    // (src/cli/run.ts), so an agent passes simple fields and the structured prompt/reference
+    // objects are assembled here.
+    run: (a) => post("/api/run", runSubmission(a, "input")),
+  },
+  {
+    name: "model_leaderboard",
+    description: "Per-model Elo leaderboard built from the owner's pairwise A/B votes in the viewer (best first: rating, wins, losses). Use it to pick which models to include in a run.",
+    inputSchema: obj(),
+    run: () => get("/api/arena"),
+  },
+  {
+    name: "design_md",
+    description:
+      "Get a DESIGN.md handoff for one chosen output (usually a shortlisted one): token front matter (colors, type, radii, spacing), a components map with styled states, Do's and Don'ts, and known gaps, read statically from its HTML. Use it to carry the picked redesign's look into the real app.",
+    inputSchema: obj({
+      runId: { type: "string", description: "the run id" },
+      job: { type: "string", description: "the job id of the chosen output, from get_run" },
+    }, ["runId", "job"]),
+    run: async (a) => ({
+      runId: str(a.runId),
+      job: str(a.job),
+      markdown: await apiText(`/api/runs/${encodeURIComponent(str(a.runId))}/design-md?job=${encodeURIComponent(str(a.job))}`),
+    }),
+  },
+  {
+    name: "repeat_run",
+    description: "Repeat a prior run from its durable original recipe. Returns the new run id without reconstructing selections from current UI state.",
+    inputSchema: obj({ runId: { type: "string", description: "the run to repeat" } }, ["runId"]),
+    run: (a) => post(`/api/runs/${encodeURIComponent(str(a.runId))}/repeat`, {}),
+  },
+  {
+    name: "retry_run",
+    description:
+      "Re-run only the failed, skipped or cancelled jobs of a finished run, instead of paying for the whole fan-out again. Omit jobIds to retry all of them. Returns { runIds, jobCount }; each returned run id streams and completes like any other run.",
+    inputSchema: obj(
+      {
+        runId: { type: "string", description: "the run to retry jobs from" },
+        jobIds: { type: "string", description: "optional comma-separated job ids; default is every non-successful job in the run" },
+      },
+      ["runId"],
+    ),
+    run: (a) => {
+      const ids = str(a.jobIds ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return post(`/api/runs/${encodeURIComponent(str(a.runId))}/retry`, ids.length ? { jobIds: ids } : {});
+    },
+  },
+  {
+    name: "cancel_run",
+    description: "Cancel an in-flight run by runId.",
+    inputSchema: obj({ runId: { type: "string" } }, ["runId"]),
+    run: (a) => post(`/api/runs/${encodeURIComponent(str(a.runId))}/cancel`),
+  },
+  {
+    name: "batch_reimagine",
+    description:
+      'Composite recipe: queue a reimagine batch and optionally wait for it. wait:false (default) returns { runId, note } immediately, poll get_run yourself. wait:true polls internally (up to timeout_secs, default 120, capped at 300) and returns a structured digest: { runId, status, jobs: [{ input, model, prompt, variant, status, outputFile, caption, error }], captionSummary }. Set mock:true for a no-API-spend dry run.',
+    inputSchema: obj({
+      ...batchRunProperties,
+      wait: { type: "boolean", description: "poll until the run finishes (or timeout_secs elapses) and return a digest instead of just { runId } (default false)" },
+      timeout_secs: { type: "number", description: "max seconds to poll when wait:true (default 120, capped at 300)" },
+      label: { type: "string", description: "tag added to the run id" },
+    }),
+    run: async (a) => {
+      const { runId } = (await post("/api/run", runSubmission(a, "inputs"))) as { runId: string };
+
+      if (!a.wait) return { runId, note: "queued, poll get_run with this runId for progress; the existing run is already submitted" };
+
+      const timeoutMs = Math.min(Math.max(1, Number(a.timeout_secs) || 120), 300) * 1000;
+      const deadline = Date.now() + timeoutMs;
+      const RUNNING_STATUSES = new Set(["queued", "running"]);
+      let manifest: Record<string, unknown> = {};
+      for (;;) {
+        manifest = (await get(`/api/runs/${encodeURIComponent(runId)}`)) as Record<string, unknown>;
+        if (!RUNNING_STATUSES.has(str(manifest.status)) || Date.now() >= deadline) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      return buildDigest(runId, manifest);
+    },
+  },
+];
+
+interface DigestJob {
+  input: string;
+  model: string;
+  prompt: string;
+  variant: number;
+  status: string;
+  outputFile: string | null;
+  caption: string | null;
+  error: string | null;
+}
+
+// Read a job's caption out of its .meta.json sidecar (written next to the output HTML by the
+// runner, see src/runner/reimagine.ts). Best-effort: absent/unreachable → null, never throws.
+async function captionFor(file: string | null | undefined): Promise<string | null> {
+  if (!file) return null;
+  try {
+    const metaPath = `/output-raw/${file.replace(/\.html$/, ".meta.json")}`;
+    const meta = (await get(metaPath)) as { caption?: string | null };
+    return meta?.caption ?? null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function buildDigest(runId: string, manifest: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const rawJobs = Array.isArray(manifest.jobs) ? (manifest.jobs as Record<string, unknown>[]) : [];
+  const jobs: DigestJob[] = await Promise.all(
+    rawJobs.map(async (j) => ({
+      input: str(j.inputId),
+      model: str(j.modelId),
+      prompt: str(j.promptId),
+      variant: Number(j.variant) || 1,
+      status: str(j.status),
+      outputFile: (j.file as string) || null,
+      caption: await captionFor(j.file as string | null | undefined),
+      error: (j.error as string) || null,
+    })),
+  );
+  const captioned = jobs.filter((j) => j.caption);
+  const captionSummary = captioned.length
+    ? `${captioned.length}/${jobs.length} job(s) carry a text-only-model caption (see each job's .caption).`
+    : "no text-only-model captions on this run (all models were vision-capable, or the run hasn't finished captioning yet).";
+  return {
+    runId,
+    status: str(manifest.status) || "unknown",
+    jobs,
+    captionSummary,
+  };
+}

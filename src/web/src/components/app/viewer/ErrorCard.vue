@@ -1,0 +1,115 @@
+<script setup lang="ts">
+import { EyeIcon, RotateCcwIcon, StarIcon, XIcon } from '@lucide/vue';
+import { computed } from 'vue';
+import { Button } from '@/components/ui/button';
+import { LazyTooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import type { Job } from '@/types';
+import type { ViewerHeight } from '@/stores/viewer';
+import { t } from '@/i18n';
+
+const props = defineProps<{
+  job: Job;
+  modelLabel: string;
+  modelColor: string;
+  promptLabel: string;
+  rw: number;
+  ar: number;
+  height: ViewerHeight;
+  scale: number;
+  starred: boolean;
+  itemHidden: boolean;
+  /** True while this run is still queued/running — the retry route 409s until it finishes. */
+  retryDisabled?: boolean;
+}>();
+
+defineEmits<{ (e: 'toggle-star'): void; (e: 'toggle-hidden'): void; (e: 'retry'): void }>();
+
+const previewScale = computed(() => Math.max(0.1, props.scale || 1));
+const frameAspect = computed(() =>
+  typeof props.height === 'number' && props.rw
+    ? props.rw / (props.height * previewScale.value)
+    : props.ar / previewScale.value,
+);
+// A 'skipped' job (no API keys configured, all keys cooling down) is not a failure — it never
+// ran — so it gets a muted label and styling instead of the destructive red used for a real error.
+const skipped = computed(() => props.job.status === 'skipped');
+</script>
+
+<template>
+  <div
+    class="flex flex-col overflow-hidden rounded-lg border bg-card transition-opacity"
+    :class="itemHidden ? 'opacity-50 grayscale' : ''"
+  >
+    <div class="flex min-w-0 items-center gap-2.5 border-b px-3 py-2.5">
+      <span class="size-2.5 shrink-0 rounded-full bg-model-dot" :style="{ '--model-color': modelColor }" />
+      <span class="min-w-0 truncate text-ui font-bold">{{ modelLabel }}</span>
+      <span class="min-w-0 truncate text-xs text-muted-foreground">{{ promptLabel }}</span>
+      <span class="flex-1" />
+      <div class="flex shrink-0 items-center gap-0.5">
+        <LazyTooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :disabled="retryDisabled"
+              :aria-label="t('viewer.retryItem')"
+              @click.stop="$emit('retry')"
+            >
+              <RotateCcwIcon class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ retryDisabled ? t('viewer.retryItemWaitTitle') : t('viewer.retryItemTitle') }}</TooltipContent>
+        </LazyTooltip>
+        <LazyTooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="starred ? t('viewer.unstarItem') : t('viewer.starItem')"
+              :aria-pressed="starred"
+              @click.stop="$emit('toggle-star')"
+            >
+              <StarIcon class="size-3.5" :class="starred ? 'fill-current text-warning' : 'text-muted-foreground'" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ starred ? t('viewer.unstarItem') : t('viewer.starItem') }}</TooltipContent>
+        </LazyTooltip>
+        <LazyTooltip>
+          <TooltipTrigger as-child>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              :aria-label="itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem')"
+              :aria-pressed="itemHidden"
+              @click.stop="$emit('toggle-hidden')"
+            >
+              <EyeIcon v-if="itemHidden" class="size-3.5 text-muted-foreground" />
+              <XIcon v-else class="size-3.5 text-muted-foreground" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{{ itemHidden ? t('viewer.restoreItem') : t('viewer.hideItem') }}</TooltipContent>
+        </LazyTooltip>
+      </div>
+    </div>
+    <div
+      class="grid aspect-(--frame-aspect) place-items-center p-3.5 text-center"
+      :class="skipped ? 'bg-muted/40 text-muted-foreground' : 'bg-destructive/10 text-destructive'"
+      :style="{ '--frame-aspect': String(frameAspect) }"
+    >
+      <div>
+        <div>{{ skipped ? t('viewer.skipped') : t('viewer.failed') }}</div>
+        <LazyTooltip v-if="job.error">
+          <TooltipTrigger as-child>
+            <!-- 140 chars is a preview only — the backend keeps up to 300, and the tooltip
+                 below is what makes the rest of it reachable rather than silently truncated. -->
+            <div class="mt-1.5 line-clamp-3 text-xs text-muted-foreground">{{ job.error.slice(0, 140) }}</div>
+          </TooltipTrigger>
+          <TooltipContent class="max-w-xs whitespace-pre-wrap">{{ job.error }}</TooltipContent>
+        </LazyTooltip>
+      </div>
+    </div>
+  </div>
+</template>

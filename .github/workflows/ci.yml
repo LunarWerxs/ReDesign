@@ -1,0 +1,95 @@
+name: CI
+
+# rust-ci-speed: ci not applied: misc/tray-host-native is the LunarWerx kit's tray host, synced from
+# lunarwerx-ui, which builds and tests it (.github/workflows/tray-host.yml); this copy is not built here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+  # Manual runs, so a commit can be verified without a dummy push. Added 2026-08-06 during a
+  # GitHub Actions incident whose recovery plan was to throttle webhook triggers: pushes landed on
+  # main and produced no run at all, leaving nothing to gate a release on.
+  workflow_dispatch:
+
+  # Release calls this workflow at its tag SHA. Keeping checks here prevents release validation
+  # drifting from the ordinary PR/main contract.
+  workflow_call:
+
+# A fixed `ci-` prefix, never ${{ github.workflow }}: under workflow_call that expression is the
+# CALLER's name, so Release's `checks` job claimed Release's own group and GitHub failed v1.7.0 as a
+# concurrency deadlock before any build ran.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  daemon:
+    timeout-minutes: 30
+    name: daemon (test + typecheck)
+    # The shipped artifact is a per-OS `bun --compile` binary, so run the suite on all three.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.3" # pin so a Bun upgrade can't silently change the build
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      # Biome. Configured since the repo started but never gated on until 2026-08-09, so a lint
+      # regression could land on main unnoticed. Linux only: the rules are platform-independent and
+      # running it three times just to see the same output is wasted matrix minutes.
+      - if: runner.os == 'Linux'
+        run: bun run lint
+      # Repo guardrail (ported from AgentHydra's architect): fails if a test OR a lifecycle hook
+      # reaches a subprocess while inheriting bun's 5s default timeout. Such a case measures the
+      # runner, not its own assertions, and a cold windows-latest box runs this class ~10x slower
+      # than a dev machine. This repo lost its Windows leg to exactly that on 2026-08-12: the
+      # tray-launcher beforeAll regenerates a .lnk through PowerShell + COM, 0.35s locally, 5057ms
+      # there. Linux only: the rule reads source, so running it three times says the same thing.
+      - if: runner.os == 'Linux'
+        run: bun run check:spawntimeout
+      # src/web carries both a bun.lock and an npm package-lock.json, and the web job's `npm ci`
+      # refuses a tree where they disagree. Checking it here names the drift directly instead of
+      # leaving it to surface as an install failure. Linux only: it reads two files, no registry.
+      - if: runner.os == 'Linux'
+        run: bun run check:weblock
+      - run: bun test tests
+        env:
+          MOCK: "1" # keep the suite fully offline, no provider API keys/quota spent in CI
+
+  web:
+    timeout-minutes: 60
+    name: web (i18n + typecheck + test + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: src/web/package-lock.json
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.3"
+      - run: npm ci
+      # The root's check:web, the same lanes a local `bun run check` runs: vue-tsc over src/ and the
+      # test/ specs (`build` does NOT type-check - vite strips types without checking them), the
+      # i18n key check, and Vitest (pure-lib units + component render, no backend needed). It
+      # delegates into src/web with `--cwd`, so the `npm ci` tree above is the one it runs.
+      - run: bun run check:web
+        working-directory: .
+      - run: npm run build # vite bundle (build script runs check:i18n first)

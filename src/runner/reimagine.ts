@@ -1,0 +1,623 @@
+// The main batch orchestrator: resolves inputs/models/prompts, builds the
+// manifest, captions inputs/references for text-only models, runs every job
+// through the pool scheduler, and persists progress/results as it goes.
+
+import fs from "node:fs";
+import path from "node:path";
+import { ensureDir, type SelectionInput } from "../util";
+import type { KeyManager } from "../keyManager";
+import { loadImages, loadReferenceImages, sourceInputIds, type InputItem, type LoadedImage } from "../inputResolver";
+import { getAdapter } from "../providers";
+import { withProviderRun } from "../provider-call";
+import { recordProviderUsage } from "./cost";
+import { prepareRunSpec, readRunSpec, type RunSpec } from "./run-spec";
+import * as store from "../store";
+import {
+  getKeyManager,
+  withKeyRotation,
+  cfgInt,
+  DESCRIBE_PROMPT,
+  DESCRIBE_REF_PROMPT,
+  SHORT_LABEL_PROMPT,
+  cleanRunTitle,
+  codename,
+} from "./helpers";
+import { buildPoolLimits, runJobsByPool, type Job } from "./scheduling";
+import { runOneJob, type JobWorkerContext } from "./job-worker";
+import type { Model } from "../config/models";
+import { ASSET_DETECT_PROMPT, assetCropsEnabled, loadSavedCrops, parseDetectedAssets, saveAssetCrops, type CroppedAsset } from "./asset-crop";
+
+interface ReferenceOptions {
+  enabled?: boolean;
+  images?: unknown;
+  rels?: unknown;
+  ids?: unknown;
+  note?: string;
+}
+
+interface RunReimagineOptions {
+  keyManager?: KeyManager;
+  mock?: boolean;
+  variants?: number | string;
+  modelQuantities?: Record<string, number | string>; // per-model copy count (overrides `variants` for that model)
+  maxImagesPerInput?: number | string;
+  concurrency?: number | string;
+  poolConcurrency?: number | string;
+  timeoutMs?: number;
+  onProgress?: (event: Record<string, unknown>) => void;
+  signal?: AbortSignal | null;
+  inputs?: SelectionInput;
+  models?: SelectionInput;
+  prompts?: { presets?: unknown; custom?: string };
+  reference?: ReferenceOptions | null;
+  brandStyleGuide?: string | null;
+  runId?: string;
+  label?: string;
+  maxCostUsd?: number;
+  /** Render each output at desktop and phone widths and let its model correct it once. */
+  selfCheck?: boolean;
+  /** The ticked inputs are screenshots of one screen: make one redesign from all of them. */
+  combineInputs?: boolean;
+  /** Internal only: already resolved and persisted by queue admission. */
+  preparedSpec?: RunSpec;
+  ownership?: store.RunOwnershipClaim;
+}
+
+interface RunSummaryInfo {
+  title: string;
+  inputId: string;
+  source: string;
+  by?: string;
+}
+
+/**
+ * Copy the run's first input screenshot into the run's own directory as `thumb.<ext>`, and
+ * return that run-dir-relative name for the manifest.
+ *
+ * input/ is a scratch folder that gets emptied routinely, so a run summary that pointed the
+ * viewer's gallery at the ORIGINAL input path showed a broken image for nearly every past run
+ * (31 runs, 1 surviving input, when this was added on 2026-07-21). A per-run copy is a few
+ * dozen KB and outlives the source. Best-effort: any failure just leaves the run without a
+ * thumbnail, and the gallery falls back to the input path, then to a placeholder.
+ */
+function persistRunThumbnail(runId: string, inputItems: InputItem[]): string | null {
+  const rel = inputItems[0]?.preview;
+  if (!rel) return null;
+  const src = path.join(store.runDir(runId), rel.split("/").join(path.sep));
+  const name = `thumb${(path.extname(src) || ".png").toLowerCase()}`;
+  try {
+    const dir = store.runDir(runId);
+    ensureDir(dir);
+    fs.copyFileSync(src, path.join(dir, name));
+    return name;
+  } catch (_) {
+    return null;
+  }
+}
+
+// --- Run summary (title) resolution --------------------------------------------
+
+function buildFallbackRunSummary(mock: boolean, opts: RunReimagineOptions, input: InputItem, runId: string): RunSummaryInfo {
+  if (mock && !opts.label) return { title: codename(runId), inputId: input.id, source: "mock" };
+  const fallback = cleanRunTitle(opts.label || input.name || input.id) || input.id;
+  return { title: fallback, inputId: input.id, source: opts.label ? "label" : "input" };
+}
+
+interface RunSummaryDescribeCtx {
+  opts: RunReimagineOptions;
+  mock: boolean;
+  visionHelper: Model | null;
+  km: KeyManager;
+  timeoutMs: number;
+  signal: AbortSignal | null;
+  imagesFor: (input: InputItem) => LoadedImage[];
+}
+
+async function describeRunSummary(base: RunSummaryInfo, input: InputItem, ctx: RunSummaryDescribeCtx): Promise<RunSummaryInfo> {
+  if (ctx.opts.label) return { ...base, source: "label" };
+  if (ctx.mock) return base;
+  if (!ctx.visionHelper) return { ...base, source: "input" };
+  const helper = ctx.visionHelper;
+  const r = await withKeyRotation(
+    ctx.km,
+    helper.keyEnv,
+    ({ apiKey }) =>
+      getAdapter(helper, { mock: false }).call({
+        model: { ...helper, maxTokens: 48 },
+        apiKey,
+        systemContract: "You write concise UI inventory labels. Output only the label.",
+        userPrompt: SHORT_LABEL_PROMPT,
+        images: ctx.imagesFor(input),
+        timeoutMs: ctx.timeoutMs,
+        signal: ctx.signal,
+        promptLabel: "run-label",
+        inputName: input.name,
+      }),
+    { signal: ctx.signal },
+  );
+  const title = r ? cleanRunTitle(r.text) : "";
+  return title ? { title, source: "ai", inputId: input.id, by: helper.id } : { ...base, source: "input" };
+}
+
+// --- Captioning (grounding) ------------------------------------------------------
+
+interface CaptionCtx {
+  mock: boolean;
+  describer: Model | null;
+  km: KeyManager;
+  timeoutMs: number;
+  signal: AbortSignal | null;
+  imagesFor: (input: InputItem) => LoadedImage[];
+}
+
+async function captionInput(input: InputItem, ctx: CaptionCtx): Promise<string | null> {
+  if (ctx.mock) return `[mock caption of ${input.name}]`;
+  if (!ctx.describer) return null;
+  const helper = ctx.describer;
+  // Rotates through the helper's keys: a dead key here used to silently cost the
+  // job its caption (text-only models then ran blind, grounded jobs ungrounded).
+  const r = await withKeyRotation(
+    ctx.km,
+    helper.keyEnv,
+    ({ apiKey }) =>
+      getAdapter(helper, { mock: false }).call({
+        model: { ...helper, maxTokens: 1500 },
+        apiKey,
+        systemContract: "You are a meticulous UI analyst. Output a thorough plain-text description only.",
+        userPrompt: DESCRIBE_PROMPT,
+        images: ctx.imagesFor(input),
+        timeoutMs: ctx.timeoutMs,
+        signal: ctx.signal,
+        promptLabel: "caption",
+        inputName: input.name,
+      }),
+    { signal: ctx.signal },
+  );
+  return r ? r.text : null; // null → the job notes it ran without a caption
+}
+
+async function captionReference(referenceImages: LoadedImage[], ctx: CaptionCtx): Promise<string | null> {
+  if (!referenceImages.length) return null;
+  if (ctx.mock) return `[mock style caption of ${referenceImages.length} reference image(s)]`;
+  if (!ctx.describer) return null;
+  const helper = ctx.describer;
+  const r = await withKeyRotation(
+    ctx.km,
+    helper.keyEnv,
+    ({ apiKey }) =>
+      getAdapter(helper, { mock: false }).call({
+        model: { ...helper, maxTokens: 1200 },
+        apiKey,
+        systemContract: "You are a meticulous design analyst. Output a thorough plain-text description of visual style only.",
+        userPrompt: DESCRIBE_REF_PROMPT,
+        images: referenceImages,
+        timeoutMs: ctx.timeoutMs,
+        signal: ctx.signal,
+        promptLabel: "ref-caption",
+        inputName: "reference",
+      }),
+    { signal: ctx.signal },
+  );
+  return r ? r.text : null;
+}
+
+// --- Real asset crops -------------------------------------------------------------
+
+// One detection call per input finds its logos and photos, and they are cropped into the run's
+// assets so every model can embed the real ones (see runner/asset-crop.ts). Best-effort: no
+// helper, a failed call or an unusable reply just means the jobs run without crops. The whole
+// body is guarded: this promise is warmed before any job attaches a handler, so it never rejects.
+async function cropInputAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
+  try {
+    return await detectAndCropAssets(input, ctx, runId);
+  } catch (err) {
+    console.warn(`[run ${runId}] asset crops for ${input.name} failed:`, err instanceof Error ? err.message : err);
+    return [];
+  }
+}
+
+async function detectAndCropAssets(input: InputItem, ctx: CaptionCtx, runId: string): Promise<CroppedAsset[]> {
+  if (ctx.mock || !ctx.describer || !assetCropsEnabled()) return [];
+  // A retry keeps the crops its run already made, so finished outputs keep their images.
+  const saved = loadSavedCrops(store.runDir(runId), input.id);
+  if (saved) return saved;
+  const images = ctx.imagesFor(input);
+  if (!images.length) return [];
+  const helper = ctx.describer;
+  const r = await withKeyRotation(
+    ctx.km,
+    helper.keyEnv,
+    ({ apiKey }) =>
+      getAdapter(helper, { mock: false }).call({
+        model: { ...helper, maxTokens: 1500 },
+        apiKey,
+        systemContract: "You locate brand and content imagery in UI screenshots. Output JSON only.",
+        userPrompt: ASSET_DETECT_PROMPT,
+        images,
+        timeoutMs: ctx.timeoutMs,
+        signal: ctx.signal,
+        promptLabel: "asset-crop",
+        inputName: input.name,
+      }),
+    { signal: ctx.signal },
+  );
+  if (!r) return [];
+  return saveAssetCrops(store.runDir(runId), input.id, images, parseDetectedAssets(r.text, images.length));
+}
+
+// --- Option / selection resolution --------------------------------------------
+
+function resolveRunOptions(opts: RunReimagineOptions) {
+  const km = opts.keyManager || getKeyManager();
+  const mock = !!opts.mock;
+  const variants = Math.max(1, Math.min(parseInt(String(opts.variants), 10) || 1, 10));
+  // Per-model copy count (the web's per-model "quantity" control). Each entry
+  // overrides the flat `variants` default for that one model; clamped 1..10.
+  const variantsByModel: Record<string, number> = {};
+  if (opts.modelQuantities && typeof opts.modelQuantities === "object") {
+    for (const [id, q] of Object.entries(opts.modelQuantities)) {
+      variantsByModel[id] = Math.max(1, Math.min(parseInt(String(q), 10) || 1, 10));
+    }
+  }
+  // OPTIONAL image cap. Absent = uncapped, every input/reference image the caller selected is
+  // sent (see inputResolver capImageRels). Only the CLI's --max-images and the MCP tool's
+  // max_images still set one; the web UI's stepper was removed 2026-07-21 because a silent
+  // default quietly dropped images the user had ticked.
+  const reqImages = parseInt(String(opts.maxImagesPerInput ?? ""), 10);
+  const maxImagesPerInput = Number.isFinite(reqImages) && reqImages > 0 ? reqImages : undefined;
+  const concurrency = Math.max(1, parseInt(String(opts.concurrency), 10) || cfgInt("MAX_CONCURRENCY", 12));
+  const poolConcurrency = Math.max(1, parseInt(String(opts.poolConcurrency), 10) || cfgInt("MAX_POOL_CONCURRENCY", 4));
+  const timeoutMs = opts.timeoutMs || cfgInt("REQUEST_TIMEOUT_MS", 120000);
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : () => {};
+  const signal = opts.signal || null;
+  return { km, mock, variants, variantsByModel, maxImagesPerInput, concurrency, poolConcurrency, timeoutMs, onProgress, signal };
+}
+
+function selectionsFromSpec(spec: RunSpec, runId: string) {
+  return {
+    inputItems: spec.inputs, models: spec.models, prompts: spec.prompts,
+    systemContract: spec.systemContract, referenceRels: spec.referenceRels,
+    referenceNote: spec.referenceNote,
+    referenceImages: loadReferenceImages(spec.referenceRels, { refDir: store.runDir(runId) }),
+  };
+}
+
+// --- Manifest construction -----------------------------------------------------
+
+function buildRunManifest(
+  runId: string,
+  summary: RunSummaryInfo,
+  jobs: Job[],
+  thumb: string | null,
+  ro: ReturnType<typeof resolveRunOptions>,
+  rs: ReturnType<typeof selectionsFromSpec>,
+  poolLimits: ReturnType<typeof buildPoolLimits>,
+  brandStyleGuide: string,
+): store.Manifest {
+  return {
+    runId,
+    createdAt: new Date().toISOString(),
+    finishedAt: null,
+    status: "running",
+    mock: ro.mock,
+    summary,
+    config: {
+      inputIds: sourceInputIds(rs.inputItems),
+      modelIds: rs.models.map((m) => m.id),
+      promptIds: rs.prompts.map((p) => p.id),
+      variants: ro.variants,
+      ...(Object.keys(ro.variantsByModel).length ? { variantsByModel: ro.variantsByModel } : {}),
+      concurrency: ro.concurrency,
+      poolConcurrency: ro.poolConcurrency,
+      poolLimits: Object.fromEntries(poolLimits),
+      maxImagesPerInput: ro.maxImagesPerInput,
+      reference: rs.referenceImages.length
+        ? { images: rs.referenceRels, count: rs.referenceImages.length, note: rs.referenceNote || null }
+        : null,
+      // Recorded so a run is fully reproducible from its own manifest: "Run again" and the
+      // failed-job retry (http/routes/runs.ts) rebuild their submission out of config alone, and
+      // without this the retried jobs would quietly drop the brand guide the originals were given.
+      ...(brandStyleGuide ? { brandStyleGuide } : {}),
+      // Always true now. Kept on the manifest so a run stays self-describing and so runs
+      // recorded before 2026-07-28 (which carry `false`, or nothing at all) are still
+      // distinguishable from current ones when comparing old output against new.
+      grounded: true,
+    },
+    ...(thumb ? { thumb } : {}),
+    inputs: rs.inputItems.map((i) => ({ id: i.id, name: i.name, type: i.type, imageCount: i.imageCount, preview: i.preview, images: i.images })),
+    prompts: rs.prompts.map((p) => ({ id: p.id, label: p.label, source: p.source, user: p.user })),
+    models: rs.models.map((m) => ({ id: m.id, label: m.label, provider: m.provider, vision: m.vision, color: m.color })),
+    counts: { total: jobs.length, done: 0, ok: 0, error: 0, skipped: 0 },
+    // Running spend total for this run, updated as each job's usage lands. Additive
+    // field, see src/runner/cost.ts for the per-job math (costForUsage/runCost).
+    cost: { totalCost: 0, currency: "USD", jobCount: 0, anyEstimatePricing: false, anyUnpriced: false },
+    providerCalls: [],
+    jobs,
+  };
+}
+
+// --- Post-schedule cleanup ------------------------------------------------------
+
+// Any job the pool scheduler threw for (rather than resolving through its own ok/error
+// path) never got its own status/finishedAt written; mark it as a failure so the
+// manifest's counts and job list stay complete. Returns whether it touched anything,
+// so the caller knows to mark the manifest dirty.
+function applyScheduledResults<R extends { ok: boolean; job?: Job; error?: unknown }>(
+  scheduledResults: R[],
+  manifest: store.Manifest,
+  onProgress: (event: Record<string, unknown>) => void,
+): boolean {
+  let dirty = false;
+  for (const r of scheduledResults) {
+    if (r.ok || !r.job || r.job.finishedAt) continue;
+    r.job.status = "error";
+    r.job.error = ((r.error as Error)?.message ? (r.error as Error).message : String(r.error || "failed")).slice(0, 300);
+    r.job.ms = 0;
+    r.job.finishedAt = new Date().toISOString();
+    (manifest.counts as store.Counts).done++;
+    (manifest.counts as store.Counts).error++;
+    dirty = true;
+    onProgress({ type: "job", runId: manifest.runId, job: r.job });
+  }
+  return dirty;
+}
+
+/**
+ * Run a full reimagine batch. Returns the final manifest. Progress is streamed
+ * via opts.onProgress(event) where event.type is start|job|done.
+ */
+async function runReimagine(opts: RunReimagineOptions = {}): Promise<store.Manifest> {
+  const runId = opts.runId || store.newRunId(opts.label);
+  const ownership = opts.ownership || store.claimRunOwnership(runId);
+  try {
+    const spec = opts.preparedSpec ? readRunSpec(store.runDir(runId)) : await prepareRunSpec(opts, store.runDir(runId));
+    if (!spec || (opts.preparedSpec && JSON.stringify(spec) !== JSON.stringify(opts.preparedSpec))) throw new Error("Saved run specification or assets changed after preparation.");
+    return await executeRunSpec(opts, runId, spec);
+  } catch (error) {
+    const manifest = store.readManifest(runId);
+    if (manifest?.status === "running") {
+      manifest.status = "error";
+      manifest.finishedAt = new Date().toISOString();
+      manifest.error = error instanceof Error ? error.message : String(error);
+      store.writeManifest(runId, manifest);
+    }
+    throw error;
+  } finally {
+    ownership.release();
+  }
+}
+
+/**
+ * Everything `runSpecBatch` needs, assembled once by `executeRunSpec`. The memoizing closures
+ * (imagesFor/describeInput/describeReference) are passed through by reference so each stays a
+ * single shared cache for the whole run.
+ */
+interface RunExecState {
+  opts: RunReimagineOptions;
+  spec: RunSpec;
+  runId: string;
+  manifest: store.Manifest;
+  mock: boolean;
+  signal: AbortSignal | null;
+  timeoutMs: number;
+  km: KeyManager;
+  systemContract: string;
+  brandStyleGuide: string;
+  referenceNote: string;
+  visionHelper: Model | null;
+  referenceImages: LoadedImage[];
+  referenceRels: string[];
+  summary: RunSummaryInfo;
+  inputItems: InputItem[];
+  models: Model[];
+  jobs: Job[];
+  poolLimits: ReturnType<typeof buildPoolLimits>;
+  concurrency: number;
+  poolConcurrency: number;
+  modelById: Map<string, Model>;
+  promptById: Map<string, RunSpec["prompts"][number]>;
+  inputById: Map<string, InputItem>;
+  imagesFor: (input: InputItem) => LoadedImage[];
+  describeInput: (input: InputItem) => Promise<string | null>;
+  describeReference: () => Promise<string | null>;
+  cropAssets: (input: InputItem) => Promise<CroppedAsset[]>;
+  onProgress: (event: Record<string, unknown>) => void;
+  markManifestDirty: () => void;
+  flushTimer: ReturnType<typeof setInterval>;
+  selfCheck: boolean;
+}
+
+/** Admit no further paid calls once the run's own spend ceiling is reached or unboundable. */
+function assertSpendCeiling(manifest: store.Manifest, spec: RunSpec, mock: boolean): void {
+  const limit = spec.settings.maxCostUsd;
+  if (limit == null || mock) return;
+  if ((manifest.cost?.totalCost ?? 0) >= limit) throw new Error(`Run spend ceiling ($${limit}) reached; no further calls admitted.`);
+  if (manifest.cost?.anyUnpriced || manifest.cost?.anyPartialUsage || manifest.cost?.anyCacheAccountingPartial) throw new Error("Run spend cannot be bounded because a provider returned unpriced or incomplete usage; no further calls admitted.");
+}
+
+/** The job phase: enrich the summary, schedule every job, then finalize and persist the manifest. */
+async function runSpecBatch(state: RunExecState): Promise<store.Manifest> {
+  const { opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide, referenceNote, visionHelper, referenceImages, referenceRels, summary, inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById, inputById, imagesFor, describeInput, describeReference, cropAssets, onProgress, markManifestDirty, flushTimer, selfCheck } = state;
+  const describeCtx: RunSummaryDescribeCtx = { opts: { ...opts, label: spec.label }, mock, visionHelper, km, timeoutMs, signal, imagesFor };
+  const summaryPromise = describeRunSummary(summary, inputItems[0] as InputItem, describeCtx)
+    .then((next) => {
+      if (!next || (next.title === (manifest.summary as RunSummaryInfo).title && next.source === (manifest.summary as RunSummaryInfo).source)) return;
+      manifest.summary = next;
+      markManifestDirty();
+      store.writeManifest(runId, manifest);
+      onProgress({ type: "snapshot", runId, manifest });
+    })
+    // Best-effort title/source enrichment, the run already has its default summary;
+    // a failure here just means it keeps that default, so nothing needs to surface.
+    .catch(() => {});
+
+  // Pre-warm captions so the first jobs don't stall on them. Every job is grounded now, so
+  // every input needs one, and firing all of them at once would put one concurrent vision
+  // request per input against a single helper pool — a burst the job scheduler itself would
+  // never allow (it caps each pool at poolConcurrency). Warm the same number the scheduler
+  // would run, then let the rest be pulled in lazily: describeInput caches its promise, so a
+  // job that arrives before its input is warmed simply starts the call itself and every
+  // later job for that input shares it.
+  // Asset crops warm alongside, on the same helper pool and the same cap.
+  for (const input of inputItems.slice(0, poolConcurrency)) {
+    describeInput(input);
+    cropAssets(input);
+  }
+  const anyTextOnly = models.some((m) => m.vision === false);
+  if (anyTextOnly && referenceImages.length) describeReference();
+
+  // Everything the per-job worker used to close over, assembled once. See runner/job-worker.ts:
+  // the worker body moved there unchanged, so these field names are the originals.
+  const jobContext: JobWorkerContext = {
+    runId,
+    manifest,
+    mock,
+    signal,
+    timeoutMs,
+    systemContract,
+    brandStyleGuide,
+    km,
+    modelById,
+    promptById,
+    inputById,
+    imagesFor,
+    describeInput,
+    describeReference,
+    cropAssets,
+    describer: visionHelper,
+    referenceImages,
+    referenceRels,
+    referenceNote,
+    onProgress,
+    markManifestDirty,
+    selfCheck,
+  };
+
+  const scheduledResults = await runJobsByPool<Job>(jobs, {
+    totalConcurrency: concurrency,
+    poolLimits,
+    keyFor: (job) => (modelById.get(job.modelId) || ({} as Model)).keyEnv || "default",
+    worker: (job) => runOneJob(job, jobContext),
+  });
+  if (applyScheduledResults(scheduledResults, manifest, onProgress)) markManifestDirty();
+
+  await summaryPromise;
+  clearInterval(flushTimer);
+  manifest.status = signal?.aborted ? "cancelled" : "done";
+  manifest.finishedAt = new Date().toISOString();
+  store.writeManifest(runId, manifest);
+  km.save();
+  onProgress({ type: "done", runId, manifest });
+  return manifest;
+}
+
+async function executeRunSpec(opts: RunReimagineOptions, runId: string, spec: RunSpec): Promise<store.Manifest> {
+  const ro = resolveRunOptions({ ...opts, ...spec.settings, modelQuantities: spec.settings.variantsByModel });
+  const { km, mock, concurrency, poolConcurrency, timeoutMs, onProgress, signal } = ro;
+  const rs = selectionsFromSpec(spec, runId);
+  const { inputItems, models, systemContract, referenceRels, referenceImages, prompts } = rs;
+  const brandStyleGuide = spec.brandStyleGuide;
+
+  // Register key pools for the models we will use.
+  for (const m of models) km.registerPool(m.keyEnv);
+
+  // Cache base64 images per input so we read each file once, not per job.
+  const imageCache = new Map<string, LoadedImage[]>();
+  function imagesFor(input: InputItem): LoadedImage[] {
+    if (!imageCache.has(input.id)) imageCache.set(input.id, loadImages(input, { inputDir: store.runDir(runId) }));
+    return imageCache.get(input.id) as LoadedImage[];
+  }
+
+  const visionHelper = spec.visionHelper;
+  if (visionHelper) km.registerPool(visionHelper.keyEnv);
+
+  const jobs = structuredClone(spec.jobs);
+  const thumb = persistRunThumbnail(runId, inputItems);
+  const summary = buildFallbackRunSummary(mock, { ...opts, label: spec.label }, inputItems[0] as InputItem, runId);
+  const poolLimits = buildPoolLimits(models, km, poolConcurrency);
+
+  const manifest = buildRunManifest(runId, summary, jobs, thumb, ro, rs, poolLimits, brandStyleGuide);
+  manifest.specVersion = spec.version;
+  manifest.config = { ...manifest.config, timeoutMs, maxCostUsd: spec.settings.maxCostUsd, ...(spec.settings.selfCheck ? { selfCheck: true } : {}), ...(spec.settings.combineInputs ? { combineInputs: true } : {}) };
+  store.writeManifest(runId, manifest);
+  onProgress({ type: "start", runId, total: jobs.length, manifest });
+  const inputById = new Map(inputItems.map((i) => [i.id, i]));
+  const modelById = new Map(models.map((m) => [m.id, m]));
+  const promptById = new Map(prompts.map((p) => [p.id, p]));
+
+  // Caption an input once (shared across all text-only jobs for that input).
+  // Caches the PROMISE so concurrent jobs don't trigger duplicate caption calls.
+  const captionCtx: CaptionCtx = { mock, describer: visionHelper, km, timeoutMs, signal, imagesFor };
+  const descCache = new Map<string, Promise<string | null>>();
+  function describeInput(input: InputItem): Promise<string | null> {
+    const cached = descCache.get(input.id);
+    if (cached) return cached;
+    const p = captionInput(input, captionCtx);
+    descCache.set(input.id, p);
+    return p;
+  }
+
+  // Caption the style reference once (shared across all text-only jobs). Caches
+  // the PROMISE so concurrent jobs don't trigger duplicate caption calls.
+  let refCaptionPromise: Promise<string | null> | null = null;
+  function describeReference(): Promise<string | null> {
+    if (refCaptionPromise) return refCaptionPromise;
+    refCaptionPromise = captionReference(referenceImages, captionCtx);
+    return refCaptionPromise;
+  }
+
+  // Crop an input's real logos and photos once (shared across every job for that input).
+  // Caches the PROMISE so concurrent jobs don't trigger duplicate detection calls.
+  const cropCache = new Map<string, Promise<CroppedAsset[]>>();
+  function cropAssets(input: InputItem): Promise<CroppedAsset[]> {
+    const cached = cropCache.get(input.id);
+    if (cached) return cached;
+    const p = cropInputAssets(input, captionCtx, runId);
+    cropCache.set(input.id, p);
+    return p;
+  }
+
+  // Debounced manifest persistence as jobs complete.
+  let manifestDirty = false;
+  // A throw in here would be raised inside a setInterval callback, and src/index.ts installs no
+  // uncaughtException handler, so a transient ENOSPC / EPERM / AV file lock would take the whole
+  // daemon down and every other active and queued run with it. Swallow it and leave manifestDirty
+  // set so the next tick retries; the run's own final write is what has to succeed.
+  const flushManifest = () => {
+    if (!manifestDirty) return;
+    try {
+      store.writeManifest(runId, manifest);
+      manifestDirty = false;
+    } catch (err) {
+      console.warn(`[run ${runId}] manifest flush failed, will retry:`, err instanceof Error ? err.message : err);
+    }
+  };
+  const flushTimer = setInterval(flushManifest, 750);
+  if (flushTimer.unref) flushTimer.unref();
+
+  const markManifestDirty = () => {
+    manifestDirty = true;
+  };
+
+  const state: RunExecState = {
+    opts, spec, runId, manifest, mock, signal, timeoutMs, km, systemContract, brandStyleGuide,
+    referenceNote: rs.referenceNote, visionHelper, referenceImages, referenceRels, summary,
+    inputItems, models, jobs, poolLimits, concurrency, poolConcurrency, modelById, promptById,
+    inputById, imagesFor, describeInput, describeReference, cropAssets, onProgress, markManifestDirty, flushTimer,
+    selfCheck: spec.settings.selfCheck === true,
+  };
+
+  try {
+    return await withProviderRun({
+      concurrency, poolConcurrency,
+      beforeCall: () => assertSpendCeiling(manifest, spec, mock),
+      recordUsage: (entry) => { recordProviderUsage(manifest, entry); markManifestDirty(); },
+    }, () => runSpecBatch(state));
+  } finally {
+    clearInterval(flushTimer);
+    flushManifest();
+  }
+}
+
+export { runReimagine };
+export type { RunReimagineOptions, ReferenceOptions, RunSummaryInfo };

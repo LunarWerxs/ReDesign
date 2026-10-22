@@ -1,0 +1,53 @@
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import 'vue-sonner/style.css';
+import './assets/index.css';
+import App from './App.vue';
+import router from './router';
+import { i18n } from './i18n';
+import { startSignInNudgeSession } from './lib/sign-in-nudge';
+// Registers the <connections-apps> custom element (Connections app switcher, rendered in
+// AppTopbar's actions). Side-effect import, once, at the app entry.
+import '@cnct/connect/apps';
+import { installImeCompositionGuard } from './lib/ime-composition-guard';
+
+// Keep input-method (IME) composition keystrokes away from every @keydown.enter handler: on
+// Safari and Chrome-on-macOS the Enter that commits a CJK candidate otherwise submits half-typed
+// text. One document-level guard (kit-synced) instead of a check at ~every Enter handler.
+installImeCompositionGuard();
+
+// Recover from stale-chunk errors. When the daemon ships a new build, its hashed chunk names
+// change; a tab still running the old build then lazy-imports a chunk that no longer exists on
+// disk and the import rejects (Vite fires `vite:preloadError`; the server already returns a real
+// 404 for missing /assets/ files, see src/server/fileServing.js serveFile). Reload once to pull
+// the fresh build instead of showing a dead view. A short timestamp guard prevents a reload loop
+// if the new build is genuinely broken (chunk truly missing). Mirrors RepoYeti/DevWebUI.
+// arkitect-allow: side-effect-teardown - app-lifetime singleton: this is the boot entry (there is no component to unmount) and the handler must stay armed for as long as the page lives, since a stale chunk can be imported at any moment.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'reimagine:last-chunk-reload';
+  const now = Date.now();
+  if (now - Number(sessionStorage.getItem(KEY) ?? 0) < 10_000) {
+    console.error('[reimagine] chunk failed to load again right after a reload', event);
+    return;
+  }
+  sessionStorage.setItem(KEY, String(now));
+  event.preventDefault();
+  window.location.reload();
+});
+
+// Start every page load at the top. The browser's own scroll restoration re-applies the offset
+// this URL had last time BEFORE the app has rendered anything, and the viewer's iframe cards
+// grow long after that, so the restored offset ends up pointing mid-page at content that wasn't
+// there when it was recorded. Route-level scrolling is handled in router/index.ts.
+if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+// Counts one session for the Connections sign-in prompt. Here, not in the control store, because
+// that store is lazy: an owner who never opens the control panel would never accrue a session and
+// so could never pass the prompt's gate. Counting only - nothing is shown from this call.
+startSignInNudgeSession({ appId: 'redesign', appName: 'ReDesign' });
+
+const app = createApp(App);
+app.use(createPinia());
+app.use(router);
+app.use(i18n);
+app.mount('#app');

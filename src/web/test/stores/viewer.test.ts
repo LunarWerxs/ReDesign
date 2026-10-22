@@ -1,0 +1,782 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { nextTick } from "vue";
+import { setActivePinia, createPinia } from "pinia";
+import { useControlStore } from "@/stores/control";
+import { useViewerStore } from "@/stores/viewer";
+import type { Job, JobStatus, Manifest, Model, RunEvent, RunStatus } from "@/types";
+
+const { deleteRunsMock, repeatRunMock, runMock, runsMock, recordFirstStarMock, getRunReviewMock, saveRunReviewMock, toastErrorMock } = vi.hoisted(() => ({
+  deleteRunsMock: vi.fn(),
+  repeatRunMock: vi.fn(),
+  runMock: vi.fn(),
+  runsMock: vi.fn(),
+  recordFirstStarMock: vi.fn(),
+  getRunReviewMock: vi.fn(),
+  saveRunReviewMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+}));
+
+vi.mock("@/lib/api", () => ({
+  api: { deleteRuns: deleteRunsMock, repeatRun: repeatRunMock, run: runMock, runs: runsMock },
+  eventsUrl: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/events`,
+}));
+vi.mock("@/lib/starTally", () => ({ recordFirstStar: recordFirstStarMock }));
+vi.mock('@/lib/review-api', () => ({ getRunReview: getRunReviewMock, saveRunReview: saveRunReviewMock }));
+vi.mock('vue-sonner', () => ({ toast: Object.assign(vi.fn(), { error: toastErrorMock, success: vi.fn() }) }));
+
+const model = (id: string, label: string): Model => ({
+  id,
+  label,
+  vision: false,
+  enabled: true,
+  keys: 1,
+});
+
+const job = (id: string, over: Partial<Job> = {}): Job => ({
+  id,
+  inputId: "i1",
+  modelId: "m1",
+  promptId: "p1",
+  variant: 1,
+  status: "ok" as JobStatus,
+  ...over,
+});
+
+const input = (id: string) => ({ id, name: id, type: "image" as const, preview: "p" });
+
+const manifest = (over: Partial<Manifest> = {}): Manifest => ({
+  runId: "run1",
+  status: "done" as RunStatus,
+  inputs: [input("i1")],
+  prompts: [],
+  models: [model("m1", "Model One")],
+  jobs: [],
+  ...over,
+});
+
+beforeEach(() => {
+  // starredItems / hiddenItems are now localStorage-backed (they persist across reloads by
+  // design), and the test localStorage is a module singleton, so clear it between cases or one
+  // test's stars bleed into the next.
+  localStorage.clear();
+  setActivePinia(createPinia());
+  vi.clearAllMocks();
+  getRunReviewMock.mockResolvedValue({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null });
+  saveRunReviewMock.mockResolvedValue({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: null });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("isLive", () => {
+  it("is false without a manifest", () => {
+    expect(useViewerStore().isLive).toBe(false);
+  });
+
+  it.each<[RunStatus, boolean]>([
+    ["queued", true],
+    ["running", true],
+    ["done", false],
+    ["error", false],
+    ["cancelled", false],
+  ])("is %s -> %s", (status, expected) => {
+    const store = useViewerStore();
+    store.manifest = manifest({ status });
+
+    expect(store.isLive).toBe(expected);
+  });
+});
+
+describe('repeatOriginal', () => {
+  it('queues an immutable durable snapshot without starting it', async () => {
+    repeatRunMock.mockResolvedValue({ runId: 'repeat-1' });
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ specVersion: 1 });
+
+    await expect(store.repeatOriginal()).resolves.toBe('repeat-1');
+    expect(repeatRunMock).toHaveBeenCalledWith('run1', { autoStart: false });
+  });
+
+  it('does not repeat legacy or live manifests', async () => {
+    const store = useViewerStore();
+    store.manifest = manifest();
+    await expect(store.repeatOriginal()).resolves.toBeNull();
+    store.manifest = manifest({ specVersion: 1, status: 'running' });
+    await expect(store.repeatOriginal()).resolves.toBeNull();
+    expect(repeatRunMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('review synchronization', () => {
+  it('does not let a delayed hydrate overwrite an edit made after the run loaded', async () => {
+    let resolveReview!: (review: import('@/lib/review-api').RunReview) => void;
+    getRunReviewMock.mockImplementationOnce(() => new Promise((resolve) => { resolveReview = resolve; }));
+    runMock.mockResolvedValueOnce(manifest({ jobs: [job('j1')] }));
+    const store = useViewerStore();
+
+    const loading = store.load('run1');
+    await loading;
+    store.setReviewNote('j1', 'local note');
+    resolveReview({ shortlist: [], hidden: [], notes: { j1: 'remote note' }, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.review.notes.j1).toBe('local note');
+  });
+
+  it('serializes complete review writes and only applies the newest response', async () => {
+    let resolveFirst!: (review: import('@/lib/review-api').RunReview) => void;
+    saveRunReviewMock
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValue({ shortlist: [], hidden: ['j1'], notes: { j1: 'latest' }, keep: true, updatedAt: '2026-01-01T00:00:01.000Z' });
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ jobs: [job('j1')] });
+
+    store.toggleItemHidden('j1');
+    store.setReviewNote('j1', 'latest');
+    store.setReviewKeep(true);
+    await vi.waitFor(() => expect(saveRunReviewMock).toHaveBeenCalledTimes(1));
+    resolveFirst({ shortlist: [], hidden: ['j1'], notes: {}, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    await vi.waitFor(() => expect(saveRunReviewMock).toHaveBeenCalledTimes(3));
+
+    expect(saveRunReviewMock.mock.calls[2]?.[1]).toEqual({ shortlist: [], hidden: ['j1'], notes: { j1: 'latest' }, keep: true });
+    await vi.waitFor(() => expect(store.review.notes.j1).toBe('latest'));
+    expect(store.review.keep).toBe(true);
+  });
+
+  it('honors a deliberately empty remote sidecar instead of resurrecting local stars', async () => {
+    localStorage.setItem('redesign.viewer.starred-items', JSON.stringify(['run1:j1']));
+    getRunReviewMock.mockResolvedValueOnce({ shortlist: [], hidden: [], notes: {}, keep: false, updatedAt: '2026-01-01T00:00:00.000Z' });
+    runMock.mockResolvedValueOnce(manifest({ jobs: [job('j1')] }));
+    const store = useViewerStore();
+
+    await store.load('run1');
+    await vi.waitFor(() => expect(store.isItemStarred('j1')).toBe(false));
+  });
+
+  it('catches a failed save and tells the owner the review was not durable', async () => {
+    saveRunReviewMock.mockRejectedValueOnce(new Error('offline'));
+    const store = useViewerStore();
+    store.runId = 'run1';
+    store.manifest = manifest({ jobs: [job('j1')] });
+
+    store.setReviewNote('j1', 'keep trying');
+
+    await vi.waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith(expect.any(String), expect.anything()));
+  });
+});
+
+describe("grouped", () => {
+  it("is empty without a manifest", () => {
+    expect(useViewerStore().grouped).toEqual([]);
+  });
+
+  it("groups jobs under their input and counts the ok ones", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({
+      inputs: [input("i1"), input("i2")],
+      jobs: [job("a"), job("b"), job("c", { inputId: "i2" })],
+    });
+
+    expect(store.grouped).toHaveLength(2);
+    expect(store.grouped[0]!.input.id).toBe("i1");
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a", "b"]);
+    expect(store.grouped[0]!.okCount).toBe(2);
+    expect(store.grouped[1]!.jobs.map((j) => j.id)).toEqual(["c"]);
+  });
+
+  it("omits an input whose jobs are all filtered out", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({
+      inputs: [input("i1"), input("i2")],
+      jobs: [job("a", { inputId: "i2" })],
+    });
+
+    // i1 contributes no visible jobs, so it must not render as an empty row.
+    expect(store.grouped.map((g) => g.input.id)).toEqual(["i2"]);
+  });
+
+  it("hides jobs whose model is hidden", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({
+      models: [model("m1", "One"), model("m2", "Two")],
+      jobs: [job("a"), job("b", { modelId: "m2" })],
+    });
+
+    store.toggleModel("m2");
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+  });
+
+  it("hides jobs whose prompt is hidden", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({ jobs: [job("a"), job("b", { promptId: "p2" })] });
+
+    store.togglePrompt("p2");
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+  });
+
+  it("excludes errored jobs until showErrors is on", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({ jobs: [job("a"), job("b", { status: "error" })] });
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+
+    store.showErrors = true;
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a", "b"]);
+    // An errored job is visible but must not inflate the ok tally.
+    expect(store.grouped[0]!.okCount).toBe(1);
+  });
+
+  it("excludes skipped jobs until showErrors is on", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({
+      jobs: [job("a"), job("b", { status: "skipped", error: "no API keys configured for X" })],
+    });
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+
+    store.showErrors = true;
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a", "b"]);
+    // A skipped job never ran, so it must not inflate the ok tally either.
+    expect(store.grouped[0]!.okCount).toBe(1);
+  });
+
+  it("never shows a pending job, even with showErrors on", () => {
+    const store = useViewerStore();
+    store.manifest = manifest({ jobs: [job("a"), job("b", { status: "running" })] });
+    store.showErrors = true;
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+  });
+
+  it("hides an individually hidden item until showHiddenItems is on", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b")] });
+
+    store.toggleItemHidden("b");
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a"]);
+
+    store.showHiddenItems = true;
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["a", "b"]);
+  });
+
+  it("sorts starred jobs to the front", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b"), job("c")] });
+
+    store.toggleItemStarred("c");
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("keeps the original order among equally starred jobs", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b"), job("c")] });
+
+    store.toggleItemStarred("b");
+    store.toggleItemStarred("c");
+
+    expect(store.grouped[0]!.jobs.map((j) => j.id)).toEqual(["b", "c", "a"]);
+  });
+});
+
+describe("one at a time", () => {
+  it("keeps its paging order when starring, moves on from a bad mark, and undo brings it back in place", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b"), job("c"), job("d", { status: "error" as JobStatus })] });
+
+    store.openFocus("b");
+    store.toggleItemStarred("b"); // floats b to the top of the grid
+    store.stepFocus(1);
+    expect(store.focusJob?.id).toBe("c");
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b", "c"]);
+
+    expect(store.toggleFocusedHidden()).toBe("bad");
+    expect(store.focusJob?.id).toBe("b");
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b"]);
+
+    expect(store.undoMarkBad()).toBe(true);
+    expect(store.focusJob?.id).toBe("c");
+    expect(store.isItemHidden("c")).toBe(false);
+    expect(store.focusList.map((j) => j.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("item keys are scoped to the run", () => {
+  it("does not leak a star from one run into another", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a")] });
+
+    store.toggleItemStarred("a");
+    expect(store.isItemStarred("a")).toBe(true);
+
+    // Same job id, different run: two runs can legitimately share job ids.
+    store.runId = "run2";
+    expect(store.isItemStarred("a")).toBe(false);
+  });
+
+  it("tracks hidden items per run too", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+
+    store.toggleItemHidden("a");
+    expect(store.isItemHidden("a")).toBe(true);
+
+    store.runId = "run2";
+    expect(store.isItemHidden("a")).toBe(false);
+  });
+
+  it("toggles a star off again", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+
+    store.toggleItemStarred("a");
+    store.toggleItemStarred("a");
+
+    expect(store.isItemStarred("a")).toBe(false);
+  });
+});
+
+describe("toggleItemStarred / first star tally", () => {
+  it("records the first star of a run against the model's label", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({
+      models: [model("m1", "Model One")],
+      jobs: [job("a")],
+    });
+
+    store.toggleItemStarred("a");
+
+    expect(recordFirstStarMock).toHaveBeenCalledExactlyOnceWith("run1", "Model One");
+  });
+
+  it("records only the first star, not later ones in the same run", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({
+      models: [model("m1", "One"), model("m2", "Two")],
+      jobs: [job("a"), job("b", { modelId: "m2" })],
+    });
+
+    store.toggleItemStarred("a");
+    store.toggleItemStarred("b");
+
+    expect(recordFirstStarMock).toHaveBeenCalledTimes(1);
+    expect(recordFirstStarMock).toHaveBeenCalledWith("run1", "One");
+  });
+
+  it("does not record when un-starring", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a")] });
+
+    store.toggleItemStarred("a");
+    recordFirstStarMock.mockClear();
+    store.toggleItemStarred("a");
+
+    expect(recordFirstStarMock).not.toHaveBeenCalled();
+  });
+
+  it("counts as first again once the earlier star is removed", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ jobs: [job("a"), job("b")] });
+
+    store.toggleItemStarred("a");
+    store.toggleItemStarred("a"); // back to zero stars in this run
+    recordFirstStarMock.mockClear();
+    store.toggleItemStarred("b");
+
+    expect(recordFirstStarMock).toHaveBeenCalledExactlyOnceWith("run1", "Model One");
+  });
+
+  it("falls back to the model id when it has no label", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ models: [model("m1", "")], jobs: [job("a")] });
+
+    store.toggleItemStarred("a");
+
+    expect(recordFirstStarMock).toHaveBeenCalledWith("run1", "m1");
+  });
+
+  it("skips the tally when the job's model is unknown", () => {
+    const store = useViewerStore();
+    store.runId = "run1";
+    store.manifest = manifest({ models: [], jobs: [job("a")] });
+
+    store.toggleItemStarred("a");
+
+    expect(recordFirstStarMock).not.toHaveBeenCalled();
+    // The star itself still lands; only the cross-run tally is skipped.
+    expect(store.isItemStarred("a")).toBe(true);
+  });
+
+  it("skips the tally when no run is loaded", () => {
+    const store = useViewerStore();
+    store.runId = null;
+    store.manifest = manifest({ jobs: [job("a")] });
+
+    store.toggleItemStarred("a");
+
+    expect(recordFirstStarMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("load", () => {
+  it("clears the manifest for a null id", async () => {
+    const store = useViewerStore();
+    store.manifest = manifest();
+
+    await store.load(null);
+
+    expect(store.manifest).toBeNull();
+    expect(store.runId).toBeNull();
+    expect(runMock).not.toHaveBeenCalled();
+  });
+
+  it("stores the fetched manifest", async () => {
+    const m = manifest({ jobs: [job("a")] });
+    runMock.mockResolvedValue(m);
+    const store = useViewerStore();
+
+    await store.load("run1");
+
+    expect(runMock).toHaveBeenCalledWith("run1");
+    expect(store.manifest).toEqual(m);
+  });
+
+  it("nulls the manifest when the fetch fails", async () => {
+    runMock.mockRejectedValue(new Error("offline"));
+    const store = useViewerStore();
+    store.manifest = manifest();
+
+    await store.load("run1");
+
+    expect(store.manifest).toBeNull();
+  });
+
+  it("does not let a stale response resurrect a run the user navigated away from", async () => {
+    // Regression test for the race: an older load()'s response resolving AFTER a newer one
+    // must not overwrite the newer manifest, and — since acceptManifest() calls stopPoll()
+    // once a manifest looks finished — must not kill the newer run's live SSE stream either.
+    const store = useViewerStore();
+    let resolveFirst!: (value: Manifest) => void;
+    let resolveSecond!: (value: Manifest) => void;
+    runMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const first = store.load("run1");
+    const second = store.load("run2");
+    resolveSecond(manifest({ runId: "run2", status: "running" }));
+    await second;
+    expect(store.manifest?.runId).toBe("run2");
+
+    // run1's response arrives late, after run2 is already the active, live selection.
+    resolveFirst(manifest({ runId: "run1", status: "done" }));
+    await first;
+
+    expect(store.runId).toBe("run2");
+    expect(store.manifest?.runId).toBe("run2");
+    expect(store.isLive).toBe(true);
+  });
+});
+
+describe("loadRuns", () => {
+  it("stores the fetched runs", async () => {
+    runsMock.mockResolvedValue({ runs: [{ runId: "run1", status: "done" as RunStatus }], nextCursor: null });
+    const store = useViewerStore();
+
+    await store.loadRuns();
+
+    expect(store.runs).toHaveLength(1);
+  });
+
+  it("degrades to an empty list when the fetch fails", async () => {
+    runsMock.mockRejectedValue(new Error("offline"));
+    const store = useViewerStore();
+
+    await store.loadRuns();
+
+    expect(store.runs).toEqual([]);
+  });
+
+  it("keeps the last good list when a refresh fails", async () => {
+    runsMock.mockRejectedValue(new Error("offline"));
+    const store = useViewerStore();
+    store.runs = [{ runId: "run1", status: "done" as RunStatus }];
+
+    await store.loadRuns();
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1"]);
+  });
+});
+
+describe("deleteRuns", () => {
+  const summary = (runId: string): import("@/types").RunSummary => ({
+    runId,
+    status: "done",
+    counts: { total: 1, ok: 1 },
+  });
+
+  it("optimistically removes and batch-deletes unique run ids", async () => {
+    const store = useViewerStore();
+    const control = useControlStore();
+    store.runs = [summary("run1"), summary("run2")];
+    control.runs = [summary("run1"), summary("run2")];
+    control.focusRun("run1");
+    store.hiddenItems = ["run1:job-a", "run2:job-b"];
+    store.starredItems = ["run1:job-a", "run2:job-b"];
+    deleteRunsMock.mockResolvedValue({
+      deleted: ["run1"],
+      skipped: [],
+      runs: [summary("run2")],
+    });
+
+    const deleting = store.deleteRuns(["run1", "run1"]);
+    expect(store.runs.map((run) => run.runId)).toEqual(["run2"]);
+    expect(store.deletingRunIds.has("run1")).toBe(true);
+
+    const result = await deleting;
+    expect(deleteRunsMock).toHaveBeenCalledExactlyOnceWith(["run1"]);
+    expect(result?.deleted).toEqual(["run1"]);
+    expect(store.hiddenItems).toEqual(["run2:job-b"]);
+    expect(store.starredItems).toEqual(["run2:job-b"]);
+    expect(store.deletingRunIds.size).toBe(0);
+    expect(control.runs.map((run) => run.runId)).toEqual(["run2"]);
+    await nextTick();
+    expect(localStorage.getItem("redesign.focused-run")).not.toBe("run1");
+  });
+
+  it("uses the authoritative response to restore a run the server skipped", async () => {
+    const store = useViewerStore();
+    const active = { ...summary("run1"), status: "running" as const };
+    store.runs = [active, summary("run2")];
+    deleteRunsMock.mockResolvedValue({
+      deleted: [],
+      skipped: [{ runId: "run1", reason: "run is active" }],
+      runs: [active, summary("run2")],
+    });
+
+    await store.deleteRuns(["run1"]);
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1", "run2"]);
+  });
+
+  it("restores the previous list when deletion fails", async () => {
+    const store = useViewerStore();
+    store.runs = [summary("run1"), summary("run2")];
+    deleteRunsMock.mockRejectedValue(new Error("offline"));
+
+    expect(await store.deleteRuns(["run1"])).toBeNull();
+    expect(store.runs.map((run) => run.runId)).toEqual(["run1", "run2"]);
+    expect(store.deletingRunIds.size).toBe(0);
+  });
+
+  it("does not let an older concurrent response resurrect a newer deletion", async () => {
+    const store = useViewerStore();
+    store.runs = [summary("run1"), summary("run2"), summary("run3")];
+    let resolveFirst!: (value: import("@/types").RunDeleteResponse) => void;
+    let resolveSecond!: (value: import("@/types").RunDeleteResponse) => void;
+    deleteRunsMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    const first = store.deleteRuns(["run1"]);
+    const second = store.deleteRuns(["run2"]);
+    resolveSecond({
+      deleted: ["run2"],
+      skipped: [],
+      runs: [summary("run3")],
+    });
+    await second;
+    resolveFirst({
+      deleted: ["run1"],
+      skipped: [],
+      // This response was produced before run2's deletion completed.
+      runs: [summary("run2"), summary("run3")],
+    });
+    await first;
+
+    expect(store.runs.map((run) => run.runId)).toEqual(["run3"]);
+  });
+});
+
+describe("reconcileItemState on load", () => {
+  it("prunes stale keys belonging to the loaded run", async () => {
+    runMock.mockResolvedValue(manifest({ runId: "run1", jobs: [job("fresh")] }));
+    const store = useViewerStore();
+    store.starredItems = ["run1:gone", "run1:fresh"];
+    store.hiddenItems = ["run1:gone"];
+
+    await store.load("run1");
+
+    expect(store.starredItems).toEqual(["run1:fresh"]);
+    expect(store.hiddenItems).toEqual([]);
+  });
+
+  it("leaves other runs' keys untouched", async () => {
+    // The prune is deliberately scoped to the loaded run: keys for runs we have not
+    // fetched carry no job list to validate against, so dropping them would lose stars.
+    runMock.mockResolvedValue(manifest({ runId: "run1", jobs: [job("fresh")] }));
+    const store = useViewerStore();
+    store.starredItems = ["run2:keep", "run1:gone"];
+
+    await store.load("run1");
+
+    expect(store.starredItems).toEqual(["run2:keep"]);
+  });
+});
+
+describe("polling", () => {
+  it("polls a live run and stops once it finishes", async () => {
+    vi.useFakeTimers();
+    runMock.mockResolvedValue(manifest({ status: "running" }));
+    const store = useViewerStore();
+
+    await store.load("run1");
+    expect(runMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(runMock).toHaveBeenCalledTimes(2);
+
+    // The run finishes; the next poll should be the last.
+    runMock.mockResolvedValue(manifest({ status: "done" }));
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(runMock).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(runMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not poll a run that is already finished", async () => {
+    vi.useFakeTimers();
+    runMock.mockResolvedValue(manifest({ status: "done" }));
+    const store = useViewerStore();
+
+    await store.load("run1");
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(runMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling through a transient fetch error", async () => {
+    vi.useFakeTimers();
+    runMock.mockResolvedValue(manifest({ status: "running" }));
+    const store = useViewerStore();
+    await store.load("run1");
+
+    const live = store.manifest;
+    runMock.mockRejectedValueOnce(new Error("blip"));
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // A blip must not blank the view or kill the timer.
+    expect(store.manifest).toEqual(live);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(runMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops the previous poll when another run is loaded", async () => {
+    vi.useFakeTimers();
+    runMock.mockResolvedValue(manifest({ status: "running" }));
+    const store = useViewerStore();
+
+    await store.load("run1");
+    await store.load("run2");
+    runMock.mockClear();
+
+    await vi.advanceTimersByTimeAsync(2500);
+
+    // Exactly one timer should survive, not one per load.
+    expect(runMock).toHaveBeenCalledTimes(1);
+    expect(runMock).toHaveBeenCalledWith("run2");
+  });
+
+  it("stopPoll halts further polling", async () => {
+    vi.useFakeTimers();
+    runMock.mockResolvedValue(manifest({ status: "running" }));
+    const store = useViewerStore();
+    await store.load("run1");
+
+    store.stopPoll();
+    runMock.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(runMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("live SSE", () => {
+  it("uses the run event stream when available and closes it on completion", async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      closed = false;
+      constructor(readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+      close() {
+        this.closed = true;
+      }
+      emit(event: RunEvent) {
+        this.onmessage?.({ data: JSON.stringify(event) } as MessageEvent<string>);
+      }
+    }
+    vi.stubGlobal("EventSource", FakeEventSource);
+    runMock.mockResolvedValue(
+      manifest({ status: "running", jobs: [job("existing", { status: "running" })] }),
+    );
+    const store = useViewerStore();
+
+    await store.load("run1");
+
+    const source = FakeEventSource.instances[0]!;
+    expect(source.url).toBe("/api/runs/run1/events");
+    const initialJobs = store.manifest!.jobs;
+    source.emit({ type: "job", runId: "run1", job: job("existing") });
+    expect(store.manifest?.jobs).toBe(initialJobs);
+    expect(store.manifest?.jobs).toHaveLength(1);
+    expect(store.manifest?.jobs[0]?.status).toBe("ok");
+
+    source.emit({ type: "job", runId: "run1", job: job("fresh") });
+    expect(store.manifest?.jobs.map((j) => j.id)).toEqual(["existing", "fresh"]);
+
+    const done = manifest({ status: "done", jobs: [job("existing"), job("fresh")] });
+    source.emit({ type: "done", runId: "run1", manifest: done });
+    expect(store.manifest).toEqual(done);
+    expect(source.closed).toBe(true);
+  });
+});

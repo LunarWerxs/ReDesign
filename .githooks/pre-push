@@ -1,0 +1,14 @@
+#!/bin/sh
+# ReDesign pre-push gate: the checks GitHub cannot run (package.json "check:local").
+# check:kit compares the kit-synced copies against ../../lunarwerx-ui, a private sibling
+# checkout CI never has, so it runs here, on the host, before the push leaves it.
+# Enable once with:  git config core.hooksPath .githooks
+# Bypass a single push with:  git push --no-verify
+if [ ! -f ../../lunarwerx-ui/sync.mjs ]; then
+  echo "› check:local skipped: no ../../lunarwerx-ui checkout on this machine"
+  exit 0
+fi
+if command -v bun >/dev/null 2>&1; then
+  echo "› check:local…"
+  bun run check:local || exit 1
+fi

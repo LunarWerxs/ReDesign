@@ -1,0 +1,53 @@
+# Secrets — never commit real keys
+.env
+.env.local
+
+# Runtime state & generated artifacts
+src/keyState.json
+output/
+*.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Ship artifacts (the zips can contain your keys — never commit)
+*.zip
+*.7z
+dist/
+/out/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.saydeploy/
+
+# Tool run output (Architect writes tmp/arkitect/) + local audit profile, not tracked
+tmp/
+.arkitect/
+
+# Editor / local tooling — not needed in a public clone
+.vscode/
+.claude/
+.agents/
+
+# Generated Windows shortcut (machine-specific absolute paths; start.cmd recreates it)
+*.lnk
+
+# Personal sample screenshots — users drop their own here
+/input/*
+
+# Local root rebuild and restart wrapper (builds via misc/rebuild_redesign.bat)
+/rebuild_redesign.bat
+
+# Local AI memory for this repo. Deliberately NOT published.
+/.claude/memory/
+
+# ⛔ PUBLIC REPO: the to-do list is not published (owner directive, 2026-08-29).
+# These notes are the most candid writing in the repo - what is broken, what is half-built, what is
+# waiting on a person - and Odin's Loki files them here automatically from chat history. The
+# folder's own README stays tracked (it is already tracked, and it states the convention); only the
+# items are ignored. Managed by public_todo_guard.py in the Odin repo.
+/docs/todo/*
+!/docs/todo/README.md
+*.tsbuildinfo

@@ -1,0 +1,158 @@
+import { ref, watch } from 'vue';
+import { api } from '@/lib/api';
+import { bindSignInNudgeStatus, nudgeOnSettingsChange } from '@/lib/sign-in-nudge';
+import { useTheme, type ThemeMode } from '@/lib/theme';
+import type { SyncStatus } from '@/types';
+import type { SettingsStore } from './settings-store';
+
+/**
+ * "Sync my settings with Connections", opt-in cloud sync of Reimagine's one portable
+ * preference (theme). Mirrors the shared shape used by RepoYeti/DevWebUI: `enableSync()`
+ * seeds the daemon with the current local appearance; a debounced watcher on the theme
+ * mode pushes further local changes while sync stays enabled+connected; `applyAppearance()`
+ * absorbs a pulled/loaded blob back into the live theme, guarded so that doesn't itself
+ * re-trigger a push.
+ *
+ * Call INSIDE the control Pinia store and spread the returned refs/functions into its
+ * `return {}}`, mirroring how `useSelfUpdate` is composed there.
+ */
+export function createSyncActions(settings?: SettingsStore) {
+  const { mode: themeMode, setTheme } = useTheme();
+
+  const syncStatus = ref<SyncStatus | null>(null);
+  const syncLoading = ref(false); // initial load + enable/disable in flight
+  const syncActionBusy = ref(false); // manual pull/push in flight
+
+  // Set while applying a just-pulled/loaded appearance, so the theme watcher below
+  // doesn't immediately echo it back out as a push.
+  let applyingRemote = false;
+
+  function currentAppearance(): Record<string, unknown> {
+    return { theme: themeMode.value };
+  }
+
+  /** Apply a synced appearance blob to the live theme (best-effort, ignores unknown/missing keys). */
+  function applyAppearance(appearance: Record<string, unknown> | null | undefined): void {
+    if (!appearance) return;
+    const theme = appearance.theme;
+    if (theme === 'light' || theme === 'dark' || theme === 'system') {
+      applyingRemote = true;
+      setTheme(theme as ThemeMode);
+      applyingRemote = false;
+    }
+  }
+
+  function absorbSyncStatus(s: SyncStatus): void {
+    syncStatus.value = s;
+    if (s.ok) applyAppearance(s.appearance);
+  }
+
+  /**
+   * Load the current sync status (mount + once after returning from sign-in). Best-effort.
+   *
+   * Being CONNECTED is what enables sync — there is no separate on/off toggle in the UI any
+   * more (2026-07-21): signing in starts syncing, Disconnect stops it. So a status that comes
+   * back connected-but-not-enabled (the state right after the OAuth redirect, or an install
+   * that predates this change) is upgraded here rather than left inert with no way to turn on.
+   */
+  async function loadSyncStatus(): Promise<void> {
+    syncLoading.value = true;
+    try {
+      const status = await api.getSyncStatus();
+      absorbSyncStatus(status);
+      if (status.ok && status.connected && !status.enabled) await enableSync();
+    } catch {
+      /* sync is optional, leave whatever we have */
+    } finally {
+      syncLoading.value = false;
+    }
+  }
+
+  /** Turn sync on, seeding it with the current local appearance. Driven by loadSyncStatus()
+   *  the moment an account is connected — there is no user-facing on/off toggle. */
+  async function enableSync(): Promise<void> {
+    syncLoading.value = true;
+    try {
+      absorbSyncStatus(await api.setSync({ enabled: true, appearance: currentAppearance() }));
+    } finally {
+      syncLoading.value = false;
+    }
+  }
+
+  /** Turn sync off. `forget` also disconnects: deletes the remote doc + forgets the credential. */
+  async function disableSync(forget = false): Promise<void> {
+    syncLoading.value = true;
+    try {
+      absorbSyncStatus(await api.setSync({ enabled: false, ...(forget ? { forget: true } : {}) }));
+    } finally {
+      syncLoading.value = false;
+    }
+  }
+
+  /** Manually pull the settings synced from another device. */
+  async function pullSync(): Promise<void> {
+    syncActionBusy.value = true;
+    try {
+      absorbSyncStatus(await api.syncPull());
+      // Remote preferences apply at the daemon too; refresh every settings consumer from its
+      // authoritative resulting snapshot without a browser-side echo.
+      await settings?.loadSettings(true);
+    } finally {
+      syncActionBusy.value = false;
+    }
+  }
+
+  /** Manually push the current synced settings now. */
+  async function pushSync(): Promise<void> {
+    syncActionBusy.value = true;
+    try {
+      absorbSyncStatus(await api.syncPush());
+    } finally {
+      syncActionBusy.value = false;
+    }
+  }
+
+  /** Push just the current local appearance (theme) as the synced blob. */
+  async function pushAppearance(): Promise<void> {
+    absorbSyncStatus(await api.setSync({ appearance: currentAppearance() }));
+  }
+
+  // When the owner changes theme locally AND sync is enabled+connected, notify the daemon-side
+  // engine. It owns the 800 ms debounce/coalescing window, so the browser does not add a second
+  // timer. Skipped while applying a remote appearance to avoid an echo.
+  watch(themeMode, () => {
+    if (applyingRemote) return;
+    const s = syncStatus.value;
+    // NOT connected is the interesting case for the sign-in prompt, and it is exactly the branch
+    // the push below discards. Someone who just changed an appearance setting is who "these follow
+    // you to your other machines" is a true sentence for, and this is the same instant we WOULD
+    // have pushed it. The engine says no to almost every one of these; see lib/sign-in-nudge.
+    //
+    // `s.ok === true` first, and not only to satisfy the union: an ERRORED status means we do not
+    // KNOW whether they are connected, and asking somebody to sign in when they may already have
+    // is the one mistake this prompt cannot take back. Unknown means stay quiet.
+    if (s?.ok === true && !s.connected) nudgeOnSettingsChange();
+    if (!s || !s.ok || !s.enabled || !s.connected) return;
+    void pushAppearance();
+  });
+
+  // Point the prompt at the live connection state. Only the STATUS binds here - the session count
+  // starts at app boot (main.ts), because this store is lazy and an owner who never opens the
+  // control panel would otherwise never accrue a session and never pass the prompt's gate.
+  // An unreadable status resolves to "signed in", which suppresses the prompt. That is the
+  // deliberate direction: this engine's every ambiguity is resolved toward asking less.
+  bindSignInNudgeStatus(() => (syncStatus.value?.ok === true ? syncStatus.value.connected : true));
+
+  return {
+    syncStatus,
+    syncLoading,
+    syncActionBusy,
+    loadSyncStatus,
+    enableSync,
+    disableSync,
+    pullSync,
+    pushSync,
+    pushAppearance,
+    applyAppearance,
+  };
+}

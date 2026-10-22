@@ -1,0 +1,93 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import { ChevronDownIcon } from '@lucide/vue';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useViewerStore } from '@/stores/viewer';
+import { t } from '@/i18n';
+
+interface FilterItem {
+  id: string;
+  label: string;
+  color?: string;
+}
+
+const props = withDefaults(defineProps<{ kind?: 'models' | 'prompts' }>(), { kind: 'models' });
+
+const store = useViewerStore();
+
+const isPrompts = computed(() => props.kind === 'prompts');
+const label = computed(() => (isPrompts.value ? t('filter.prompts') : t('filter.models')));
+const noun = computed(() => (isPrompts.value ? t('filter.promptNoun') : t('filter.modelNoun')));
+const items = computed<FilterItem[]>(() =>
+  isPrompts.value ? store.manifest?.prompts || [] : store.manifest?.models || [],
+);
+const hidden = computed(() => (isPrompts.value ? store.hiddenPrompts : store.hiddenModels));
+const visibleCount = computed(() => items.value.filter((i) => !hidden.value.includes(i.id)).length);
+
+function isVisible(item: FilterItem) {
+  return !hidden.value.includes(item.id);
+}
+function toggle(id: string) {
+  if (isPrompts.value) store.togglePrompt(id);
+  else store.toggleModel(id);
+}
+function onRowKeydown(e: KeyboardEvent, id: string) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  toggle(id);
+}
+function showAll() {
+  const ids = new Set(items.value.map((i) => i.id));
+  if (isPrompts.value) store.hiddenPrompts = store.hiddenPrompts.filter((id) => !ids.has(id));
+  else store.hiddenModels = store.hiddenModels.filter((id) => !ids.has(id));
+}
+function hideAll() {
+  const ids = items.value.map((i) => i.id);
+  if (isPrompts.value) store.hiddenPrompts = Array.from(new Set([...store.hiddenPrompts, ...ids]));
+  else store.hiddenModels = Array.from(new Set([...store.hiddenModels, ...ids]));
+}
+</script>
+
+<template>
+  <Popover>
+    <PopoverTrigger as-child>
+      <Button
+        variant="outline"
+        size="sm"
+        :title="t('filter.chooseVisible', { noun })"
+        :disabled="!items.length"
+      >
+        <span>{{ label }}</span>
+        <span class="ms-auto text-muted-foreground">{{ visibleCount }}/{{ items.length }}</span>
+        <ChevronDownIcon class="size-4 text-muted-foreground" />
+      </Button>
+    </PopoverTrigger>
+    <PopoverContent align="start" :collision-padding="12" class="w-[min(340px,calc(100vw-2rem))]">
+      <div class="flex items-center gap-2 px-1 pb-2">
+        <strong class="text-xs uppercase tracking-wider text-muted-foreground">{{ label }}</strong>
+        <div class="ms-auto flex gap-1.5">
+          <Button variant="ghost" size="xs" @click="showAll">{{ t('filter.all') }}</Button>
+          <Button variant="ghost" size="xs" @click="hideAll">{{ t('filter.none') }}</Button>
+        </div>
+      </div>
+      <div class="grid max-h-[min(50vh,340px)] gap-1 overflow-y-auto pe-1">
+        <div
+          v-for="item in items"
+          :key="item.id"
+          role="button"
+          tabindex="0"
+          class="flex items-center gap-2 rounded-md border px-2.5 py-2 text-start transition-colors outline-none"
+          :class="isVisible(item) ? 'border-primary bg-accent' : 'hover:border-muted-foreground/40 opacity-55'"
+          @click="toggle(item.id)"
+          @keydown="onRowKeydown($event, item.id)"
+        >
+          <Checkbox class="pointer-events-none" :model-value="isVisible(item)" tabindex="-1" />
+          <span v-if="item.color" class="size-2.5 shrink-0 rounded-full bg-(--item-color)" :style="{ '--item-color': item.color }" />
+          <span class="min-w-0 flex-1 truncate font-semibold">{{ item.label }}</span>
+        </div>
+      </div>
+    </PopoverContent>
+  </Popover>
+</template>
