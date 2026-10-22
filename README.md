@@ -1,3 +1,7 @@
+> **RēDesign is retired.** It is no longer developed as a standalone app: its engine moved into an in-house tool.
+> The last release keeps working on your own keys but gets no more updates, and this repository stays read-only
+> for its history.
+
 [![RēDesign](.github/banner.png)](https://redes1gn.github.io/)
 
 # RēDesign
